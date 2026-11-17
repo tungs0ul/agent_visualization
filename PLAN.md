@@ -700,6 +700,38 @@ Two parts; do **8a first**, it is simpler and fully supported:
   (MCP server declared in plugin.json `channels`) that injects messages into that
   session; see the original M8 notes below. Research availability first.
 
+### M8b research (2026-11-17, Claude Code 2.1.326)
+
+Source: code.claude.com/docs/en/channels-reference.md.
+- A channel is an MCP server (stdio JSON-RPC) declaring
+  `capabilities.experimental["claude/channel"] = {}`. It pushes
+  `notifications/claude/channel` `{content, meta}`; Claude sees
+  `<channel source="agent-room" …>text</channel>`, the terminal shows
+  `← agent-room: text`, and Claude acts on it. No acknowledgement; messages queue
+  while Claude is busy and arrive together on the next turn.
+- Two-way: a `reply` MCP tool. Optional permission relay
+  (`claude/channel/permission`): Claude Code sends
+  `notifications/claude/channel/permission_request {request_id, tool_name,
+  description, input_preview}`, the server answers
+  `notifications/claude/channel/permission {request_id, behavior}`.
+- **Big limitation:** custom channels are not on the allowlist (research preview).
+  Each session must be started with
+  `claude --dangerously-load-development-channels plugin:agent-room@agent-room`
+  (interactive only, a warning dialog every start). With `-p` the flag is ignored.
+- Session identity: children of Claude Code get `CLAUDE_PID` and
+  `CLAUDE_CODE_SESSION_ID` (seen in Bash; check that the MCP server gets them too,
+  and what happens after `/resume` or `/clear`). Hooks run under the same `claude`
+  process, so the app can match a channel to a session by the claude pid.
+- Design: `room-hook --channel` (no Node needed) speaks MCP over stdio, connects to
+  `~/.agent-room/room.sock` with a `ChannelHello {claude_pid, session_id}` and keeps
+  the connection open; the app sends `{text}` lines, the server emits the channel
+  notification. Declared in `plugin/.mcp.json` (or plugin.json `mcpServers`) plus the
+  `channels` manifest entry. The chat window's Send then targets a live terminal
+  session when its channel is connected; otherwise it shows how to start Claude with
+  the flag. Never send without the user pressing Send.
+- Decision needed from the user before building: accept starting sessions with the
+  development flag (and its dialog) until the channel is allowlisted.
+
 ### M8: Chat with Claude from the app (later; requested 2026-11-17)
 
 A text input in the app (side panel and mini mode) to send messages to the running
@@ -848,10 +880,13 @@ config file, and can remove both cleanly.
 - [ ] M4d Rooms per repository (part 1 done 2026-11-17: repo + branch detection, shown in roster/title; part 2: separate rooms in the scene)
 - [x] M4e Waiting at the Approval desk with the card in the scene (2026-11-17)
 - [x] M4f Camera controls: zoom, pan (2026-11-17; pinning dropped by the user)
-- [ ] M8 Chat with Claude from the app
+- [ ] M8 Chat with Claude from the app (8a done: new/continue/resume sessions; 8b
+      researched, waiting for the user's OK on the development-channels flag)
 - [x] M9 Auto-accept mode and centre pop-ups (2026-11-17)
 - [ ] M10 Context, 5-hour and weekly limits in the app
-- [ ] M12 Hide/show the side panel
+- [x] M12 Hide/show the side panel (2026-11-17; needs a look on screen)
+- [x] M11 Own CPU/RAM/FPS overlay (2026-11-17; needs a look on screen)
+- [ ] M13 Permission rules (waiting for the user's answer, see M13)
 - [x] M5 Permissions (2026-11-17; user still to try Y/N and a deny reason live)
 - [ ] M6 Polish
 - [x] M7 Distribution, code side (2026-11-17); publishing left to the user
@@ -1226,3 +1261,16 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   Permission-rules request recorded as **M13** with an open question. 55 tests pass,
   clippy clean. **Next:** user reinstalls (`scripts/install-dev.sh`, both binaries changed) and
   checks both fixes on screen; then M12, M8a leftovers, M11.
+- 2026-11-17, Claude Opus 5.5 (same session, later): click Claude to open the chat;
+  continue a closed session / resume earlier ones (`--resume`, verified with Haiku);
+  M8b channel researched (see "M8b research"): works only with
+  `--dangerously-load-development-channels`, so the user must OK that first.
+  **M12 done:** "Hide" in the panel header / "Show log" top-right / key L, kept in
+  `~/.agent-room/ui.json` (`ui::PanelPrefs`); with the panel hidden, permission cards
+  move to a top panel. **M11 done:** `stats.rs`, "Stats" button / key I, bottom-left
+  overlay "CPU · RAM · fps" from sysinfo (only measured while shown, refresh 1 s; the
+  app then redraws once a second). Header buttons wrap (`horizontal_wrapped`).
+  Not checked on screen: the Mac's screen was locked, and Bevy draws black frames
+  then (screenshots all black, also for the unchanged build). Commits pushed.
+  **Next:** user checks M11/M12/chat on screen; answers M13 (rules only with
+  Auto-accept, or an opt-in setting) and M8b (accept the development flag?).

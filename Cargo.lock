@@ -5272,6 +5272,7 @@ dependencies = [
  "room-proto",
  "serde",
  "serde_json",
+ "sysinfo",
 ]
 
 [[package]]

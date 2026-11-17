@@ -49,6 +49,8 @@ pub fn draw(
     in_room: InRoom,
     mut chat: ChatParams,
     mut markdown: ResMut<MarkdownCache>,
+    mut panel: ResMut<PanelPrefs>,
+    mut stats: ResMut<crate::stats::Stats>,
     mut styled: Local<bool>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
@@ -83,6 +85,22 @@ pub fn draw(
     if !ctx.egui_wants_keyboard_input() && ctx.input(|input| input.key_pressed(egui::Key::A)) {
         auto.0 = !auto.0;
     }
+    if !ctx.egui_wants_keyboard_input() && ctx.input(|input| input.key_pressed(egui::Key::L)) {
+        panel.toggle();
+    }
+    if !ctx.egui_wants_keyboard_input() && ctx.input(|input| input.key_pressed(egui::Key::I)) {
+        stats.toggle();
+    }
+    if stats.shown {
+        egui::Area::new("stats".into())
+            .anchor(egui::Align2::LEFT_BOTTOM, egui::vec2(8.0, -8.0))
+            .interactable(false)
+            .show(ctx, |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    ui.label(egui::RichText::new(stats.line()).small().monospace());
+                });
+            });
+    }
     let RoomLog { lines, pending, final_answer, .. } = &mut *log;
     let mut picked = None;
 
@@ -109,13 +127,34 @@ pub fn draw(
                     }
                 });
             });
+    } else if ctx.viewport_rect().width() >= WIDE_LAYOUT && panel.hidden {
+        // The log is hidden (PLAN.md M12): the room gets the whole window. Permission
+        // cards still need a place.
+        if !pending.is_empty() {
+            egui::Panel::top("permissions").show(&mut root, |ui| {
+                egui::ScrollArea::vertical()
+                    .max_height(ctx.viewport_rect().height() * 0.6)
+                    .show(ui, |ui| permission_cards(ui, pending, now, &mut answers));
+            });
+        }
+        egui::Area::new("show-panel".into())
+            .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-8.0, 8.0))
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    answer_button(ui, final_answer);
+                    if ui.small_button("Show log").on_hover_text("Show the side panel (L)").clicked() {
+                        panel.toggle();
+                    }
+                });
+            });
     } else if ctx.viewport_rect().width() >= WIDE_LAYOUT {
         egui::Panel::right("side").exact_size(SIDE_PANEL_WIDTH).show(&mut root, |ui| {
             // Nothing in here may grow the panel: widgets wrap or truncate to this width.
             ui.set_max_width(SIDE_PANEL_WIDTH - 16.0);
             ui.add_space(4.0);
             picked = session_picker(ui, &model);
-            ui.horizontal(|ui| {
+            // Wraps instead of widening the panel when all buttons show.
+            ui.horizontal_wrapped(|ui| {
                 if ui.small_button("Mini").on_hover_text("Small widget view (M)").clicked() {
                     toggle_mini.write(ToggleMini);
                 }
@@ -128,6 +167,12 @@ pub fn draw(
                     }
                 }
                 answer_button(ui, final_answer);
+                if ui.small_button("Hide").on_hover_text("Hide this panel (L)").clicked() {
+                    panel.toggle();
+                }
+                if ui.small_button("Stats").on_hover_text("This app's CPU, memory and frame rate (I)").clicked() {
+                    stats.toggle();
+                }
             });
             ui.separator();
             if let Some(session) = model.shown() {
@@ -516,6 +561,34 @@ fn ago(secs: u64) -> String {
         60..3600 => format!("{} min ago", secs / 60),
         3600..86_400 => format!("{} h ago", secs / 3600),
         _ => format!("{} d ago", secs / 86_400),
+    }
+}
+
+/// UI choices remembered across starts, in `~/.agent-room/ui.json`.
+#[derive(Resource, Default, serde::Serialize, serde::Deserialize)]
+pub struct PanelPrefs {
+    /// The side panel with the log is hidden (PLAN.md M12).
+    #[serde(default)]
+    pub hidden: bool,
+}
+
+impl PanelPrefs {
+    fn path() -> Option<std::path::PathBuf> {
+        room_proto::state_dir().map(|dir| dir.join("ui.json"))
+    }
+
+    pub fn load() -> Self {
+        Self::path()
+            .and_then(|path| std::fs::read_to_string(path).ok())
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .unwrap_or_default()
+    }
+
+    fn toggle(&mut self) {
+        self.hidden = !self.hidden;
+        if let (Some(path), Ok(text)) = (Self::path(), serde_json::to_string(self)) {
+            let _ = std::fs::write(path, text);
+        }
     }
 }
 

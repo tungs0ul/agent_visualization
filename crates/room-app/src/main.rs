@@ -14,6 +14,7 @@ mod model;
 mod repo;
 mod scene;
 mod server;
+mod stats;
 mod ui;
 mod window;
 
@@ -74,6 +75,8 @@ fn main() -> AppExit {
         .insert_resource(NeedsCornerPlacement(saved.is_none()))
         .init_resource::<RoomLog>()
         .init_resource::<scene::Zoom>()
+        .init_resource::<stats::Stats>()
+        .insert_resource(ui::PanelPrefs::load())
         .init_resource::<AutoAccept>()
         .init_resource::<repo::RepoCache>()
         .init_resource::<camera::CameraControl>()
@@ -101,6 +104,7 @@ fn main() -> AppExit {
                 scene::follow_action,
                 anim::keep_text_readable,
                 settle_permissions,
+                stats::measure,
                 pace_updates,
                 window::take_screenshots,
             )
@@ -282,6 +286,7 @@ fn settle_permissions(mut log: ResMut<RoomLog>) {
 fn pace_updates(
     log: Res<RoomLog>,
     animating: Res<Animating>,
+    stats: Res<stats::Stats>,
     screenshots: Option<Res<ScreenshotMode>>,
     mut current: Local<Option<Duration>>,
     mut settings: ResMut<WinitSettings>,
@@ -293,6 +298,8 @@ fn pace_updates(
         Some(FRAME)
     } else if !log.pending.is_empty() || !log.questions.is_empty() {
         Some(COUNTDOWN_TICK)
+    } else if stats.shown {
+        Some(stats::REFRESH)
     } else {
         None
     };
