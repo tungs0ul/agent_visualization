@@ -174,7 +174,9 @@ fn set_glass(handle: &RawHandleWrapper, on: bool) {
         }
         effect.setState(NSVisualEffectState::Active);
         effect.setAutoresizingMask(NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewHeightSizable);
-        container.addSubview_positioned_relativeTo(&effect, NSWindowOrderingMode::Below, Some(view));
+        // Bottom of the whole stack: below Bevy's view *and* the title bar with the
+        // close/minimise/zoom buttons, which it would otherwise cover.
+        container.addSubview_positioned_relativeTo(&effect, NSWindowOrderingMode::Below, None);
         *glass = Some(effect);
     });
 }

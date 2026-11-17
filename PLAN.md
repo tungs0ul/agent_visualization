@@ -627,7 +627,12 @@ repository appears and the agent walks there.
   Dev: `AGENT_ROOM_DEV_CHAT="<folder>|<message>"` starts a session and sends a message.
 - Verified: a session started from the app runs, its hooks reach the room (log shows the
   prompt and "Done: - 2+2 = 4…").
-- **Bug to fix first:** in that run neither the chat window nor the final-answer pop-up
+- Fixed: chat window collapsed (no height on its first frame) → `min_size` + floor on the
+  transcript height; the final-answer pop-up is skipped while the chat window is open
+  (it already shows the answer). Verified with a Haiku session.
+- Fixed: the backdrop view covered the title-bar buttons → inserted at the bottom of the
+  superview's stack (`relativeTo: None`). Check on screen.
+- (resolved) Bug: in that run neither the chat window nor the final-answer pop-up
   was visible in the screenshot (both should be). Suspect `chat_window`: the
   `ScrollArea::max_height(ui.available_height() - 70.0)` inside a new `egui::Window` may
   be negative/zero on the first frame, or the window is placed off-screen; check with a

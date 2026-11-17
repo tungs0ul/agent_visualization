@@ -201,7 +201,10 @@ pub fn draw(
     }
     chat_window(ctx, &mut chat, &mut markdown);
     question_popup(ctx, &mut log, now);
-    final_answer_popup(ctx, &mut log, &mut markdown, mode.mini);
+    // The chat window already shows Claude's answers; don't cover it with the pop-up.
+    if !chat.chats.open {
+        final_answer_popup(ctx, &mut log, &mut markdown, mode.mini);
+    }
     Ok(())
 }
 
@@ -357,6 +360,10 @@ fn chat_window(ctx: &egui::Context, chat: &mut ChatParams, markdown: &mut Markdo
         .id("chat".into())
         .open(&mut open)
         .default_size(ctx.viewport_rect().size() * egui::vec2(0.45, 0.7))
+        // A new window has no height on its first frame; without a minimum the
+        // transcript's height below goes negative and the window collapses.
+        .min_size(egui::vec2(360.0, 320.0))
+        .default_pos(ctx.viewport_rect().center() - egui::vec2(200.0, 200.0))
         .show(ctx, |ui| {
             let Some(session) = chats.session.as_mut() else {
                 ui.label("Start a Claude Code session in a folder:");
@@ -380,7 +387,7 @@ fn chat_window(ctx: &egui::Context, chat: &mut ChatParams, markdown: &mut Markdo
             egui::ScrollArea::vertical()
                 .stick_to_bottom(true)
                 .auto_shrink(false)
-                .max_height(ui.available_height() - input_height)
+                .max_height((ui.available_height() - input_height).max(160.0))
                 .show(ui, |ui| {
                     for (speaker, text) in &session.transcript {
                         match speaker {
