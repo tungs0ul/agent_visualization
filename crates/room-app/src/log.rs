@@ -20,6 +20,8 @@ pub struct LogLine {
     pub session: String,
     pub agent: String,
     pub text: String,
+    /// When it happened (the activity flow shows how long ago).
+    pub at: Instant,
 }
 
 pub struct PendingPermission {
@@ -225,7 +227,7 @@ impl RoomLog {
     pub fn note(&mut self, session: &str, agent: String, text: String) {
         // Mirrors the on-screen log; `RUST_LOG=agent_room=debug` shows it in the terminal.
         debug!("{agent}: {text}");
-        self.lines.push_back(LogLine { session: session.to_owned(), agent, text });
+        self.lines.push_back(LogLine { session: session.to_owned(), agent, text, at: Instant::now() });
         while self.lines.len() > MAX_LINES {
             self.lines.pop_front();
         }

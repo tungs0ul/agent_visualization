@@ -472,6 +472,7 @@ pub fn labels(
     roster: Res<Roster>,
     camera: Query<(&Camera, &GlobalTransform), With<RoomCamera3d>>,
     avatars: Query<(&Avatar, &GlobalTransform)>,
+    mut selected: ResMut<crate::hud::Selected>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
     if !mode.mini {
@@ -534,9 +535,10 @@ pub fn labels(
         egui::Area::new(egui::Id::new(("label3d", avatar.of)))
             .fixed_pos(egui::pos2(screen.x, screen.y))
             .pivot(egui::Align2::CENTER_BOTTOM)
-            .interactable(false)
+            .interactable(true)
+            .order(egui::Order::Background)
             .show(ctx, |ui| {
-                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                let shown = egui::Frame::popup(ui.style()).show(ui, |ui| {
                     ui.set_max_width(220.0);
                     let tint = avatar.accent.to_srgba();
                     let color =
@@ -546,6 +548,11 @@ pub fn labels(
                         ui.label(egui::RichText::new(doing).small());
                     }
                 });
+                // Clicking a robot's label opens its details (`hud`).
+                let click = shown.response.interact(egui::Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+                if click.clicked() {
+                    selected.0 = Some(avatar.of);
+                }
             });
     }
     Ok(())

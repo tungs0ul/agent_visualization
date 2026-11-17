@@ -16,6 +16,7 @@ mod scene;
 mod server;
 mod stats;
 mod theme;
+mod hud;
 mod view3d;
 mod world3d;
 mod ui;
@@ -79,6 +80,8 @@ fn main() -> AppExit {
         .add_message::<camera::RoomClick>()
         .add_message::<view3d::Toggle3d>()
         .insert_resource(view3d::View3d::from_env())
+        .init_resource::<hud::Trace>()
+        .init_resource::<hud::Selected>()
         .insert_resource(mini::ViewMode::from_saved(saved))
         .insert_resource(server)
         .insert_resource(NeedsCornerPlacement(saved.is_none()))
@@ -116,13 +119,13 @@ fn main() -> AppExit {
                 settle_permissions,
                 stats::measure,
                 (theme::switch, theme::recolor, theme::stars).chain(),
-                (view3d::toggle, view3d::build, view3d::sync, view3d::deliver, view3d::activity_holograms, view3d::light_trails, view3d::frame, view3d::cameras).chain(),
+                (view3d::toggle, view3d::build, view3d::sync, view3d::deliver, view3d::activity_holograms, view3d::light_trails, hud::trace, view3d::frame, view3d::cameras).chain(),
                 pace_updates,
                 window::take_screenshots,
             )
                 .chain(),
         )
-        .add_systems(EguiPrimaryContextPass, (ui::draw, view3d::labels).chain());
+        .add_systems(EguiPrimaryContextPass, (ui::draw, view3d::labels, hud::draw).chain());
     if let Some(mode) = ScreenshotMode::from_env() {
         app.insert_resource(mode).insert_resource(WinitSettings::continuous());
     }
