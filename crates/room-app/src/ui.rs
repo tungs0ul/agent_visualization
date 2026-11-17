@@ -28,6 +28,8 @@ const MAX_FINISHED_ROWS: usize = 4;
 const PANEL: egui::Color32 = egui::Color32::from_rgb(0xFB, 0xF7, 0xF1);
 const ALLOW: egui::Color32 = egui::Color32::from_rgb(0x3E, 0x9B, 0x5F);
 const DENY: egui::Color32 = egui::Color32::from_rgb(0xC9, 0x4F, 0x4F);
+/// Share of the window the final answer covers.
+const FINAL_ANSWER_SHARE: f32 = 0.86;
 const AUTO: egui::Color32 = egui::Color32::from_rgb(0xE0, 0x8A, 0x1E);
 
 #[allow(clippy::too_many_arguments)]
@@ -42,6 +44,7 @@ pub fn draw(
     window: Single<&Window, With<PrimaryWindow>>,
     mut camera: Single<&mut Camera, With<WorldCamera>>,
     in_room: InRoom,
+    mut markdown: ResMut<MarkdownCache>,
     mut styled: Local<bool>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
@@ -188,7 +191,7 @@ pub fn draw(
         log.note(&pending.session, pending.agent, format!("{verb} {}", pending.tool.describe().1));
     }
     question_popup(ctx, &mut log, now);
-    final_answer_popup(ctx, &mut log, mode.mini);
+    final_answer_popup(ctx, &mut log, &mut markdown, mode.mini);
     Ok(())
 }
 
@@ -279,23 +282,43 @@ fn question_popup(ctx: &egui::Context, log: &mut RoomLog, now: Instant) {
     }
 }
 
-/// Claude's answer at the end of a turn, until closed or the next prompt.
-fn final_answer_popup(ctx: &egui::Context, log: &mut RoomLog, mini: bool) {
+/// Claude's answer at the end of a turn, rendered as markdown, until closed or the
+/// next prompt. Nothing else happens at that moment, so it takes most of the window.
+fn final_answer_popup(ctx: &egui::Context, log: &mut RoomLog, markdown: &mut MarkdownCache, mini: bool) {
     if !log.questions.is_empty() {
         return;
     }
     let Some(text) = log.final_answer.clone() else { return };
     let mut close = false;
+    let size = ctx.viewport_rect().size() * FINAL_ANSWER_SHARE;
     egui::Window::new("Claude")
         .id("final-answer".into())
         .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
         .collapsible(false)
         .resizable(false)
-        .max_width(if mini { 280.0 } else { 460.0 })
+        .fixed_size(size)
         .show(ctx, |ui| {
+            // Larger, comfortable reading text; smaller in the mini widget.
+            let body = if mini { 13.0 } else { 18.0 };
+            let style = ui.style_mut();
+            for (text_style, size) in [
+                (egui::TextStyle::Body, body),
+                (egui::TextStyle::Monospace, body - 2.0),
+                (egui::TextStyle::Heading, body + 6.0),
+                (egui::TextStyle::Button, body),
+            ] {
+                if let Some(font) = style.text_styles.get_mut(&text_style) {
+                    font.size = size;
+                }
+            }
+            style.spacing.item_spacing.y = 8.0;
             egui::ScrollArea::vertical()
-                .max_height(ctx.viewport_rect().height() * if mini { 0.55 } else { 0.5 })
-                .show(ui, |ui| ui.label(text));
+                .max_height(size.y - if mini { 40.0 } else { 56.0 })
+                .auto_shrink(false)
+                .show(ui, |ui| {
+                    egui_commonmark::CommonMarkViewer::new().show(ui, &mut markdown.0, &text);
+                });
+            ui.separator();
             if ui.button("Close").clicked() {
                 close = true;
             }
@@ -304,6 +327,10 @@ fn final_answer_popup(ctx: &egui::Context, log: &mut RoomLog, mini: bool) {
         log.final_answer = None;
     }
 }
+
+/// Cache for rendered markdown (images, code highlighting state).
+#[derive(Resource, Default)]
+pub struct MarkdownCache(egui_commonmark::CommonMarkCache);
 
 /// The shown session's name; a drop-down to switch when several sessions are known.
 fn session_picker(ui: &mut egui::Ui, model: &Model) -> Option<String> {

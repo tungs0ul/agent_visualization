@@ -74,6 +74,7 @@ fn main() -> AppExit {
         .init_resource::<AutoAccept>()
         .init_resource::<repo::RepoCache>()
         .init_resource::<camera::CameraControl>()
+        .init_resource::<ui::MarkdownCache>()
         .init_resource::<Model>()
         .init_resource::<Roster>()
         .init_resource::<Animating>()

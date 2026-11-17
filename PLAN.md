@@ -1087,6 +1087,10 @@ Later in the session (2026-11-17):
   blending) added to the view's **superview**, below Bevy's view (`mini::set_glass`,
   objc2 0.6 / objc2-app-kit 0.3). Toggle test passes; the look must be checked on screen
   (no rounded corners yet).
+- Final answer pop-up (user request): rendered as markdown with `egui_commonmark` 0.25
+  (egui 0.36): headings, lists, inline code, highlighted code blocks with a copy button,
+  quotes. Covers 86 % of the window (`FINAL_ANSWER_SHARE`), body text 18 (13 in mini),
+  scrolls. egui has no bold face, so `**bold**` shows as normal weight.
 - **Next:** M4d part 2 — draw a room per repo in use: a second floor area beside the
   office (sign "repo · branch", a few desks, library/servers corners), agents whose
   `repo` differs from the home repo walk there instead of the home zones; rooms appear
