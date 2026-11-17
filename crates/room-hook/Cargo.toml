@@ -1,0 +1,9 @@
+[package]
+name = "room-hook"
+description = "Claude Code hook command that forwards hook events to Agent Room"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]

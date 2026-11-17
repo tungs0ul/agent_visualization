@@ -1,0 +1,11 @@
+{
+  "name": "agent-room",
+  "displayName": "Agent Room",
+  "version": "0.1.0",
+  "description": "Shows Claude Code and its sub-agents working in an animated room, and lets you answer permission prompts from the Agent Room app.",
+  "author": {
+    "name": "tungs0ul"
+  },
+  "license": "MIT",
+  "keywords": ["visualization", "subagents", "permissions", "hooks"]
+}
