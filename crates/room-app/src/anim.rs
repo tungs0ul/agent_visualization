@@ -10,6 +10,7 @@ use bevy::prelude::*;
 use bevy_prototype_lyon::prelude::*;
 use room_proto::describe::truncate;
 
+use crate::model::Pose;
 use crate::scene::{TEXT, UiFont, rounded};
 
 /// Walking speed in room units per second.
@@ -29,20 +30,6 @@ const LINGER_SECONDS: f32 = 0.7;
 
 const BUBBLE_FILL: Color = Color::WHITE;
 const BUBBLE_EDGE: Color = Color::srgb(0.886, 0.835, 0.765);
-
-/// What a character is doing; drives its animation.
-#[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Pose {
-    #[default]
-    Idle,
-    Thinking,
-    Reading,
-    Typing,
-    Web,
-    Delegating,
-    Reporting,
-    Waiting,
-}
 
 /// Per-character offset so characters don't breathe and blink in sync.
 #[derive(Component)]

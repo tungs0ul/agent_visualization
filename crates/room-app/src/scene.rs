@@ -8,12 +8,11 @@ use std::collections::HashMap;
 use bevy::camera::ScalingMode;
 use bevy::prelude::*;
 use bevy_prototype_lyon::prelude::*;
-use room_proto::describe::Activity;
-use room_proto::event::{AgentRef, EventKind, RoomEvent};
 
 use crate::anim::{
-    self, Accent, Arrive, Bubble, BubbleRef, Done, Part, Phase, Pose, Rest, RigOf, Walk, say,
+    self, Accent, Arrive, Bubble, BubbleRef, Done, Part, Phase, Rest, RigOf, Walk, say,
 };
+use crate::model::{Change, Pose, Who};
 
 // Draw order is by z: room -100..-60, characters 0..9 (their desk 5..8 in front of the
 // body), bubbles +30, planes 60. Never change an entity's z after spawning it: Bevy 0.20
@@ -76,9 +75,9 @@ const SUB_ACCENTS: [Color; 8] = [
     rgb(0xC9, 0xA2, 0x27),
 ];
 
-/// A parsed hook event, for every system that reacts to Claude Code.
+/// A model change for the scene to show (see `model::Change`).
 #[derive(Message, Clone)]
-pub struct HookEvent(pub RoomEvent);
+pub struct SceneChange(pub Change);
 
 /// The camera that draws the room (egui has its own).
 #[derive(Component)]
@@ -99,39 +98,32 @@ struct Seat {
     slot: usize,
     character: Entity,
     desk: Entity,
-    /// Already threw its report (through `SubagentHandback`).
-    reported: bool,
 }
 
-/// Who sits where, for the session shown in the room.
+/// Which entities draw whom. Who is in the room is decided by the model.
 #[derive(Resource, Default)]
 pub struct Roster {
-    session: Option<String>,
     main: Option<Entity>,
     seated: HashMap<String, Seat>,
     /// Desks of agents on their way out: desk ⇒ seat index, freed once the desk is gone.
     leaving: HashMap<Entity, usize>,
-    /// Every sub-agent seen this session, seated or gone: id ⇒ type. Reports arrive
-    /// after the agent stopped, and still need its name.
-    known: HashMap<String, String>,
-    /// What the main agent asked each sub-agent to do: id ⇒ description.
-    briefs: HashMap<String, String>,
 }
 
 impl Roster {
-    pub fn agent_type(&self, agent_id: &str) -> Option<&str> {
-        self.known.get(agent_id).map(String::as_str)
-    }
-
     fn free_slot(&self) -> Option<usize> {
         (0..SEATS.len()).find(|slot| {
             !self.seated.values().any(|seat| seat.slot == *slot) && !self.leaving.values().any(|s| s == slot)
         })
     }
 
+    fn character(&self, who: &Who) -> Option<Entity> {
+        match who {
+            Who::Main => self.main,
+            Who::Sub(id) => self.seated.get(id).map(|seat| seat.character),
+        }
+    }
+
     fn clear(&mut self, commands: &mut Commands) {
-        self.known.clear();
-        self.briefs.clear();
         for seat in self.seated.drain().map(|(_, seat)| seat) {
             commands.entity(seat.character).despawn();
             commands.entity(seat.desk).despawn();
@@ -181,138 +173,85 @@ pub fn spawn_room(mut commands: Commands, font: Res<UiFont>, mut roster: ResMut<
     roster.main = Some(main);
 }
 
-/// Turns hook events into poses, speech, arrivals and departures.
-#[allow(clippy::too_many_arguments)]
-pub fn apply_events(
+/// Shows model changes: arrivals, poses, speech, hand-overs, departures.
+pub fn apply_changes(
     mut commands: Commands,
-    mut events: MessageReader<HookEvent>,
+    mut changes: MessageReader<SceneChange>,
     mut roster: ResMut<Roster>,
     font: Res<UiFont>,
-    mut characters: Query<(&Agent, &Transform, &mut Pose, &BubbleRef)>,
+    mut characters: Query<(&Transform, &mut Pose, &BubbleRef), With<Agent>>,
     mut bubbles: Query<&mut Bubble>,
     desks: Query<(), With<Desk>>,
 ) {
     roster.leaving.retain(|desk, _| desks.contains(*desk));
-    for HookEvent(event) in events.read() {
-        if !follow_session(&mut roster, event, &mut commands) {
-            continue;
-        }
-        let Some(main) = roster.main else { continue };
-        let entity = match &event.agent {
-            AgentRef::Main => {
-                if let EventKind::ToolFinished { launched: Some(launched), .. } = &event.kind {
-                    roster.briefs.insert(launched.agent_id.clone(), launched.description.clone());
+    // Characters spawned in this batch can't be queried yet; their first pose and
+    // words are applied next frame (see `apply_pending`).
+    let mut pending: HashMap<Entity, Pending> = HashMap::new();
+    for SceneChange(change) in changes.read() {
+        match change {
+            Change::ShowSession => roster.clear(&mut commands),
+            Change::Joined { id, agent_type, greeting } => {
+                if roster.seated.contains_key(id) {
+                    continue;
                 }
-                if matches!(event.kind, EventKind::SessionEnded { .. }) {
-                    roster.clear(&mut commands);
+                if let Some(character) = seat_agent(&mut commands, &mut roster, id, agent_type, &font) {
+                    pending.entry(character).or_default().line = Some(greeting.clone());
                 }
-                main
             }
-            AgentRef::Sub { id, agent_type } => {
-                if let EventKind::SubagentStopped { last_message } = &event.kind {
-                    // Unknown ids are Claude Code's internal helpers (PLAN.md 3.4): ignore.
-                    let Some(seat) = roster.seated.remove(id) else { continue };
-                    if let Ok((_, transform, mut pose, bubble)) = characters.get_mut(seat.character) {
-                        // No hand-back: it still brings its last words over to Claude.
-                        if !seat.reported {
-                            *pose = Pose::Reporting;
-                            commands.entity(seat.character).insert(deliver(transform, seat.slot));
-                            if let Some(text) = last_message {
-                                say(&mut bubbles, bubble.0, text);
-                            }
-                        }
+            Change::Pose { who, pose } => {
+                let Some(entity) = roster.character(who) else { continue };
+                match characters.get_mut(entity) {
+                    Ok((_, mut current, _)) => {
+                        current.set_if_neq(*pose);
                     }
-                    commands.entity(seat.character).insert(Done::new(seat.desk, DOOR));
-                    roster.leaving.insert(seat.desk, seat.slot);
-                    continue;
-                }
-                if agent_type.is_empty() {
-                    continue;
-                }
-                match roster.seated.get(id) {
-                    Some(seat) => seat.character,
-                    None => match seat_agent(&mut commands, &mut roster, id, agent_type, &font) {
-                        Some(character) => {
-                            let brief = roster.briefs.get(id).cloned().unwrap_or_else(|| "On my way!".to_owned());
-                            // The bubble entity exists only after commands apply; greet next event.
-                            commands.entity(character).insert(PendingGreeting(brief));
-                            continue;
-                        }
-                        None => continue,
-                    },
+                    Err(_) => pending.entry(entity).or_default().pose = Some(*pose),
                 }
             }
-        };
-
-        let Ok((_, transform, mut pose, bubble)) = characters.get_mut(entity) else { continue };
-        let (next_pose, line) = react(&event.kind, *pose, &roster);
-        if let Some(next_pose) = next_pose {
-            pose.set_if_neq(next_pose);
+            Change::Say { who, line } => {
+                let Some(entity) = roster.character(who) else { continue };
+                match characters.get(entity) {
+                    Ok((_, _, bubble)) => say(&mut bubbles, bubble.0, line),
+                    Err(_) => pending.entry(entity).or_default().line = Some(line.clone()),
+                }
+            }
+            Change::Deliver { id } => {
+                let Some(seat) = roster.seated.get(id) else { continue };
+                if let Ok((transform, _, _)) = characters.get(seat.character) {
+                    commands.entity(seat.character).insert(deliver(transform, seat.slot));
+                }
+            }
+            Change::Leave { id } => {
+                let Some(seat) = roster.seated.remove(id) else { continue };
+                commands.entity(seat.character).insert(Done::new(seat.desk, DOOR));
+                roster.leaving.insert(seat.desk, seat.slot);
+            }
         }
-        if let Some(line) = line {
-            say(&mut bubbles, bubble.0, &line);
-        }
-        if let (AgentRef::Sub { id, .. }, EventKind::Handback { .. }) = (&event.agent, &event.kind)
-            && let Some(seat) = roster.seated.get_mut(id)
-        {
-            seat.reported = true;
-            commands.entity(entity).insert(deliver(transform, seat.slot));
-        }
+    }
+    for (entity, change) in pending {
+        commands.entity(entity).insert(change);
     }
 }
 
-/// A newly seated sub-agent says what it was asked to do once its bubble exists.
-#[derive(Component)]
-pub struct PendingGreeting(String);
+/// A pose and words for a character that didn't exist yet when they came in.
+#[derive(Component, Default)]
+pub struct Pending {
+    pose: Option<Pose>,
+    line: Option<String>,
+}
 
-pub fn greet(
+pub fn apply_pending(
     mut commands: Commands,
-    greeters: Query<(Entity, &PendingGreeting, &BubbleRef)>,
+    mut waiting: Query<(Entity, &Pending, &mut Pose, &BubbleRef)>,
     mut bubbles: Query<&mut Bubble>,
 ) {
-    for (entity, greeting, bubble) in &greeters {
-        say(&mut bubbles, bubble.0, &greeting.0);
-        commands.entity(entity).remove::<PendingGreeting>();
-    }
-}
-
-/// Pose and speech for an event, given the character's current pose.
-fn react(kind: &EventKind, current: Pose, roster: &Roster) -> (Option<Pose>, Option<String>) {
-    match kind {
-        EventKind::SessionStarted { .. } => (Some(Pose::Idle), Some("Hello!".to_owned())),
-        EventKind::UserPrompt { .. } => (Some(Pose::Thinking), Some("On it!".to_owned())),
-        EventKind::ToolStarted { tool, .. } => {
-            let (activity, label) = tool.describe();
-            (Some(pose_for(activity)), Some(label))
+    for (entity, pending, mut pose, bubble) in &mut waiting {
+        if let Some(next) = pending.pose {
+            *pose = next;
         }
-        // An answered permission: back to work.
-        EventKind::ToolFinished { .. } if current == Pose::Waiting => (Some(Pose::Thinking), None),
-        EventKind::ToolFailed { tool_name, interrupted: false, .. } => {
-            (Some(Pose::Thinking), Some(format!("Hmm, {tool_name} failed")))
+        if let Some(line) = &pending.line {
+            say(&mut bubbles, bubble.0, line);
         }
-        EventKind::ToolFailed { .. } => (Some(Pose::Idle), Some("Stopped".to_owned())),
-        EventKind::PermissionAsked { tool } => (Some(Pose::Waiting), Some(format!("May I? {}", tool.describe().1))),
-        EventKind::PermissionAutoDenied { tool_name, .. } => (Some(Pose::Thinking), Some(format!("Not allowed: {tool_name}"))),
-        EventKind::Handback { .. } => (Some(Pose::Reporting), Some("Here's my report!".to_owned())),
-        EventKind::ReportReceived { from_agent } => {
-            let from = roster.agent_type(from_agent).unwrap_or("my helper");
-            (Some(Pose::Thinking), Some(format!("Got it from {from}")))
-        }
-        EventKind::Notification { message, .. } => (None, Some(message.clone())),
-        EventKind::TurnEnded { .. } => (Some(Pose::Idle), Some("All done".to_owned())),
-        EventKind::TurnFailed { .. } => (Some(Pose::Idle), Some("Something went wrong".to_owned())),
-        _ => (None, None),
-    }
-}
-
-fn pose_for(activity: Activity) -> Pose {
-    match activity {
-        Activity::Reading => Pose::Reading,
-        Activity::Writing | Activity::Terminal => Pose::Typing,
-        Activity::Web => Pose::Web,
-        Activity::Delegating => Pose::Delegating,
-        Activity::Reporting => Pose::Reporting,
-        Activity::Thinking => Pose::Thinking,
+        commands.entity(entity).remove::<Pending>();
     }
 }
 
@@ -333,29 +272,14 @@ fn deliver(transform: &Transform, slot: usize) -> Walk {
 
 /// Gives a new sub-agent a desk and walks it in from the door.
 fn seat_agent(commands: &mut Commands, roster: &mut Roster, id: &str, agent_type: &str, font: &UiFont) -> Option<Entity> {
-    roster.known.insert(id.to_owned(), agent_type.to_owned());
     let slot = roster.free_slot()?;
     let seat = SEATS[slot];
     let accent = accent_for(agent_type);
     let character = spawn_character(commands, DOOR, 1.0, accent, id, font);
     let desk = spawn_desk(commands, seat, 1.0, accent, agent_type, font);
     commands.entity(character).insert(Walk::new(DOOR, seat + BEHIND_DESK, seat, Arrive::Sit));
-    roster.seated.insert(id.to_owned(), Seat { slot, character, desk, reported: false });
+    roster.seated.insert(id.to_owned(), Seat { slot, character, desk });
     Some(character)
-}
-
-/// The room shows one session: the first one seen, until the user starts or types into
-/// another. Returns whether this event belongs to the shown session.
-fn follow_session(roster: &mut Roster, event: &RoomEvent, commands: &mut Commands) -> bool {
-    match &roster.session {
-        Some(current) if *current == event.session_id => true,
-        Some(_) if !matches!(event.kind, EventKind::SessionStarted { .. } | EventKind::UserPrompt { .. }) => false,
-        _ => {
-            roster.clear(commands);
-            roster.session = Some(event.session_id.clone());
-            true
-        }
-    }
 }
 
 /// Stable accent per agent type: the common ones get fixed colors.
@@ -469,30 +393,11 @@ pub fn circle(radius: f32, fill: Color) -> Shape {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use room_proto::event::ToolCall;
-    use serde_json::json;
 
     #[test]
     fn accents_are_stable_and_fixed_for_common_types() {
         assert_eq!(accent_for("Explore"), SUB_ACCENTS[0]);
         assert_eq!(accent_for("Plan"), SUB_ACCENTS[1]);
         assert_eq!(accent_for("ecc:code-reviewer"), accent_for("ecc:code-reviewer"));
-    }
-
-    #[test]
-    fn tools_set_pose_and_speech() {
-        let roster = Roster::default();
-        let read = EventKind::ToolStarted {
-            tool_use_id: "t".into(),
-            tool: ToolCall { name: "Read".into(), input: json!({ "file_path": "/x/PLAN.md" }) },
-        };
-        assert_eq!(react(&read, Pose::Idle, &roster), (Some(Pose::Reading), Some("Reading PLAN.md".into())));
-
-        let ask = EventKind::PermissionAsked { tool: ToolCall { name: "Bash".into(), input: json!({ "command": "ls" }) } };
-        assert_eq!(react(&ask, Pose::Typing, &roster).0, Some(Pose::Waiting));
-
-        let done = EventKind::ToolFinished { tool_use_id: "t".into(), tool_name: "Bash".into(), launched: None };
-        assert_eq!(react(&done, Pose::Waiting, &roster).0, Some(Pose::Thinking));
-        assert_eq!(react(&done, Pose::Typing, &roster).0, None);
     }
 }

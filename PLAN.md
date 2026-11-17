@@ -502,6 +502,13 @@ The machine runs 24/7; wasted CPU/GPU costs money.
 
 ## 8. Milestones
 
+**Order decided with the user (2026-11-17): function first, visuals later.** After M4:
+1. Agent model refactor (pure, tested state; scene and panels only read it).
+2. M5 Permissions.
+3. From M6: session picker, roster list (plain list for now).
+4. M7 Distribution (cargo install + plugin marketplace).
+5. M4b office zones and other visual polish.
+
 Each milestone ends with: builds clean (`cargo build`, `cargo clippy -- -D warnings`),
 tests pass, no leftover processes, PLAN.md status updated.
 
@@ -798,3 +805,13 @@ anything surprising.
     badge, walk-over hand-over with pulse, walk-out.
   **Next:** user watches a live session. Then M4b (office zones) or M5 (permission
   polish: Y/N keys, card above the agent, attention request).
+- 2026-11-17, Claude Opus 5.5: Step 1 of the agreed order done: **agent model
+  refactor**. `crates/room-app/src/model.rs` holds all agent/session logic as plain
+  data: `Model::apply(&RoomEvent) -> Vec<Change>` (ShowSession, Joined, Pose, Say,
+  Deliver, Leave), sessions with their agents (`AgentInfo`: type, status, pose, task,
+  doing, report), which session is shown, internal-helper detection. 7 unit tests.
+  `scene.rs` only maps `Change`s to entities (`Roster` = who is drawn by which entity;
+  `Pending` applies the first pose/words to characters spawned in the same frame).
+  The log and UI read the model (`model.shown()`, `agent_type()`), so the roster list
+  and office zones later only need drawing code. Visual replay unchanged.
+  **Next:** M5 Permissions.

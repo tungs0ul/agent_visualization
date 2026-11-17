@@ -40,19 +40,10 @@ impl PendingPermission {
 pub struct RoomLog {
     pub lines: VecDeque<LogLine>,
     pub pending: Vec<PendingPermission>,
-    pub session: Option<SessionInfo>,
-}
-
-pub struct SessionInfo {
-    pub id: String,
-    pub cwd: Option<String>,
 }
 
 impl RoomLog {
     pub fn push(&mut self, event: &RoomEvent) {
-        if self.session.as_ref().is_none_or(|s| s.id != event.session_id) {
-            self.session = Some(SessionInfo { id: event.session_id.clone(), cwd: event.cwd.clone() });
-        }
         if let Some(text) = summary(&event.kind) {
             self.note(agent_label(&event.agent), text);
         }
@@ -144,7 +135,7 @@ mod tests {
     }
 
     #[test]
-    fn log_is_capped_and_tracks_the_session() {
+    fn log_is_capped() {
         let mut log = RoomLog::default();
         let event = RoomEvent {
             session_id: "s1".into(),
@@ -157,6 +148,5 @@ mod tests {
             log.push(&event);
         }
         assert_eq!(log.lines.len(), MAX_LINES);
-        assert_eq!(log.session.as_ref().unwrap().id, "s1");
     }
 }

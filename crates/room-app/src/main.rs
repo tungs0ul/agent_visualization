@@ -7,6 +7,7 @@
 
 mod anim;
 mod log;
+mod model;
 mod scene;
 mod server;
 mod ui;
@@ -25,7 +26,8 @@ use room_proto::event::{AgentRef, EventKind};
 
 use crate::anim::Animating;
 use crate::log::{PendingPermission, RoomLog, agent_label};
-use crate::scene::{HookEvent, Roster};
+use crate::model::Model;
+use crate::scene::{Roster, SceneChange};
 use crate::server::{Incoming, Server};
 use crate::window::{NeedsCornerPlacement, SavedWindow, ScreenshotMode};
 
@@ -54,10 +56,11 @@ fn main() -> AppExit {
             ..default()
         }))
         .add_plugins((EguiPlugin::default(), ShapePlugin))
-        .add_message::<HookEvent>()
+        .add_message::<SceneChange>()
         .insert_resource(server)
         .insert_resource(NeedsCornerPlacement(saved.is_none()))
         .init_resource::<RoomLog>()
+        .init_resource::<Model>()
         .init_resource::<Roster>()
         .init_resource::<Animating>()
         .add_systems(Startup, ((scene::load_font, scene::spawn_room).chain(), spawn_ui_camera, connect_waker))
@@ -68,8 +71,8 @@ fn main() -> AppExit {
                 window::hotkeys,
                 window::remember_geometry,
                 receive_events,
-                scene::apply_events,
-                scene::greet,
+                scene::apply_changes,
+                scene::apply_pending,
                 (anim::walk, anim::leave_when_done, anim::animate_parts, anim::update_bubbles),
                 (anim::hand_over, anim::pulse),
                 anim::detect_motion,
@@ -114,27 +117,30 @@ fn connect_waker(server: Res<Server>, proxy: Res<EventLoopProxyWrapper>) {
     }));
 }
 
+/// Every hook event: into the model (which tells the scene what to show), the log,
+/// and the permission cards.
 fn receive_events(
     server: Res<Server>,
-    roster: Res<Roster>,
+    mut model: ResMut<Model>,
     mut log: ResMut<RoomLog>,
-    mut hook_events: MessageWriter<HookEvent>,
+    mut scene: MessageWriter<SceneChange>,
 ) {
     let now = Instant::now();
     for Incoming { event, reply } in server.events.try_iter() {
-        match &event.kind {
-            // The roster knows what kind of agent sent the report.
-            EventKind::ReportReceived { from_agent } if roster.agent_type(from_agent).is_some() => {
-                let sender = AgentRef::Sub {
-                    id: from_agent.clone(),
-                    agent_type: roster.agent_type(from_agent).unwrap_or_default().to_owned(),
-                };
-                log.note(agent_label(&event.agent), format!("Got the report from {}", agent_label(&sender)));
-            }
-            // Claude Code's own internal helpers stop without ever starting (PLAN.md 3.4).
-            EventKind::SubagentStopped { .. }
-                if matches!(&event.agent, AgentRef::Sub { id, agent_type } if agent_type.is_empty() && roster.agent_type(id).is_none()) => {}
-            _ => log.push(&event),
+        let internal_helper = model.is_internal_helper(&event);
+        for change in model.apply(&event) {
+            scene.write(SceneChange(change));
+        }
+        let report_from = match &event.kind {
+            EventKind::ReportReceived { from_agent } => model
+                .agent_type(&event.session_id, from_agent)
+                .map(|agent_type| AgentRef::Sub { id: from_agent.clone(), agent_type: agent_type.to_owned() }),
+            _ => None,
+        };
+        match report_from {
+            Some(sender) => log.note(agent_label(&event.agent), format!("Got the report from {}", agent_label(&sender))),
+            None if internal_helper => {}
+            None => log.push(&event),
         }
         if let (Some(reply), EventKind::PermissionAsked { tool }) = (reply, &event.kind) {
             log.pending.push(PendingPermission {
@@ -146,7 +152,6 @@ fn receive_events(
                 reply,
             });
         }
-        hook_events.write(HookEvent(event));
     }
 }
 

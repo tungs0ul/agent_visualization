@@ -11,6 +11,7 @@ use room_proto::event::ToolCall;
 use room_proto::{Decision, PermissionReply};
 
 use crate::log::RoomLog;
+use crate::model::Model;
 use crate::scene::WorldCamera;
 
 const DENY_MESSAGE: &str = "The user denied this in Agent Room.";
@@ -24,6 +25,7 @@ const DENY: egui::Color32 = egui::Color32::from_rgb(0xC9, 0x4F, 0x4F);
 pub fn draw(
     mut contexts: EguiContexts,
     mut log: ResMut<RoomLog>,
+    model: Res<Model>,
     window: Single<&Window, With<PrimaryWindow>>,
     mut camera: Single<&mut Camera, With<WorldCamera>>,
     mut styled: Local<bool>,
@@ -49,7 +51,7 @@ pub fn draw(
     if ctx.viewport_rect().width() >= WIDE_LAYOUT {
         egui::Panel::right("side").exact_size(SIDE_PANEL_WIDTH).show(&mut root, |ui| {
             ui.add_space(4.0);
-            ui.label(egui::RichText::new(session_title(&log)).strong());
+            ui.label(egui::RichText::new(session_title(&model)).strong());
             ui.separator();
             permission_cards(ui, &log, now, &mut answers);
             event_log(ui, &log);
@@ -64,7 +66,7 @@ pub fn draw(
         }
         egui::Panel::bottom("ticker").show(&mut root, |ui| {
             let latest = log.lines.back();
-            let text = latest.map_or_else(|| session_title(&log), |line| format!("{}: {}", line.agent, line.text));
+            let text = latest.map_or_else(|| session_title(&model), |line| format!("{}: {}", line.agent, line.text));
             ui.add(egui::Label::new(text).truncate());
         });
     }
@@ -86,8 +88,8 @@ pub fn draw(
     Ok(())
 }
 
-fn session_title(log: &RoomLog) -> String {
-    match &log.session {
+fn session_title(model: &Model) -> String {
+    match model.shown() {
         Some(session) => session.cwd.clone().unwrap_or_else(|| session.id.clone()),
         None => "Waiting for Claude Code…".to_owned(),
     }
