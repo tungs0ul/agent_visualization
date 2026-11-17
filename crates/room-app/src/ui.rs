@@ -28,7 +28,6 @@ const WIDE_LAYOUT: f32 = 700.0;
 const SIDE_PANEL_WIDTH: f32 = 320.0;
 /// Finished sub-agents kept in the roster list.
 const MAX_FINISHED_ROWS: usize = 4;
-const PANEL: egui::Color32 = egui::Color32::from_rgb(0xFB, 0xF7, 0xF1);
 const ALLOW: egui::Color32 = egui::Color32::from_rgb(0x3E, 0x9B, 0x5F);
 const DENY: egui::Color32 = egui::Color32::from_rgb(0xC9, 0x4F, 0x4F);
 /// Share of the window the final answer covers.
@@ -51,15 +50,14 @@ pub fn draw(
     mut markdown: ResMut<MarkdownCache>,
     mut panel: ResMut<PanelPrefs>,
     mut stats: ResMut<crate::stats::Stats>,
-    mut styled: Local<bool>,
+    mut styled: Local<Option<crate::theme::Look>>,
+    mut theme: ResMut<crate::theme::Theme>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
-    if !*styled {
-        // Light panels that sit well next to the warm room.
-        let mut visuals = egui::Visuals::light();
-        visuals.panel_fill = PANEL;
-        ctx.set_visuals(visuals);
-        *styled = true;
+    // Panels in the room's theme (PLAN.md M14).
+    if *styled != Some(theme.look()) {
+        ctx.set_visuals(crate::theme::visuals(theme.look()));
+        *styled = Some(theme.look());
     }
     let mut root = egui::Ui::new(
         ctx.clone(),
@@ -172,6 +170,10 @@ pub fn draw(
                 }
                 if ui.small_button("Stats").on_hover_text("This app's CPU, memory and frame rate (I)").clicked() {
                     stats.toggle();
+                }
+                let label = format!("Theme: {}", theme.choice.label());
+                if ui.small_button(label).on_hover_text("Auto, Light, Dark, Spaceship (T)").clicked() {
+                    theme.cycle();
                 }
             });
             ui.separator();

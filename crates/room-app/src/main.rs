@@ -15,6 +15,8 @@ mod repo;
 mod scene;
 mod server;
 mod stats;
+mod theme;
+mod view3d;
 mod ui;
 mod window;
 
@@ -62,20 +64,25 @@ fn main() -> AppExit {
         // old and new sizes; wgpu rejects it and Bevy would quit. Skip that frame instead;
         // the next one is consistent again.
         .insert_resource(RenderErrorHandler(|_, _, _| RenderErrorPolicy::Ignore))
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(window::initial_window(saved)),
-            ..default()
-        }))
+        .add_plugins(
+            DefaultPlugins
+                .set(WindowPlugin { primary_window: Some(window::initial_window(saved)), ..default() })
+                // The 3D models (PLAN.md M15) live in the checkout's `assets/`.
+                .set(AssetPlugin { file_path: concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets").to_owned(), ..default() }),
+        )
         .add_plugins((EguiPlugin::default(), ShapePlugin))
         .add_message::<SceneChange>()
         .add_message::<mini::ToggleMini>()
         .add_message::<camera::RoomClick>()
+        .add_message::<view3d::Toggle3d>()
+        .insert_resource(view3d::View3d::from_env())
         .insert_resource(mini::ViewMode::from_saved(saved))
         .insert_resource(server)
         .insert_resource(NeedsCornerPlacement(saved.is_none()))
         .init_resource::<RoomLog>()
         .init_resource::<scene::Zoom>()
         .init_resource::<stats::Stats>()
+        .insert_resource(theme::Theme::load())
         .insert_resource(ui::PanelPrefs::load())
         .init_resource::<AutoAccept>()
         .init_resource::<repo::RepoCache>()
@@ -105,12 +112,14 @@ fn main() -> AppExit {
                 anim::keep_text_readable,
                 settle_permissions,
                 stats::measure,
+                (theme::switch, theme::recolor, theme::stars).chain(),
+                (view3d::toggle, view3d::build, view3d::sync, view3d::cameras).chain(),
                 pace_updates,
                 window::take_screenshots,
             )
                 .chain(),
         )
-        .add_systems(EguiPrimaryContextPass, ui::draw);
+        .add_systems(EguiPrimaryContextPass, (ui::draw, view3d::labels).chain());
     if let Some(mode) = ScreenshotMode::from_env() {
         app.insert_resource(mode).insert_resource(WinitSettings::continuous());
     }

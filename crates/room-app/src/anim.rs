@@ -35,7 +35,7 @@ const PAPER_Z: f32 = 60.0;
 const LINGER_SECONDS: f32 = 0.7;
 
 const BUBBLE_FILL: Color = Color::WHITE;
-const BUBBLE_EDGE: Color = Color::srgb(0.886, 0.835, 0.765);
+pub(crate) const BUBBLE_EDGE: Color = Color::srgb(0.886, 0.835, 0.765);
 
 /// Per-character offset so characters don't breathe and blink in sync.
 #[derive(Component)]
