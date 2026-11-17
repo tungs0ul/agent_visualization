@@ -719,7 +719,7 @@ config file, and can remove both cleanly.
       Spaces.
 - [x] M4 Life (2026-11-17)
 - [x] M4b Office zones (2026-11-17)
-- [ ] M4c Mini mode (widget-sized, frosted background)
+- [x] M4c Mini mode, code (2026-11-17); frosted glass still to be confirmed by the user on screen
 - [ ] M4d Rooms per repository
 - [ ] M4e Waiting at the Approval desk with the card in the scene
 - [ ] M4f Camera controls: zoom, pan, pin an agent
@@ -959,3 +959,52 @@ anything surprising.
     M4e approval desk with in-scene card, M4f camera zoom/pan/pin, M8 chat.
   **Next:** user picks the next milestone (suggested: M4c mini mode, since the app is
   meant to sit in a corner while working).
+- 2026-11-17, Claude Opus 5.5: **M4c mini mode** (code done, needs a human look).
+  - `crates/room-app/src/mini.rs`: `ViewMode { mini, applied, full }` (resource),
+    `ToggleMini` message (buttons), systems `toggle` (key M), `drag` (left-drag on empty
+    space calls `Window::start_drag_move`), `apply_mode` (main thread via
+    `NonSendMarker`), `hide_new_desks`.
+  - Entering mini: remembers the full geometry, window 320×200 logical at the top-right
+    under the menu bar, no decorations, always on top, `ClearColor(Color::NONE)`,
+    `Furniture` + `Desk` entities hidden, glass on. Leaving restores all of it.
+  - The window is now always created `transparent: true` with
+    `CompositeAlphaMode::PostMultiplied`; the full view paints `BACKDROP` over it.
+  - Glass: `window-vibrancy` 0.8.1 (macOS-only dependency). `apply_liquid_glass`
+    (macOS 26, `NSGlassEffectViewStyle::Regular`, radius 18), falling back to
+    `apply_vibrancy(Popover)`. The effect view is inserted below the view's other
+    content; wgpu's CAMetalLayer is a sublayer of the same view, so Bevy should draw on
+    top. **Unverified:** Bevy screenshots can't show the composited glass (they read
+    Bevy's own frame, where the background is just transparent). If the glass covers
+    the room, try `LiquidGlassOptions::content_view` or moving the effect view.
+  - `window.json` gains `"mini": bool`; while mini, geometry isn't saved (the full
+    window's is kept) and P is ignored.
+  - UI: mini shows only permission cards (top) and a "Full" button bottom-right; the
+    full views have a "Mini" button (side panel header / ticker).
+  - Verified by screenshot: 320×200, transparent background, only characters drawn,
+    camera follows agents, no warnings.
+
+### Handover (2026-11-17, end of this session)
+
+State: all work committed on master in `~/claude-room`; 46 tests pass; clippy clean;
+plugin + marketplace validate. Not published anywhere (no GitHub repo yet).
+
+How to run: see README "Install from a clone". Dev loop: `cargo run -p room-app` +
+`AGENT_ROOM_HOOK=$PWD/target/debug/room-hook claude --plugin-dir ./plugin`.
+Visual checks without a human: screenshot mode + `scripts/replay.py` with
+`AGENT_ROOM_DIR` under `$TMPDIR` (see AGENTS.md). Scenario files used this session
+(two-session spike log, synthetic office walk-through) live in the user's
+`~/.agent-room/spike/events.jsonl`; the synthetic `office.jsonl` generator is in the
+handoff entry for M4b (recreate it: SessionStart, prompt, two Agent launches, sub-agents
+reading → web, Bash → permission → edit, hand-backs, Stop; ~3 s apart).
+
+Open items, in order:
+1. **User checks mini mode on screen** (press M or "Mini"): frosted glass visible behind
+   the characters? drag works? Fix per the note above if not.
+2. User tries Y/N and deny-with-reason live (M5 leftovers).
+3. Next milestones, user to choose: M4e (wait at Approval desk + in-scene card),
+   M4f (camera zoom/pan/pin agent), M4d (rooms per repo), M8 (chat via plugin channel).
+4. Publishing (user only): GitHub repo, replace `<owner>` in README and
+   `packaging/homebrew/agent-room.rb`, tag a release.
+
+Known gaps: macOS attention bounce not done; roster click-to-highlight not done
+(part of M4f); `agent-room` release binary is 96 MB (Bevy default features; could trim).

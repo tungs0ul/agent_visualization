@@ -12,6 +12,7 @@ use room_proto::event::ToolCall;
 use room_proto::{Decision, PermissionReply};
 
 use crate::log::{LogLine, PendingPermission, RoomLog, keyboard_target};
+use crate::mini::{ToggleMini, ViewMode};
 use crate::model::{Model, Pose, SessionState, Status};
 use crate::scene::{self, SceneChange};
 use crate::scene::WorldCamera;
@@ -26,11 +27,14 @@ const PANEL: egui::Color32 = egui::Color32::from_rgb(0xFB, 0xF7, 0xF1);
 const ALLOW: egui::Color32 = egui::Color32::from_rgb(0x3E, 0x9B, 0x5F);
 const DENY: egui::Color32 = egui::Color32::from_rgb(0xC9, 0x4F, 0x4F);
 
+#[allow(clippy::too_many_arguments)]
 pub fn draw(
     mut contexts: EguiContexts,
     mut log: ResMut<RoomLog>,
     mut model: ResMut<Model>,
     mut scene: MessageWriter<SceneChange>,
+    mode: Res<ViewMode>,
+    mut toggle_mini: MessageWriter<ToggleMini>,
     window: Single<&Window, With<PrimaryWindow>>,
     mut camera: Single<&mut Camera, With<WorldCamera>>,
     mut styled: Local<bool>,
@@ -67,10 +71,32 @@ pub fn draw(
     let RoomLog { lines, pending } = &mut *log;
     let mut picked = None;
 
-    if ctx.viewport_rect().width() >= WIDE_LAYOUT {
+    if mode.mini {
+        // Only the room and, when needed, the permission cards. A small button returns
+        // to the full view (or press M).
+        if !pending.is_empty() {
+            egui::Panel::top("permissions").show(&mut root, |ui| {
+                egui::ScrollArea::vertical()
+                    .max_height(ctx.viewport_rect().height() * 0.8)
+                    .show(ui, |ui| permission_cards(ui, pending, now, &mut answers));
+            });
+        }
+        egui::Area::new("leave-mini".into())
+            .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-8.0, -8.0))
+            .show(ctx, |ui| {
+                if ui.small_button("Full").on_hover_text("Full view (M)").clicked() {
+                    toggle_mini.write(ToggleMini);
+                }
+            });
+    } else if ctx.viewport_rect().width() >= WIDE_LAYOUT {
         egui::Panel::right("side").exact_size(SIDE_PANEL_WIDTH).show(&mut root, |ui| {
             ui.add_space(4.0);
-            picked = session_picker(ui, &model);
+            ui.horizontal(|ui| {
+                picked = session_picker(ui, &model);
+                if ui.small_button("Mini").on_hover_text("Small widget view (M)").clicked() {
+                    toggle_mini.write(ToggleMini);
+                }
+            });
             ui.separator();
             if let Some(session) = model.shown() {
                 roster(ui, session);
@@ -91,7 +117,12 @@ pub fn draw(
             let shown = model.shown().map(|session| session.id.as_str());
             let latest = lines.iter().rev().find(|line| shown.is_none_or(|s| line.session == s));
             let text = latest.map_or_else(|| session_title(&model), |line| format!("{}: {}", line.agent, line.text));
-            ui.add(egui::Label::new(text).truncate());
+            ui.horizontal(|ui| {
+                if ui.small_button("Mini").on_hover_text("Small widget view (M)").clicked() {
+                    toggle_mini.write(ToggleMini);
+                }
+                ui.add(egui::Label::new(text).truncate());
+            });
         });
     }
     if let Some(id) = picked {

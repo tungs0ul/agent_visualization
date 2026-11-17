@@ -8,11 +8,13 @@ use std::time::{Duration, Instant};
 use bevy::prelude::*;
 use bevy::render::view::window::screenshot::{Screenshot, save_to_disk};
 use bevy::window::{
-    Monitor, MonitorSelection, PrimaryMonitor, PrimaryWindow, WindowLevel, WindowMode, WindowMoved, WindowPosition,
+    CompositeAlphaMode, Monitor, MonitorSelection, PrimaryMonitor, PrimaryWindow, WindowLevel, WindowMode, WindowMoved, WindowPosition,
     WindowResized, WindowResolution,
 };
 use bevy_egui::input::EguiWantsInput;
 use serde::{Deserialize, Serialize};
+
+use crate::mini::ViewMode;
 
 /// Logical size of the corner window on first start.
 pub const START_SIZE: Vec2 = Vec2::new(420.0, 320.0);
@@ -37,6 +39,9 @@ pub struct SavedWindow {
     pub width: f32,
     pub height: f32,
     pub on_top: bool,
+    /// Start in mini mode (the geometry above is the full window's).
+    #[serde(default)]
+    pub mini: bool,
 }
 
 impl SavedWindow {
@@ -48,7 +53,7 @@ impl SavedWindow {
             .filter(|saved| saved.width >= 200.0 && saved.height >= 150.0)
     }
 
-    fn of(window: &Window) -> Option<Self> {
+    pub fn of(window: &Window) -> Option<Self> {
         let WindowPosition::At(position) = window.position else { return None };
         (window.mode == WindowMode::Windowed).then(|| Self {
             x: position.x,
@@ -56,10 +61,11 @@ impl SavedWindow {
             width: window.width(),
             height: window.height(),
             on_top: window.window_level == WindowLevel::AlwaysOnTop,
+            mini: false,
         })
     }
 
-    fn save(&self) {
+    pub fn save(&self) {
         let Some(path) = state_path() else { return };
         match serde_json::to_string(self) {
             Ok(text) => {
@@ -84,6 +90,10 @@ pub fn initial_window(saved: Option<SavedWindow>) -> Window {
         title: "Agent Room".into(),
         resolution,
         resizable: true,
+        // Always created see-through so mini mode can show the glass behind it; the
+        // full view paints an opaque background over it (`mini::apply_mode`).
+        transparent: true,
+        composite_alpha_mode: CompositeAlphaMode::PostMultiplied,
         window_level: if saved.is_none_or(|s| s.on_top) { WindowLevel::AlwaysOnTop } else { WindowLevel::Normal },
         position: saved.map_or(WindowPosition::Automatic, |s| WindowPosition::At(IVec2::new(s.x, s.y))),
         ..default()
@@ -117,8 +127,15 @@ pub fn remember_geometry(
     mut moved: MessageReader<WindowMoved>,
     mut resized: MessageReader<WindowResized>,
     window: Single<&Window, With<PrimaryWindow>>,
+    mode: Res<ViewMode>,
     mut changed_at: Local<Option<Instant>>,
 ) {
+    // The mini window's place is fixed; only the full window's geometry is remembered.
+    if mode.mini {
+        moved.clear();
+        resized.clear();
+        return;
+    }
     if moved.read().count() + resized.read().count() > 0 {
         *changed_at = Some(Instant::now());
     }
@@ -136,6 +153,7 @@ pub fn remember_geometry(
 pub fn hotkeys(
     keys: Res<ButtonInput<KeyCode>>,
     egui_input: Res<EguiWantsInput>,
+    mode: Res<ViewMode>,
     mut window: Single<&mut Window, With<PrimaryWindow>>,
 ) {
     if egui_input.wants_any_keyboard_input() {
@@ -150,7 +168,7 @@ pub fn hotkeys(
     if keys.just_pressed(KeyCode::Escape) && window.mode != WindowMode::Windowed {
         window.mode = WindowMode::Windowed;
     }
-    if keys.just_pressed(KeyCode::KeyP) {
+    if keys.just_pressed(KeyCode::KeyP) && !mode.mini {
         window.window_level = match window.window_level {
             WindowLevel::AlwaysOnTop => WindowLevel::Normal,
             _ => WindowLevel::AlwaysOnTop,

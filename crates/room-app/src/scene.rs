@@ -12,6 +12,7 @@ use bevy_prototype_lyon::prelude::*;
 use crate::anim::{
     self, Accent, Animating, Arrive, Bubble, BubbleRef, Chip, Done, Part, Phase, Place, Rest, RigOf, Station, Walk, say,
 };
+use crate::mini::Furniture;
 use crate::model::{Change, Pose, Who};
 
 // Draw order is by z: room -100..-60, characters 0..9 (their desk 5..8 in front of the
@@ -187,22 +188,24 @@ pub fn spawn_room(mut commands: Commands, font: Res<UiFont>, mut roster: ResMut<
         }),
     ));
 
-    commands.spawn((rounded(FLOOR_SIZE, 28.0, FLOOR, Some((FLOOR_EDGE, 4.0))), Transform::from_xyz(0.0, 0.0, -100.0)));
+    commands.spawn((Furniture, rounded(FLOOR_SIZE, 28.0, FLOOR, Some((FLOOR_EDGE, 4.0))), Transform::from_xyz(0.0, 0.0, -100.0)));
     // Back wall with two windows.
     let wall_height = 90.0;
     let wall_y = FLOOR_SIZE.y / 2.0 - wall_height / 2.0;
     commands.spawn((
+        Furniture,
         rounded(Vec2::new(FLOOR_SIZE.x, wall_height), 28.0, WALL, None),
         Transform::from_xyz(0.0, wall_y, -90.0),
     ));
     for x in [-150.0, 150.0] {
         commands.spawn((
+            Furniture,
             rounded(Vec2::new(150.0, 56.0), 8.0, WINDOW_GLASS, Some((WINDOW_FRAME, 6.0))),
             Transform::from_xyz(x, wall_y + 4.0, -80.0),
         ));
     }
-    commands.spawn((rounded(Vec2::new(130.0, 12.0), 6.0, DOOR_COLOR, None), Transform::from_translation(DOOR.extend(-80.0))));
-    commands.spawn((ellipse(Vec2::new(210.0, 140.0), RUG, Some((RUG_EDGE, 3.0))), MAIN_SEAT.extend(-70.0).into_transform()));
+    commands.spawn((Furniture, rounded(Vec2::new(130.0, 12.0), 6.0, DOOR_COLOR, None), Transform::from_translation(DOOR.extend(-80.0))));
+    commands.spawn((Furniture, ellipse(Vec2::new(210.0, 140.0), RUG, Some((RUG_EDGE, 3.0))), MAIN_SEAT.extend(-70.0).into_transform()));
     for zone in &ZONES {
         spawn_zone(&mut commands, zone, &font);
     }
@@ -214,7 +217,7 @@ pub fn spawn_room(mut commands: Commands, font: Res<UiFont>, mut roster: ResMut<
 
 /// A zone's rug, name and props. Props sit in the top half; agents stand in front.
 fn spawn_zone(commands: &mut Commands, zone: &Zone, font: &UiFont) {
-    let root = commands.spawn((zone.center.extend(-95.0).into_transform(), Visibility::default())).id();
+    let root = commands.spawn((Furniture, zone.center.extend(-95.0).into_transform(), Visibility::default())).id();
     let mut put = |shape: Shape, at: Vec2, z: f32| {
         commands.spawn((shape, Transform::from_translation(at.extend(z)), ChildOf(root)));
     };
@@ -587,7 +590,7 @@ fn spawn_character(commands: &mut Commands, at: Vec2, s: f32, accent: Color, key
 }
 
 fn spawn_plant(commands: &mut Commands, at: Vec2) {
-    let plant = commands.spawn((Transform::from_translation(at.extend(-60.0)), Visibility::default())).id();
+    let plant = commands.spawn((Furniture, Transform::from_translation(at.extend(-60.0)), Visibility::default())).id();
     commands.spawn((rounded(Vec2::new(34.0, 30.0), 6.0, POT, None), Transform::from_xyz(0.0, -18.0, 1.0), ChildOf(plant)));
     for (x, y, r, color) in [(-12.0, 6.0, 16.0, LEAF_DARK), (12.0, 8.0, 15.0, LEAF_DARK), (0.0, 16.0, 18.0, LEAF)] {
         commands.spawn((circle(r, color), Transform::from_xyz(x, y, 2.0), ChildOf(plant)));

@@ -7,6 +7,7 @@
 
 mod anim;
 mod log;
+mod mini;
 mod model;
 mod scene;
 mod server;
@@ -57,6 +58,8 @@ fn main() -> AppExit {
         }))
         .add_plugins((EguiPlugin::default(), ShapePlugin))
         .add_message::<SceneChange>()
+        .add_message::<mini::ToggleMini>()
+        .insert_resource(mini::ViewMode::from_saved(saved))
         .insert_resource(server)
         .insert_resource(NeedsCornerPlacement(saved.is_none()))
         .init_resource::<RoomLog>()
@@ -67,12 +70,12 @@ fn main() -> AppExit {
         .add_systems(
             Update,
             (
-                window::place_in_corner,
-                window::hotkeys,
-                window::remember_geometry,
+                (window::place_in_corner, window::hotkeys, mini::toggle, mini::drag, mini::apply_mode, window::remember_geometry)
+                    .chain(),
                 receive_events,
                 scene::apply_changes,
                 scene::apply_pending,
+                mini::hide_new_desks,
                 scene::route_agents,
                 (anim::walk, anim::leave_when_done, anim::animate_parts, anim::update_bubbles, anim::update_chips),
                 (anim::hand_over, anim::pulse),
