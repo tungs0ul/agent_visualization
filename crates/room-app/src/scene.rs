@@ -12,6 +12,7 @@ use bevy_prototype_lyon::prelude::*;
 use crate::anim::{
     self, Accent, Animating, Arrive, Bubble, BubbleRef, Chip, Done, Part, Phase, Place, Rest, RigOf, Station, Walk, say,
 };
+use crate::camera::CameraControl;
 use crate::mini::Furniture;
 use crate::model::{Change, Pose, Who};
 
@@ -345,6 +346,7 @@ pub fn follow_action(
     time: Res<Time>,
     camera: Single<(&Camera, &mut Transform, &mut Projection), With<WorldCamera>>,
     agents: Query<&Transform, (With<Agent>, Without<WorldCamera>)>,
+    control: Res<CameraControl>,
     mut animating: ResMut<Animating>,
 ) {
     let (camera, mut transform, mut projection) = camera.into_inner();
@@ -352,7 +354,11 @@ pub fn follow_action(
     let Projection::Orthographic(ortho) = &mut *projection else { return };
     let ScalingMode::AutoMin { min_width, min_height } = &mut ortho.scaling_mode else { return };
 
-    let (target_center, target_size) = if viewport.x >= FOLLOW_BELOW_WIDTH {
+    let (target_center, target_size) = if let Some((center, size)) = control.manual {
+        // The user zoomed or panned: hold that view until a double-click resets it.
+        let half_room = ((ROOM_SIZE - size) / 2.0).max(Vec2::ZERO) + size / 2.0;
+        (center.clamp(-half_room, half_room), size)
+    } else if viewport.x >= FOLLOW_BELOW_WIDTH {
         (Vec2::ZERO, ROOM_SIZE)
     } else {
         let mut min = Vec2::splat(f32::MAX);

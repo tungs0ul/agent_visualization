@@ -743,7 +743,7 @@ config file, and can remove both cleanly.
 - [x] M4c Mini mode, code (2026-11-17); frosted glass still to be confirmed by the user on screen
 - [ ] M4d Rooms per repository
 - [x] M4e Waiting at the Approval desk with the card in the scene (2026-11-17)
-- [ ] M4f Camera controls: zoom, pan, pin an agent
+- [x] M4f Camera controls: zoom, pan (2026-11-17; pinning dropped by the user)
 - [ ] M8 Chat with Claude from the app
 - [x] M9 Auto-accept mode and centre pop-ups (2026-11-17)
 - [ ] M10 Context, 5-hour and weekly limits in the app
@@ -1066,8 +1066,13 @@ Later in the session (2026-11-17):
   frame: "May I? <tool>", command, Allow/Deny with the same 300 ms guard). Answers from
   either card go through one path. Sub-agents already walk to and stay at the Approval
   desk while `Pose::Waiting`.
-- **Next in the plan:** M4f camera zoom/pan/pin, then M10 (context + limits), M4d (rooms
-  per repo), M8 (chat). The user should reinstall (`scripts/install-dev.sh`) or
+- **M4f done (without pinning, dropped by the user: agents come and go too fast):**
+  `camera.rs` — pinch or ⌘/Ctrl+scroll zooms, scroll/two-finger or left-drag pans (drag
+  only in the full view; in mini it moves the window), double-click resets to automatic
+  framing. `CameraControl.manual` holds the chosen view; `scene::follow_action` uses it
+  while set. Gestures can't be scripted here: the user should try them.
+- **Next in the plan:** M4d (rooms per repo), M8 (chat), and **M10 last** (the user
+  doesn't need context/limits yet). The user should reinstall (`scripts/install-dev.sh`) or
   `cargo run -p room-app` to get M9/M4e.
 
 Known gaps: macOS attention bounce not done; roster click-to-highlight not done

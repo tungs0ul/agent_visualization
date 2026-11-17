@@ -6,6 +6,7 @@
 //! beside or below it.
 
 mod anim;
+mod camera;
 mod log;
 mod mini;
 mod model;
@@ -70,6 +71,7 @@ fn main() -> AppExit {
         .insert_resource(NeedsCornerPlacement(saved.is_none()))
         .init_resource::<RoomLog>()
         .init_resource::<AutoAccept>()
+        .init_resource::<camera::CameraControl>()
         .init_resource::<Model>()
         .init_resource::<Roster>()
         .init_resource::<Animating>()
@@ -87,6 +89,7 @@ fn main() -> AppExit {
                 (anim::walk, anim::leave_when_done, anim::animate_parts, anim::update_bubbles, anim::update_chips),
                 (anim::hand_over, anim::pulse),
                 anim::detect_motion,
+                camera::camera_input,
                 scene::follow_action,
                 settle_permissions,
                 pace_updates,
