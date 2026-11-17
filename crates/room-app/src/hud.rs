@@ -123,7 +123,8 @@ pub fn draw(
     mut contexts: EguiContexts,
     view: Res<View3d>,
     mode: Res<crate::mini::ViewMode>,
-    model: Res<Model>,
+    mut model: ResMut<Model>,
+    mut scene: MessageWriter<crate::scene::SceneChange>,
     log: Res<RoomLog>,
     trace: Res<Trace>,
     roster: Res<Roster>,
@@ -137,6 +138,43 @@ pub fn draw(
     let Some(rect) = camera.logical_viewport_rect() else { return Ok(()) };
     let area = egui::Rect::from_min_max(egui::pos2(rect.min.x, rect.min.y), egui::pos2(rect.max.x, rect.max.y));
     let ctx = contexts.ctx_mut()?;
+
+    // Every Claude Code session sends its events here, one room each. When more than
+    // one is live, list them under the counts so the user sees them and can switch
+    // (a dot shows which ones are busy).
+    let shown_id = model.shown().map(|session| session.id.clone());
+    let live: Vec<(String, String, bool)> = model
+        .sessions()
+        .into_iter()
+        .filter(|session| !session.ended && !session.headless)
+        .map(|session| (session.id.clone(), session.name(), session.is_busy()))
+        .collect();
+    let mut picked = None;
+    if live.len() > 1 {
+        egui::Area::new("hud-sessions".into())
+            .fixed_pos(egui::pos2(area.max.x - 8.0, area.min.y + 64.0))
+            .pivot(egui::Align2::RIGHT_TOP)
+            .show(ctx, |ui| {
+                card().show(ui, |ui| {
+                    ui.label(egui::RichText::new(format!("{} Claude sessions", live.len())).small().color(DIM));
+                    for (id, name, busy) in &live {
+                        let current = shown_id.as_deref() == Some(id.as_str());
+                        let dot = if *busy { "⚡" } else { "⏸" };
+                        let text = egui::RichText::new(format!("{dot} {}", truncate(name, 24)))
+                            .color(if current { CYAN } else { egui::Color32::from_gray(210) });
+                        if ui.selectable_label(current, text).on_hover_text("Show this session's room").clicked() && !current {
+                            picked = Some(id.clone());
+                        }
+                    }
+                });
+            });
+    }
+    if let Some(id) = picked {
+        for change in model.show(&id) {
+            scene.write(crate::scene::SceneChange(change));
+        }
+    }
+
     let Some(session) = model.shown() else { return Ok(()) };
 
     // Title, top left (beside the 2D/3D switch).
