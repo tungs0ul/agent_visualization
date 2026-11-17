@@ -10,6 +10,7 @@ mod camera;
 mod log;
 mod mini;
 mod model;
+mod repo;
 mod scene;
 mod server;
 mod ui;
@@ -71,6 +72,7 @@ fn main() -> AppExit {
         .insert_resource(NeedsCornerPlacement(saved.is_none()))
         .init_resource::<RoomLog>()
         .init_resource::<AutoAccept>()
+        .init_resource::<repo::RepoCache>()
         .init_resource::<camera::CameraControl>()
         .init_resource::<Model>()
         .init_resource::<Roster>()
@@ -139,6 +141,7 @@ fn receive_events(
     mut model: ResMut<Model>,
     mut log: ResMut<RoomLog>,
     auto: Res<AutoAccept>,
+    mut repos: ResMut<repo::RepoCache>,
     mut scene: MessageWriter<SceneChange>,
 ) {
     let now = Instant::now();
@@ -147,6 +150,20 @@ fn receive_events(
         for change in model.apply(&event) {
             trace!("{change:?}");
             scene.write(SceneChange(change));
+        }
+        // Where everyone works (PLAN.md M4d): the session's repo from its cwd, each
+        // agent's from the paths its tool calls touch.
+        let who = match &event.agent {
+            AgentRef::Main => Who::Main,
+            AgentRef::Sub { id, .. } => Who::Sub(id.clone()),
+        };
+        if let Some(home) = event.cwd.as_deref().and_then(|cwd| repos.locate(std::path::Path::new(cwd))) {
+            model.set_repo(&event.session_id, &who, home, true);
+        }
+        if let EventKind::ToolStarted { tool, .. } = &event.kind
+            && let Some(repo) = repos.for_tool(tool, event.cwd.as_deref())
+        {
+            model.set_repo(&event.session_id, &who, repo, false);
         }
         let report_from = match &event.kind {
             EventKind::ReportReceived { from_agent } => model

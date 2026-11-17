@@ -10,6 +10,8 @@ use bevy::prelude::*;
 use room_proto::describe::Activity;
 use room_proto::event::{AgentRef, EventKind, RoomEvent};
 
+use crate::repo::Repo;
+
 /// What a character is doing; drives its animation.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Pose {
@@ -84,6 +86,8 @@ pub struct AgentInfo {
     /// The latest action, as shown in its speech bubble.
     pub doing: Option<String>,
     pub report: Option<String>,
+    /// The repository its latest tool call worked in.
+    pub repo: Option<Repo>,
     reported: bool,
 }
 
@@ -94,6 +98,10 @@ pub struct SessionState {
     pub main_pose: Pose,
     /// What the main agent is doing, as shown in its speech bubble.
     pub main_doing: Option<String>,
+    /// The repository of the session's working directory.
+    pub home_repo: Option<Repo>,
+    /// The repository Claude's latest tool call worked in.
+    pub main_repo: Option<Repo>,
     /// Sub-agents in the order they joined, finished ones included.
     pub agents: Vec<(String, AgentInfo)>,
     pub ended: bool,
@@ -144,6 +152,23 @@ impl Model {
         let mut sessions: Vec<_> = self.sessions.values().collect();
         sessions.sort_by_key(|session| std::cmp::Reverse(session.last_seen));
         sessions
+    }
+
+    /// Records where an agent works (PLAN.md M4d). `home` is the session's own repo.
+    pub fn set_repo(&mut self, session: &str, who: &Who, repo: Repo, home: bool) {
+        let Some(state) = self.sessions.get_mut(session) else { return };
+        if home {
+            state.home_repo.get_or_insert(repo);
+            return;
+        }
+        match who {
+            Who::Main => state.main_repo = Some(repo),
+            Who::Sub(id) => {
+                if let Some(info) = state.agent_mut(id) {
+                    info.repo = Some(repo);
+                }
+            }
+        }
     }
 
     /// Shows another session (picked by the user). Returns the changes that redraw the
@@ -300,6 +325,7 @@ fn update_sub(session: &mut SessionState, id: &str, agent_type: &str, kind: &Eve
                 task,
                 doing: None,
                 report: None,
+                repo: None,
                 reported: false,
             },
         ));

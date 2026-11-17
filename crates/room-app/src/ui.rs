@@ -338,16 +338,30 @@ fn session_picker(ui: &mut egui::Ui, model: &Model) -> Option<String> {
 
 /// Who is in the room: Claude, then each sub-agent with what it is doing.
 fn roster(ui: &mut egui::Ui, session: &SessionState) {
-    agent_row(ui, scene::MAIN_ACCENT, "Claude", session.main_pose.word(), session.main_doing.as_deref(), false);
+    // "in api · main" when an agent works outside the session's own repository.
+    let away = |repo: &Option<crate::repo::Repo>| -> Option<String> {
+        let repo = repo.as_ref()?;
+        let home = session.home_repo.as_ref().map(|home| &home.root);
+        (Some(&repo.root) != home).then(|| format!("in {}", repo.label()))
+    };
+    let main_state = match away(&session.main_repo) {
+        Some(place) => format!("{} · {place}", session.main_pose.word()),
+        None => session.main_pose.word().to_owned(),
+    };
+    agent_row(ui, scene::MAIN_ACCENT, "Claude", &main_state, session.main_doing.as_deref(), false);
     // Working agents first, then the most recent finished ones.
     let working = session.agents.iter().filter(|(_, info)| info.status != Status::Done);
     let finished = session.agents.iter().rev().filter(|(_, info)| info.status == Status::Done).take(MAX_FINISHED_ROWS);
     for (id, info) in working.chain(finished) {
         let done = info.status == Status::Done;
         let name = format!("{} {}", info.agent_type, id.chars().take(4).collect::<String>());
-        let state = if done { "done" } else { info.pose.word() };
+        let word = if done { "done" } else { info.pose.word() };
+        let state = match away(&info.repo) {
+            Some(place) => format!("{word} · {place}"),
+            None => word.to_owned(),
+        };
         let detail = if done { info.report.as_deref() } else { info.doing.as_deref().or(info.task.as_deref()) };
-        agent_row(ui, scene::accent_for(&info.agent_type), &name, state, detail, done);
+        agent_row(ui, scene::accent_for(&info.agent_type), &name, &state, detail, done);
     }
 }
 
@@ -375,6 +389,9 @@ fn egui_color(color: Color) -> egui::Color32 {
 }
 
 fn session_title(model: &Model) -> String {
+    if let Some(repo) = model.shown().and_then(|session| session.home_repo.as_ref()) {
+        return repo.label();
+    }
     match model.shown() {
         Some(session) => session.cwd.clone().unwrap_or_else(|| session.id.clone()),
         None => "Waiting for Claude Code…".to_owned(),

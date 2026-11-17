@@ -741,7 +741,7 @@ config file, and can remove both cleanly.
 - [x] M4 Life (2026-11-17)
 - [x] M4b Office zones (2026-11-17)
 - [x] M4c Mini mode, code (2026-11-17); frosted glass still to be confirmed by the user on screen
-- [ ] M4d Rooms per repository
+- [ ] M4d Rooms per repository (part 1 done 2026-11-17: repo + branch detection, shown in roster/title; part 2: separate rooms in the scene)
 - [x] M4e Waiting at the Approval desk with the card in the scene (2026-11-17)
 - [x] M4f Camera controls: zoom, pan (2026-11-17; pinning dropped by the user)
 - [ ] M8 Chat with Claude from the app
@@ -1071,8 +1071,19 @@ Later in the session (2026-11-17):
   only in the full view; in mini it moves the window), double-click resets to automatic
   framing. `CameraControl.manual` holds the chosen view; `scene::follow_action` uses it
   while set. Gestures can't be scripted here: the user should try them.
-- **Next in the plan:** M4d (rooms per repo), M8 (chat), and **M10 last** (the user
-  doesn't need context/limits yet). The user should reinstall (`scripts/install-dev.sh`) or
+- **M4d part 1 done:** `repo.rs` — `RepoCache::for_tool` finds the repo of a tool call
+  (file_path/notebook_path/path; Bash `cd X` and absolute/`~/` paths), walking up to
+  `.git` (file or dir, worktrees supported) and reading the branch from `HEAD` (detached ⇒
+  short hash), cached per directory. `Model::set_repo` stores the session's home repo
+  (from cwd) and each agent's latest repo (`AgentInfo.repo`, `main_repo`). Side panel
+  title shows "repo · branch"; roster rows add "· in other-repo · branch" when an agent
+  works outside the home repo. Verified with real repos (claude-room · main, smart_haus ·
+  master).
+- **Next:** M4d part 2 — draw a room per repo in use: a second floor area beside the
+  office (sign "repo · branch", a few desks, library/servers corners), agents whose
+  `repo` differs from the home repo walk there instead of the home zones; rooms appear
+  on first use, fade when unused; the wide camera fits all rooms. Then M8 (chat), and
+  **M10 last** (the user doesn't need context/limits yet). The user should reinstall (`scripts/install-dev.sh`) or
   `cargo run -p room-app` to get M9/M4e.
 
 Known gaps: macOS attention bounce not done; roster click-to-highlight not done
