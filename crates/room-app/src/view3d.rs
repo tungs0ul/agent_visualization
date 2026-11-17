@@ -21,7 +21,7 @@ use bevy_egui::{EguiContexts, egui};
 use crate::anim::{Accent, Animating};
 use crate::model::{Model, Pose, Who};
 use crate::scene::{Agent, Roster, WorldCamera};
-use crate::world3d::Location;
+use crate::world3d::{INBOX, Location};
 
 
 /// The robot every agent is (`tools/blender/robot.py`): 1 m tall, facing +z.
@@ -343,8 +343,6 @@ fn visitor_spot(slot: usize) -> Vec3 {
 #[derive(Component)]
 pub(crate) struct Document;
 
-/// Where documents are left: the main console's inbox.
-const INBOX: Vec3 = Vec3::new(0.75, 0.95, -0.15);
 
 /// Sub-agents with a report hand it over in person when Claude is at its desk;
 /// otherwise they leave it there as a glowing document, and Claude picks the
@@ -581,5 +579,138 @@ pub fn frame(
 }
 
 /// Where the camera looks at the whole workspace from.
-const FULL_EYE: Vec3 = Vec3::new(0.0, 9.0, 10.5);
-const FULL_LOOK: Vec3 = Vec3::new(0.0, 0.0, 0.2);
+const FULL_EYE: Vec3 = Vec3::new(0.0, 11.0, 13.5);
+const FULL_LOOK: Vec3 = Vec3::new(0.0, 0.0, -0.4);
+
+/// The hologram floating beside a robot: a picture of what it is doing right now
+/// (PLAN.md M17, "the holograms are the visualisation of its mind").
+#[derive(Component)]
+pub(crate) struct ActivityHolo {
+    /// The robot it belongs to.
+    of: Entity,
+    pose: Pose,
+    /// Seconds since it appeared (it grows in).
+    age: f32,
+}
+
+/// Which hologram shows what a robot does.
+fn holo_for(pose: Pose) -> Option<&'static str> {
+    Some(match pose {
+        Pose::Reading => "models/stations/holo_document.glb",
+        Pose::Typing => "models/stations/holo_editor.glb",
+        Pose::Terminal => "models/stations/holo_terminal.glb",
+        Pose::Web => "models/stations/holo_cards.glb",
+        Pose::Thinking => "models/stations/holo_nodes.glb",
+        Pose::Delegating | Pose::Reporting => "models/stations/holo_capsule.glb",
+        Pose::Idle | Pose::Waiting => return None,
+    })
+}
+
+/// Shows, swaps and moves the activity holograms; they appear once a robot has
+/// arrived where it works, beside its head, turned a little towards the camera.
+#[allow(clippy::type_complexity)]
+pub fn activity_holograms(
+    mut commands: Commands,
+    view: Res<View3d>,
+    time: Res<Time>,
+    assets: Res<AssetServer>,
+    characters: Query<&Pose, With<Agent>>,
+    avatars: Query<(Entity, &Avatar, &Transform), Without<ActivityHolo>>,
+    mut holos: Query<(Entity, &mut ActivityHolo, &mut Transform)>,
+) {
+    if !view.on {
+        return;
+    }
+    let mut shown: HashMap<Entity, Pose> = HashMap::new();
+    for (entity, mut holo, mut at) in &mut holos {
+        let robot = avatars.get(holo.of).ok();
+        let pose = robot.and_then(|(_, avatar, _)| characters.get(avatar.of).ok()).copied();
+        let walking = robot.is_some_and(|(_, avatar, _)| avatar.playing == Some(Act::Walk));
+        if pose != Some(holo.pose) || walking {
+            commands.entity(entity).despawn();
+            continue;
+        }
+        let Some((_, _, robot_at)) = robot else { continue };
+        shown.insert(holo.of, holo.pose);
+        holo.age += time.delta_secs();
+        let grow = (holo.age / 0.35).min(1.0);
+        let bob = 0.04 * (time.elapsed_secs() * 1.6 + (holo.of.to_bits() % 97) as f32).sin();
+        let side = robot_at.rotation * Vec3::new(0.62, 0.0, 0.15) * robot_at.scale.x;
+        at.translation = robot_at.translation + side + Vec3::Y * (0.95 * robot_at.scale.y + bob);
+        at.rotation = Quat::from_rotation_y(-0.35);
+        at.scale = Vec3::splat(grow * 0.9);
+    }
+    for (robot, avatar, _) in &avatars {
+        if shown.contains_key(&robot) || avatar.playing == Some(Act::Walk) {
+            continue;
+        }
+        let Ok(pose) = characters.get(avatar.of) else { continue };
+        let Some(file) = holo_for(*pose) else { continue };
+        commands.spawn((
+            ActivityHolo { of: robot, pose: *pose, age: 0.0 },
+            WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(file))),
+            Transform::from_scale(Vec3::ZERO),
+        ));
+    }
+}
+
+/// A spot of light a walking robot leaves on the floor; it shrinks away.
+#[derive(Component)]
+pub(crate) struct TrailDot {
+    age: f32,
+}
+
+/// How long a trail dot lasts, and how often a walking robot drops one.
+const TRAIL_LIFE: f32 = 1.4;
+const TRAIL_EVERY: f32 = 0.09;
+
+/// Walking robots leave a fading cyan light trail on the floor (PLAN.md M17).
+#[allow(clippy::too_many_arguments)]
+pub fn light_trails(
+    mut commands: Commands,
+    view: Res<View3d>,
+    time: Res<Time>,
+    avatars: Query<(&Avatar, &Transform), Without<TrailDot>>,
+    mut dots: Query<(Entity, &mut TrailDot, &mut Transform)>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut since: Local<f32>,
+    mut look: Local<Option<(Handle<Mesh>, Handle<StandardMaterial>)>>,
+) {
+    if !view.on {
+        return;
+    }
+    let dt = time.delta_secs();
+    for (entity, mut dot, mut at) in &mut dots {
+        dot.age += dt;
+        let left = 1.0 - dot.age / TRAIL_LIFE;
+        if left <= 0.0 {
+            commands.entity(entity).despawn();
+        } else {
+            at.scale = Vec3::new(left, 1.0, left);
+        }
+    }
+    *since += dt;
+    if *since < TRAIL_EVERY {
+        return;
+    }
+    *since = 0.0;
+    let (mesh, material) = look
+        .get_or_insert_with(|| {
+            (
+                meshes.add(Cylinder::new(0.09, 0.004)),
+                materials.add(StandardMaterial { base_color: Color::BLACK, emissive: LinearRgba::rgb(0.4, 2.2, 4.0), ..default() }),
+            )
+        })
+        .clone();
+    for (avatar, at) in &avatars {
+        if avatar.playing == Some(Act::Walk) {
+            commands.spawn((
+                TrailDot { age: 0.0 },
+                Mesh3d(mesh.clone()),
+                MeshMaterial3d(material.clone()),
+                Transform::from_translation(Vec3::new(at.translation.x, at.translation.y + 0.012, at.translation.z)),
+            ));
+        }
+    }
+}

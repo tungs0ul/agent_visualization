@@ -19,7 +19,7 @@ print("animations:")
 for a in gl.get("animations", []):
     times = [acc[s["input"]].get("max", [0])[0] for s in a["samplers"]]
     print(f"  {a['name']:<10} channels={len(a['channels']):<3} duration={max(times):.3f}s")
-print("materials:", [m["name"] for m in gl.get("materials", [])])
+print("materials:", [m["name"] + ("(" + m["alphaMode"] + ")" if "alphaMode" in m else "") for m in gl.get("materials", [])])
 print("nodes:", [n.get("name") for n in gl.get("nodes", [])])
 print("skins:", [(s.get("name"), len(s["joints"])) for s in gl.get("skins", [])])
 tris = 0
