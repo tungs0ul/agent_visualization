@@ -2,7 +2,7 @@
 # the user's Mac and need no code signing. Publish it in a tap repository
 # (github.com/tungs0ul/homebrew-tap, file Formula/agent-room.rb), then users run
 #   brew install tungs0ul/tap/agent-room
-# Before publishing: replace tungs0ul, point `url` at a release tag and fill in `sha256`
+# Before publishing: point `url` at a release tag and fill in `sha256`
 # (`shasum -a 256 <tarball>`).
 class AgentRoom < Formula
   desc "Watch Claude Code and its sub-agents work, and answer permission prompts"
@@ -10,7 +10,7 @@ class AgentRoom < Formula
   url "https://github.com/tungs0ul/agent_visualization/archive/refs/tags/v0.1.0.tar.gz"
   sha256 "<sha256 of the tarball>"
   license "MIT"
-  head "https://github.com/tungs0ul/agent_visualization.git", branch: "master"
+  head "https://github.com/tungs0ul/agent_visualization.git", branch: "main"
 
   depends_on "rust" => :build
   depends_on :macos
