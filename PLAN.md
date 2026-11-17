@@ -742,7 +742,7 @@ config file, and can remove both cleanly.
 - [x] M4b Office zones (2026-11-17)
 - [x] M4c Mini mode, code (2026-11-17); frosted glass still to be confirmed by the user on screen
 - [ ] M4d Rooms per repository
-- [ ] M4e Waiting at the Approval desk with the card in the scene
+- [x] M4e Waiting at the Approval desk with the card in the scene (2026-11-17)
 - [ ] M4f Camera controls: zoom, pan, pin an agent
 - [ ] M8 Chat with Claude from the app
 - [x] M9 Auto-accept mode and centre pop-ups (2026-11-17)
@@ -1059,6 +1059,16 @@ Later in the session (2026-11-17):
   early resize, leaving Bevy drawing 640×400 into a 1536×924 window).
 - Fixed: the side panel header overflowed (drop-down 296 px + Mini button), pushing the
   panel wider and leaving its old edge as a line through the text.
+
+- **M4e done:** `PendingPermission.who` records who asks; `ui::InRoom` (SystemParam)
+  maps that character to window coordinates (`Camera::world_to_viewport`), and the
+  oldest card of the shown session floats next to the character (`egui::Area`, popup
+  frame: "May I? <tool>", command, Allow/Deny with the same 300 ms guard). Answers from
+  either card go through one path. Sub-agents already walk to and stay at the Approval
+  desk while `Pose::Waiting`.
+- **Next in the plan:** M4f camera zoom/pan/pin, then M10 (context + limits), M4d (rooms
+  per repo), M8 (chat). The user should reinstall (`scripts/install-dev.sh`) or
+  `cargo run -p room-app` to get M9/M4e.
 
 Known gaps: macOS attention bounce not done; roster click-to-highlight not done
 (part of M4f); `agent-room` release binary is 96 MB (Bevy default features; could trim).

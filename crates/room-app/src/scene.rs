@@ -155,7 +155,7 @@ impl Roster {
         })
     }
 
-    fn character(&self, who: &Who) -> Option<Entity> {
+    pub fn character(&self, who: &Who) -> Option<Entity> {
         match who {
             Who::Main => self.main,
             Who::Sub(id) => self.seated.get(id).map(|seat| seat.character),

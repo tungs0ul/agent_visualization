@@ -24,6 +24,8 @@ pub struct LogLine {
 
 pub struct PendingPermission {
     pub session: String,
+    /// Who asks, to show the card next to that character.
+    pub who: crate::model::Who,
     pub agent: String,
     pub tool: ToolCall,
     pub cwd: Option<String>,

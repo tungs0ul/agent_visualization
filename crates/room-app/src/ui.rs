@@ -13,7 +13,9 @@ use room_proto::{Decision, PermissionReply};
 
 use crate::log::{AutoAccept, LogLine, PendingPermission, Question, RoomLog, keyboard_target};
 use crate::mini::{ToggleMini, ViewMode};
-use crate::model::{Model, Pose, SessionState, Status};
+use crate::model::{Model, Pose, SessionState, Status, Who};
+use crate::scene::{Agent, Roster};
+use bevy::ecs::system::SystemParam;
 use crate::scene::{self, SceneChange};
 use crate::scene::WorldCamera;
 
@@ -39,6 +41,7 @@ pub fn draw(
     mut toggle_mini: MessageWriter<ToggleMini>,
     window: Single<&Window, With<PrimaryWindow>>,
     mut camera: Single<&mut Camera, With<WorldCamera>>,
+    in_room: InRoom,
     mut styled: Local<bool>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
@@ -145,10 +148,34 @@ pub fn draw(
     let window_size = UVec2::new(window.physical_width(), window.physical_height());
     fit_camera(&mut camera, root.available_rect_before_wrap(), window.scale_factor(), window_size);
 
+    // The oldest permission card also floats next to whoever asks (PLAN.md M4e).
+    if let Some(index) = log.pending.iter().position(|card| model.shown().is_some_and(|s| s.id == card.session))
+        && let Some(at) = in_room.screen_position(&camera, &log.pending[index].who)
+    {
+        let card = &log.pending[index];
+        let enabled = card.accepts_input(now);
+        egui::Area::new("card-in-room".into())
+            .fixed_pos(egui::pos2(at.x + 36.0, at.y - 70.0))
+            .show(ctx, |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    ui.set_max_width(260.0);
+                    ui.label(egui::RichText::new(format!("May I? {}", card.tool.name)).strong());
+                    ui.add(egui::Label::new(egui::RichText::new(full_input(&card.tool)).monospace().small()).truncate());
+                    ui.horizontal(|ui| {
+                        if ui.add_enabled(enabled, colored_button("Allow", ALLOW)).clicked() {
+                            answers.push((index, Decision::Allow));
+                        }
+                        if ui.add_enabled(enabled, colored_button("Deny", DENY)).clicked() {
+                            answers.push((index, Decision::Deny));
+                        }
+                    });
+                });
+            });
+    }
     // Highest index first, so removing one doesn't shift the others.
     answers.sort_by_key(|&(index, _)| std::cmp::Reverse(index));
     answers.dedup_by_key(|&mut (index, _)| index);
-    for (index, decision) in answers {
+    for (index, decision) in answers.drain(..) {
         let pending = log.pending.remove(index);
         let reason = pending.reason.trim();
         let message = (decision == Decision::Deny)
@@ -163,6 +190,23 @@ pub fn draw(
     question_popup(ctx, &mut log, now);
     final_answer_popup(ctx, &mut log, mode.mini);
     Ok(())
+}
+
+/// Where characters are on screen, for cards drawn next to them.
+#[derive(SystemParam)]
+pub struct InRoom<'w, 's> {
+    roster: Res<'w, Roster>,
+    characters: Query<'w, 's, &'static GlobalTransform, With<Agent>>,
+    camera: Query<'w, 's, &'static GlobalTransform, With<WorldCamera>>,
+}
+
+impl InRoom<'_, '_> {
+    /// Logical window position just above the character's head.
+    fn screen_position(&self, camera: &Camera, who: &Who) -> Option<Vec2> {
+        let character = self.characters.get(self.roster.character(who)?).ok()?;
+        let camera_transform = self.camera.single().ok()?;
+        camera.world_to_viewport(camera_transform, character.translation() + Vec3::new(0.0, 60.0, 0.0)).ok()
+    }
 }
 
 /// Off: a plain button. On: amber, so it is impossible to miss (PLAN.md M9).

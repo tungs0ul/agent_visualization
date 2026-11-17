@@ -29,7 +29,7 @@ use room_proto::event::{AgentRef, EventKind};
 use crate::anim::Animating;
 use crate::log::{AutoAccept, PendingPermission, PendingQuestion, RoomLog, agent_label, always_asks, parse_questions};
 use room_proto::{Decision, PermissionReply};
-use crate::model::Model;
+use crate::model::{Model, Who};
 use crate::scene::{Roster, SceneChange};
 use crate::server::{Incoming, Server};
 use crate::window::{NeedsCornerPlacement, SavedWindow, ScreenshotMode};
@@ -168,6 +168,10 @@ fn receive_events(
             }
             (Some(reply), EventKind::PermissionAsked { tool }) => log.pending.push(PendingPermission {
                 session: event.session_id.clone(),
+                who: match &event.agent {
+                    AgentRef::Main => Who::Main,
+                    AgentRef::Sub { id, .. } => Who::Sub(id.clone()),
+                },
                 agent,
                 tool: tool.clone(),
                 cwd: event.cwd.clone(),
