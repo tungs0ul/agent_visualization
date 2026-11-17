@@ -575,8 +575,9 @@ config file, and can remove both cleanly.
 
 - [x] Plan written (2026-11-17)
 - [x] M1 Hook spike (2026-11-17)
-- [x] M2 Protocol and app skeleton (2026-11-17). Pending: user clicks Allow/Deny once
-      in a live session to confirm the full round trip (see handoff log).
+- [x] M2 Protocol and app skeleton (2026-11-17). Live round trip confirmed by the user:
+      Allow in the app ⇒ command ran; Deny ⇒ Claude got "The user denied this in Agent
+      Room."; no terminal prompt for either.
 - [ ] M3 Static room and window behavior
 - [ ] M4 Life
 - [ ] M5 Permissions
