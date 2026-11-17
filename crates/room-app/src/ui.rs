@@ -51,7 +51,7 @@ pub fn draw(
     mut panel: ResMut<PanelPrefs>,
     mut stats: ResMut<crate::stats::Stats>,
     mut styled: Local<Option<crate::theme::Look>>,
-    mut theme: ResMut<crate::theme::Theme>,
+    theme: Res<crate::theme::Theme>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
     // Panels in the room's theme (PLAN.md M14).
@@ -170,10 +170,6 @@ pub fn draw(
                 }
                 if ui.small_button("Stats").on_hover_text("This app's CPU, memory and frame rate (I)").clicked() {
                     stats.toggle();
-                }
-                let label = format!("Theme: {}", theme.choice.label());
-                if ui.small_button(label).on_hover_text("Auto, Light, Dark, Spaceship (T)").clicked() {
-                    theme.cycle();
                 }
             });
             ui.separator();

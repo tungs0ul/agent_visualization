@@ -22,6 +22,8 @@ pub enum Choice {
     Space,
 }
 
+// Switching (Auto, Light, Dark) is paused for now (PLAN.md M17); kept for later.
+#[allow(dead_code)]
 impl Choice {
     pub fn label(self) -> &'static str {
         match self {
@@ -79,7 +81,9 @@ pub struct Theme {
 
 impl Theme {
     pub fn load() -> Self {
-        let choice = path().and_then(|path| std::fs::read_to_string(path).ok()).map_or(Choice::Auto, |text| Choice::parse(&text));
+        // One look for now: the dark space style that matches the 3D workspace
+        // (PLAN.md M17). Switching (Auto, Light, Dark) is paused.
+        let choice = Choice::Space;
         Self { choice, system_dark: system_is_dark(), shown: None }
     }
 
@@ -91,18 +95,6 @@ impl Theme {
             Choice::Space => Look::Space,
         }
     }
-
-    /// Auto, Light, Dark, Spaceship, …; remembered in `~/.agent-room/theme.txt`.
-    pub fn cycle(&mut self) {
-        self.choice = self.choice.next();
-        if let Some(path) = path() {
-            let _ = std::fs::write(path, self.choice.key());
-        }
-    }
-}
-
-fn path() -> Option<std::path::PathBuf> {
-    room_proto::state_dir().map(|dir| dir.join("theme.txt"))
 }
 
 /// `defaults read -g AppleInterfaceStyle` says "Dark" in dark mode and fails in light.
@@ -172,16 +164,11 @@ fn repaint_shape(shape: &mut Shape, look: Look) {
     }
 }
 
-/// T cycles the theme; the system appearance updates Auto.
+/// The system appearance updates Auto.
 pub fn switch(
-    keys: Res<ButtonInput<KeyCode>>,
-    egui_input: Res<bevy_egui::input::EguiWantsInput>,
     mut changed: MessageReader<WindowThemeChanged>,
     mut theme: ResMut<Theme>,
 ) {
-    if keys.just_pressed(KeyCode::KeyT) && !egui_input.wants_any_keyboard_input() {
-        theme.cycle();
-    }
     if let Some(change) = changed.read().last() {
         theme.system_dark = change.theme == bevy::window::WindowTheme::Dark;
     }
