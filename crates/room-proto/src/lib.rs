@@ -9,12 +9,27 @@ pub mod describe;
 pub mod event;
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 pub const PROTOCOL_VERSION: u32 = 1;
 pub const SOCKET_NAME: &str = "room.sock";
+pub const LOCK_NAME: &str = "app.lock";
+
+const DEFAULT_PERMISSION_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// How long `room-hook` waits for an answer before Claude Code falls back to its
+/// terminal prompt: `AGENT_ROOM_PERMISSION_TIMEOUT` seconds, default 60. The app uses the
+/// same value for its countdown. Must stay well below Claude Code's hook timeout (600 s).
+pub fn permission_timeout() -> Duration {
+    std::env::var("AGENT_ROOM_PERMISSION_TIMEOUT")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .filter(|&secs| secs > 0)
+        .map_or(DEFAULT_PERMISSION_TIMEOUT, Duration::from_secs)
+}
 
 /// `~/.agent-room`, or `$AGENT_ROOM_DIR` when set (tests, multiple dev instances).
 pub fn state_dir() -> Option<PathBuf> {

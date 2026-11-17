@@ -575,9 +575,8 @@ config file, and can remove both cleanly.
 
 - [x] Plan written (2026-11-17)
 - [x] M1 Hook spike (2026-11-17)
-- [ ] M2 Protocol and app skeleton: room-proto done, room-hook forward mode done.
-      Remaining: room-app (Bevy window + socket server + egui log), replay script,
-      switch plugin hooks from `--log` to forward mode.
+- [x] M2 Protocol and app skeleton (2026-11-17). Pending: user clicks Allow/Deny once
+      in a live session to confirm the full round trip (see handoff log).
 - [ ] M3 Static room and window behavior
 - [ ] M4 Life
 - [ ] M5 Permissions
@@ -630,3 +629,45 @@ anything surprising.
   crossbeam channel, wake the app. Bevy: corner window (always on top, resizable),
   egui log panel listing parsed events. Then `scripts/replay.sh` and the hooks.json
   switch.
+- 2026-11-17, Claude Opus 5.5: M2 done.
+  - `crates/room-app` (Bevy 0.20.1, bevy_egui 0.43.1 / egui 0.36):
+    - `server.rs`: state dir 0700, `app.lock` via `File::try_lock` (second instance
+      exits with "Agent Room is already running"), stale socket removed, socket 0600,
+      accept thread + one short thread per connection, `Incoming { RoomEvent,
+      Option<ReplyHandle> }` over crossbeam, wakes Bevy through
+      `EventLoopProxyWrapper` + `WinitUserEvent::WakeUp`.
+    - **macOS gotcha:** `set_read_timeout` on an accepted Unix stream returns EINVAL
+      once the peer has closed (every fire-and-forget hook). Ignore the error and read
+      anyway; treating it as fatal silently dropped most events.
+    - `log.rs`: `RoomLog` (capped lines, pending permissions, current session) and
+      `summary()` per event. Lines are mirrored to `debug!`; run with
+      `RUST_LOG=room_app=debug` to see them in a terminal.
+    - `ui.rs`: egui 0.36 panels need a root `Ui` (`egui::Ui::new(ctx, id, UiBuilder::new()
+      .layer_id(LayerId::background()).max_rect(ctx.viewport_rect()))`), then
+      `egui::Panel::top(..).show(&mut root, ..)` / `egui::CentralPanel::default().show(&mut root, ..)`.
+      Permission cards: full input, cwd, Allow/Deny (disabled for the first 300 ms),
+      countdown; expiry note "answered in the terminal".
+    - `main.rs`: corner window 420×320 logical, always on top, resizable;
+      `WinitSettings::desktop_app()` while idle, 250 ms reactive ticks only while a
+      countdown shows. Placement uses the `PrimaryMonitor` entity once it exists.
+  - `Cargo.toml`: dev profile opt-level 1, dependencies opt-level 3 (Bevy is too slow
+    unoptimized).
+  - `scripts/replay.py <events.jsonl> [--speed N] [--session PREFIX]` pipes a recorded
+    log through `target/debug/room-hook`.
+  - Plugin hooks now run room-hook in forward mode (`"args": []`). With the app closed
+    they exit silently, so it is safe to keep the plugin loaded.
+  - Verified: replaying the interactive session (46 events) shows every event in the
+    log in order, both permission requests fall back after the timeout, idle CPU 0.0 %.
+    `screencapture` fails from this agent ("could not create image from display": no
+    Screen Recording permission), so the UI was checked through the debug log only.
+  **Next:**
+  1. User check (needs a human click): `cargo run -p room-app` in one terminal,
+     `claude --plugin-dir ~/claude-room/plugin` in another, ask for something that
+     needs permission, click Allow once and Deny once in the app. Look at the window
+     placement and layout.
+  2. Start M3 (room scene with lyon shapes: desks, main Claude, sub-agent slots;
+     hotkeys F/P/Esc; window.json; agent tracking keyed by `agent_id`, using
+     `ToolFinished.launched.agent_id` to link delegations, ignore `SubagentStopped` for
+     agents never started).
+  Small known gaps: "Got the report from helper a7f0" doesn't know the agent type yet
+  (M3 agent tracking fixes it); no Y/N keys yet (M5).

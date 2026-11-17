@@ -20,9 +20,8 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use room_proto::{HookEnvelope, PermissionReply, SOCKET_NAME};
+use room_proto::{HookEnvelope, PermissionReply, SOCKET_NAME, permission_timeout};
 
-const DEFAULT_PERMISSION_TIMEOUT: Duration = Duration::from_secs(60);
 const WRITE_TIMEOUT: Duration = Duration::from_secs(1);
 
 fn main() -> ExitCode {
@@ -94,16 +93,6 @@ fn forward(raw: &str) -> Result<(), String> {
     let reply: PermissionReply = serde_json::from_str(reply.trim()).map_err(|e| format!("reply JSON: {e}"))?;
     let mut stdout = io::stdout().lock();
     writeln!(stdout, "{}", reply.hook_output()).map_err(|e| format!("stdout: {e}"))
-}
-
-/// `AGENT_ROOM_PERMISSION_TIMEOUT` in seconds, default 60. Must stay well below the
-/// hook timeout Claude Code applies (600 s by default).
-fn permission_timeout() -> Duration {
-    std::env::var("AGENT_ROOM_PERMISSION_TIMEOUT")
-        .ok()
-        .and_then(|s| s.parse::<u64>().ok())
-        .filter(|&secs| secs > 0)
-        .map_or(DEFAULT_PERMISSION_TIMEOUT, Duration::from_secs)
 }
 
 /// Wraps the raw hook JSON with a timestamp and appends it as a single line.

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/room-hook", "crates/room-proto"]
+members = ["crates/room-app", "crates/room-hook", "crates/room-proto"]
 
 [workspace.package]
 version = "0.1.0"
@@ -19,3 +19,10 @@ lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
+
+# Bevy is unusably slow unoptimized; keep our own code fast to rebuild.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
