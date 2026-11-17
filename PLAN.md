@@ -797,7 +797,16 @@ User: "read, edit is allow, doing anything in tmp is allow, git push need to ask
   allow only simple commands whose path arguments are all inside tmp.
 - `git push` already asks (`log::ALWAYS_ASK`).
 
-### M14: Themes, light and dark mode (requested 2026-11-17, not started)
+### M14: Themes, light and dark mode (requested 2026-11-17, done 2026-11-17)
+
+Built (`theme.rs`): Auto / Light / Dark / Spaceship, T or the header button,
+kept in `~/.agent-room/theme.txt`. The room is still spawned in Light colours;
+`theme::recolor` maps every Light colour in `PALETTE` to the current theme (new
+shapes and texts as they appear, everything on a switch), alpha kept. White is
+deliberately not in the table (bubbles, paper). Spaceship adds stars
+(`theme::stars`). egui panels use `theme::visuals`. Not themed yet: the 3D view.
+
+Original notes:
 
 User: "light mode, dark mode, theme switching, and add another theme which is
 futuristic in a space ship".
@@ -808,7 +817,32 @@ futuristic in a space ship".
   desks, a window with stars; same layout and zones so nothing else changes.
 - 2D first (the current lyon shapes); a theme only changes colours and props.
 
-### M15: 3D room (requested 2026-11-17, research only)
+### M15: 3D room (requested 2026-11-17, first version 2026-11-17)
+
+Built (`view3d.rs`), 3 key or the 2D/3D button top left of the room:
+- The 2D room stays the source of truth. Each 2D character and desk gets a 3D
+  stand-in that copies its position (100 room units = 1 m); poses map to animations
+  (Idle, Work, Walk, Wave). The 2D camera is switched off while 3D is on.
+- Base after the Kenney Space Station Kit sample (user's choice): tiles of 1.5 m,
+  raised floor (top at y = 0), back and side walls with windows/banners, pipes,
+  scaffolding, props per zone, rails, stairs at the door, rocks outside.
+- Claude: KayKit character (`assets/models/kaykit`), tinted orange. Sub-agents: a
+  random KayKit Adventurer (user's request). Adventurer files have no animations;
+  the shared `Rig_Medium_*.glb` clips play once `prepare_avatar` adds an
+  `AnimationPlayer` on `Rig_Medium` and tags each bone with
+  `AnimationTargetId::from_names(path)` + `AnimatedBy`.
+- Kenney Space Kit models are exported with their root at (2, 0, 1.5);
+  `scene_child` moves them back.
+- Assets load from the checkout (`AssetPlugin.file_path` = `CARGO_MANIFEST_DIR/../../assets`);
+  a binary installed elsewhere without the checkout has no 3D models. To do:
+  embed them or install them to `~/.agent-room/assets`.
+- Cost: the first switch to 3D compiles shaders (several seconds); in 3D the app
+  redraws at 30 fps all the time (animations). 2D stays cheap.
+- `AGENT_ROOM_VIEW3D=1` starts in 3D (screenshot tests).
+- Next: speech bubbles in 3D (now egui labels), theme-aware lighting, walking
+  around props, characters sitting on chairs.
+
+Original notes:
 
 User: "does bevy support 3d? and can we do 3d? and support switching between 2d and 3d".
 - Bevy has a full 3D renderer (PBR materials, lights, shadows, glTF scenes and
@@ -954,8 +988,8 @@ config file, and can remove both cleanly.
 - [x] M12 Hide/show the side panel (2026-11-17; needs a look on screen)
 - [x] M11 Own CPU/RAM/FPS overlay (2026-11-17; needs a look on screen)
 - [x] M13 Permission rules as part of Auto-accept (2026-11-17)
-- [ ] M14 Themes: light, dark, spaceship
-- [ ] M15 3D room (researched)
+- [x] M14 Themes: light, dark, spaceship (2026-11-17)
+- [x] M15 3D station view, first version (2026-11-17; see M15 "Next")
 - [ ] M16 Custom themes from the user's models
 - [x] M5 Permissions (2026-11-17; user still to try Y/N and a deny reason live)
 - [ ] M6 Polish

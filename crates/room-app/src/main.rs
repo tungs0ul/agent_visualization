@@ -42,6 +42,8 @@ use crate::window::{NeedsCornerPlacement, SavedWindow, ScreenshotMode};
 
 /// Redraw rate while characters move (about 30 fps: smooth enough, half the power of 60).
 const FRAME: Duration = Duration::from_millis(33);
+/// Redraw rate for animations while the window is not focused.
+const UNFOCUSED_FRAME: Duration = Duration::from_millis(100);
 /// Redraw rate while only a permission countdown changes.
 const COUNTDOWN_TICK: Duration = Duration::from_millis(250);
 
@@ -323,7 +325,9 @@ fn pace_updates(
     *settings = match wanted {
         Some(every) => WinitSettings {
             focused_mode: UpdateMode::reactive(every),
-            unfocused_mode: UpdateMode::reactive_low_power(every),
+            // Mostly the app sits beside the terminal, unfocused: 10 fps is enough to
+            // see what happens and costs a third of 30 fps (the Mac ran hot).
+            unfocused_mode: UpdateMode::reactive_low_power(every.max(UNFOCUSED_FRAME)),
         },
         None => WinitSettings::desktop_app(),
     };

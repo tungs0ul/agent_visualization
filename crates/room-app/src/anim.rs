@@ -527,9 +527,17 @@ pub fn update_bubbles(
             1.0 - (1.0 - BUBBLE_DIM_ALPHA) * ((bubble.age - BUBBLE_FRESH) / 0.5).min(1.0)
         };
 
+        // Only write when something changed: any write re-shapes the text, and doing
+        // that for every bubble 30 times a second cost a third of a CPU core.
         if let Ok((mut text, mut color)) = labels.get_mut(bubble.label) {
-            text.0 = bubble.text.chars().take(bubble.revealed.ceil() as usize).collect();
-            color.0 = TEXT.with_alpha(alpha);
+            let shown: String = bubble.text.chars().take(bubble.revealed.ceil() as usize).collect();
+            if text.0 != shown {
+                text.0 = shown;
+            }
+            let wanted = TEXT.with_alpha(alpha);
+            if color.0 != wanted {
+                color.0 = wanted;
+            }
         }
         // Sized for the whole sentence up front, so it doesn't grow while typing.
         if starting || alpha < 1.0 {
