@@ -831,3 +831,17 @@ anything surprising.
     "request attention" (needs the winit window via `bevy::winit::WINIT_WINDOWS`, a
     main-thread `thread_local`, so a system with `NonSendMarker`).
   **Next:** step 3: session picker + roster list.
+- 2026-11-17, Claude Opus 5.5: Step 3 done (session picker + roster list).
+  - Model: `sessions()` (most recent first, by an event counter), `show(id)` (returns
+    ShowSession + replay changes), `SessionState::{name(), is_busy(), ended,
+    main_doing}`, `Pose::word()`. Test added.
+  - Side panel (wide layout): session drop-down when there are 2+ sessions
+    ("smart_haus · working"), roster list (painted color dot, name, status word,
+    current action / task / report; working agents first, last 4 finished ones
+    faded), then permission cards, then the log.
+  - Log lines and permission cards carry their session; the log and the ticker show
+    only the viewed session. Log lines are single `LayoutJob` labels that break
+    anywhere (long paths used to push the panel wider). Don't use `ui.indent` in the
+    panel: it draws a guide line.
+  - egui's default font has no "●"; draw dots with the painter.
+  **Next:** step 4: M7 distribution.

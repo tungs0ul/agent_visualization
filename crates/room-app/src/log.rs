@@ -17,11 +17,13 @@ pub const MAX_LINES: usize = 500;
 pub const INPUT_GUARD: Duration = Duration::from_millis(300);
 
 pub struct LogLine {
+    pub session: String,
     pub agent: String,
     pub text: String,
 }
 
 pub struct PendingPermission {
+    pub session: String,
     pub agent: String,
     pub tool: ToolCall,
     pub cwd: Option<String>,
@@ -52,14 +54,14 @@ pub struct RoomLog {
 impl RoomLog {
     pub fn push(&mut self, event: &RoomEvent) {
         if let Some(text) = summary(&event.kind) {
-            self.note(agent_label(&event.agent), text);
+            self.note(&event.session_id, agent_label(&event.agent), text);
         }
     }
 
-    pub fn note(&mut self, agent: String, text: String) {
+    pub fn note(&mut self, session: &str, agent: String, text: String) {
         // Mirrors the on-screen log; `RUST_LOG=room_app=debug` shows it in the terminal.
         debug!("{agent}: {text}");
-        self.lines.push_back(LogLine { agent, text });
+        self.lines.push_back(LogLine { session: session.to_owned(), agent, text });
         while self.lines.len() > MAX_LINES {
             self.lines.pop_front();
         }

@@ -138,12 +138,17 @@ fn receive_events(
             _ => None,
         };
         match report_from {
-            Some(sender) => log.note(agent_label(&event.agent), format!("Got the report from {}", agent_label(&sender))),
+            Some(sender) => log.note(
+                &event.session_id,
+                agent_label(&event.agent),
+                format!("Got the report from {}", agent_label(&sender)),
+            ),
             None if internal_helper => {}
             None => log.push(&event),
         }
         if let (Some(reply), EventKind::PermissionAsked { tool }) = (reply, &event.kind) {
             log.pending.push(PendingPermission {
+                session: event.session_id.clone(),
                 agent: agent_label(&event.agent),
                 tool: tool.clone(),
                 cwd: event.cwd.clone(),
@@ -175,7 +180,7 @@ fn settle_permissions(mut log: ResMut<RoomLog>) {
             continue;
         };
         let card = log.pending.remove(index);
-        log.note(card.agent, format!("{}: {outcome}", card.tool.name));
+        log.note(&card.session, card.agent, format!("{}: {outcome}", card.tool.name));
     }
 }
 

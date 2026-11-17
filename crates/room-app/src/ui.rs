@@ -12,13 +12,16 @@ use room_proto::event::ToolCall;
 use room_proto::{Decision, PermissionReply};
 
 use crate::log::{LogLine, PendingPermission, RoomLog, keyboard_target};
-use crate::model::Model;
+use crate::model::{Model, Pose, SessionState, Status};
+use crate::scene::{self, SceneChange};
 use crate::scene::WorldCamera;
 
 const DENY_MESSAGE: &str = "The user denied this in Agent Room.";
 /// From this logical width on, the log gets its own side panel.
 const WIDE_LAYOUT: f32 = 700.0;
 const SIDE_PANEL_WIDTH: f32 = 320.0;
+/// Finished sub-agents kept in the roster list.
+const MAX_FINISHED_ROWS: usize = 4;
 const PANEL: egui::Color32 = egui::Color32::from_rgb(0xFB, 0xF7, 0xF1);
 const ALLOW: egui::Color32 = egui::Color32::from_rgb(0x3E, 0x9B, 0x5F);
 const DENY: egui::Color32 = egui::Color32::from_rgb(0xC9, 0x4F, 0x4F);
@@ -26,7 +29,8 @@ const DENY: egui::Color32 = egui::Color32::from_rgb(0xC9, 0x4F, 0x4F);
 pub fn draw(
     mut contexts: EguiContexts,
     mut log: ResMut<RoomLog>,
-    model: Res<Model>,
+    mut model: ResMut<Model>,
+    mut scene: MessageWriter<SceneChange>,
     window: Single<&Window, With<PrimaryWindow>>,
     mut camera: Single<&mut Camera, With<WorldCamera>>,
     mut styled: Local<bool>,
@@ -61,14 +65,19 @@ pub fn draw(
         });
     }
     let RoomLog { lines, pending } = &mut *log;
+    let mut picked = None;
 
     if ctx.viewport_rect().width() >= WIDE_LAYOUT {
         egui::Panel::right("side").exact_size(SIDE_PANEL_WIDTH).show(&mut root, |ui| {
             ui.add_space(4.0);
-            ui.label(egui::RichText::new(session_title(&model)).strong());
+            picked = session_picker(ui, &model);
             ui.separator();
+            if let Some(session) = model.shown() {
+                roster(ui, session);
+                ui.separator();
+            }
             permission_cards(ui, pending, now, &mut answers);
-            event_log(ui, lines);
+            event_log(ui, lines, model.shown().map(|session| session.id.as_str()));
         });
     } else {
         if !pending.is_empty() {
@@ -79,10 +88,16 @@ pub fn draw(
             });
         }
         egui::Panel::bottom("ticker").show(&mut root, |ui| {
-            let latest = lines.back();
+            let shown = model.shown().map(|session| session.id.as_str());
+            let latest = lines.iter().rev().find(|line| shown.is_none_or(|s| line.session == s));
             let text = latest.map_or_else(|| session_title(&model), |line| format!("{}: {}", line.agent, line.text));
             ui.add(egui::Label::new(text).truncate());
         });
+    }
+    if let Some(id) = picked {
+        for change in model.show(&id) {
+            scene.write(SceneChange(change));
+        }
     }
     let window_size = UVec2::new(window.physical_width(), window.physical_height());
     fit_camera(&mut camera, root.available_rect_before_wrap(), window.scale_factor(), window_size);
@@ -100,9 +115,78 @@ pub fn draw(
             Decision::Allow => "Allowed",
             Decision::Deny => "Denied",
         };
-        log.note(pending.agent, format!("{verb} {}", pending.tool.describe().1));
+        log.note(&pending.session, pending.agent, format!("{verb} {}", pending.tool.describe().1));
     }
     Ok(())
+}
+
+/// The shown session's name; a drop-down to switch when several sessions are known.
+fn session_picker(ui: &mut egui::Ui, model: &Model) -> Option<String> {
+    let sessions = model.sessions();
+    let title = session_title(model);
+    if sessions.len() < 2 {
+        ui.label(egui::RichText::new(title).strong());
+        return None;
+    }
+    let shown = model.shown().map(|session| session.id.as_str());
+    let mut picked = None;
+    egui::ComboBox::from_id_salt("session")
+        .selected_text(egui::RichText::new(title).strong())
+        .width(SIDE_PANEL_WIDTH - 24.0)
+        .show_ui(ui, |ui| {
+            for session in sessions {
+                let state = if session.ended {
+                    "ended"
+                } else if session.is_busy() {
+                    "working"
+                } else {
+                    "idle"
+                };
+                let label = format!("{}  ·  {state}", session.name());
+                if ui.selectable_label(shown == Some(session.id.as_str()), label).clicked() {
+                    picked = Some(session.id.clone());
+                }
+            }
+        });
+    picked
+}
+
+/// Who is in the room: Claude, then each sub-agent with what it is doing.
+fn roster(ui: &mut egui::Ui, session: &SessionState) {
+    agent_row(ui, scene::MAIN_ACCENT, "Claude", session.main_pose.word(), session.main_doing.as_deref(), false);
+    // Working agents first, then the most recent finished ones.
+    let working = session.agents.iter().filter(|(_, info)| info.status != Status::Done);
+    let finished = session.agents.iter().rev().filter(|(_, info)| info.status == Status::Done).take(MAX_FINISHED_ROWS);
+    for (id, info) in working.chain(finished) {
+        let done = info.status == Status::Done;
+        let name = format!("{} {}", info.agent_type, id.chars().take(4).collect::<String>());
+        let state = if done { "done" } else { info.pose.word() };
+        let detail = if done { info.report.as_deref() } else { info.doing.as_deref().or(info.task.as_deref()) };
+        agent_row(ui, scene::accent_for(&info.agent_type), &name, state, detail, done);
+    }
+}
+
+fn agent_row(ui: &mut egui::Ui, accent: Color, name: &str, state: &str, detail: Option<&str>, faded: bool) {
+    let accent = egui_color(accent);
+    let strong = if faded { ui.visuals().weak_text_color() } else { ui.visuals().strong_text_color() };
+    ui.horizontal(|ui| {
+        let (dot, _) = ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
+        ui.painter().circle_filled(dot.center(), 5.0, accent);
+        ui.label(egui::RichText::new(name).color(strong).strong());
+        let state_color = if state == Pose::Waiting.word() { DENY } else { ui.visuals().weak_text_color() };
+        ui.label(egui::RichText::new(state).color(state_color).small());
+    });
+    if let Some(detail) = detail {
+        ui.horizontal(|ui| {
+            ui.add_space(22.0);
+            ui.add(egui::Label::new(egui::RichText::new(detail).small().weak()).truncate());
+        });
+    }
+}
+
+fn egui_color(color: Color) -> egui::Color32 {
+    let srgba = color.to_srgba();
+    egui::Color32::from_rgb((srgba.red * 255.0) as u8, (srgba.green * 255.0) as u8, (srgba.blue * 255.0) as u8)
 }
 
 fn session_title(model: &Model) -> String {
@@ -157,16 +241,23 @@ fn colored_button(text: &str, fill: egui::Color32) -> egui::Button<'_> {
     egui::Button::new(egui::RichText::new(text).color(egui::Color32::WHITE).strong()).fill(fill)
 }
 
-fn event_log(ui: &mut egui::Ui, lines: &VecDeque<LogLine>) {
+/// The shown session's log. Each line is one wrapped label that may break anywhere:
+/// long paths have no spaces and would otherwise widen the panel.
+fn event_log(ui: &mut egui::Ui, lines: &VecDeque<LogLine>, session: Option<&str>) {
+    let strong = ui.visuals().strong_text_color();
+    let normal = ui.visuals().text_color();
+    let font = egui::TextStyle::Body.resolve(ui.style());
     egui::ScrollArea::vertical()
         .stick_to_bottom(true)
         .auto_shrink(false)
         .show(ui, |ui| {
-            for line in lines {
-                ui.horizontal_wrapped(|ui| {
-                    ui.label(egui::RichText::new(&line.agent).strong());
-                    ui.label(&line.text);
-                });
+            let width = ui.available_width();
+            for line in lines.iter().filter(|line| session.is_none_or(|s| line.session == s)) {
+                let mut job = egui::text::LayoutJob::default();
+                job.append(&line.agent, 0.0, egui::TextFormat::simple(font.clone(), strong));
+                job.append(&line.text, 8.0, egui::TextFormat::simple(font.clone(), normal));
+                job.wrap = egui::text::TextWrapping { max_width: width, break_anywhere: true, ..default() };
+                ui.label(job);
             }
         });
 }

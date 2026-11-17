@@ -24,6 +24,22 @@ pub enum Pose {
     Waiting,
 }
 
+impl Pose {
+    /// One word for lists: what the character is doing.
+    pub fn word(self) -> &'static str {
+        match self {
+            Pose::Idle => "idle",
+            Pose::Thinking => "thinking",
+            Pose::Reading => "reading",
+            Pose::Typing => "working",
+            Pose::Web => "on the web",
+            Pose::Delegating => "delegating",
+            Pose::Reporting => "reporting",
+            Pose::Waiting => "needs your OK",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Status {
     Working,
@@ -72,13 +88,31 @@ pub struct SessionState {
     pub id: String,
     pub cwd: Option<String>,
     pub main_pose: Pose,
+    /// What the main agent is doing, as shown in its speech bubble.
+    pub main_doing: Option<String>,
     /// Sub-agents in the order they joined, finished ones included.
     pub agents: Vec<(String, AgentInfo)>,
+    pub ended: bool,
     /// Tasks handed out with the `Agent` tool, by sub-agent id, until the agent shows up.
     briefs: HashMap<String, String>,
+    /// Order of last activity across sessions (higher is more recent).
+    last_seen: u64,
 }
 
 impl SessionState {
+    /// Something is going on: Claude or a sub-agent isn't idle or done.
+    pub fn is_busy(&self) -> bool {
+        self.main_pose != Pose::Idle || self.agents.iter().any(|(_, info)| info.status != Status::Done)
+    }
+
+    /// The project folder name, or the session id when there is no cwd.
+    pub fn name(&self) -> String {
+        self.cwd
+            .as_deref()
+            .and_then(|cwd| cwd.rsplit('/').find(|part| !part.is_empty()))
+            .map_or_else(|| self.id.chars().take(8).collect(), str::to_owned)
+    }
+
     pub fn agent(&self, id: &str) -> Option<&AgentInfo> {
         self.agents.iter().find(|(agent_id, _)| agent_id == id).map(|(_, info)| info)
     }
@@ -93,9 +127,29 @@ pub struct Model {
     sessions: HashMap<String, SessionState>,
     /// The session the room shows.
     shown: Option<String>,
+    events_seen: u64,
 }
 
 impl Model {
+    /// All sessions, most recently active first.
+    pub fn sessions(&self) -> Vec<&SessionState> {
+        let mut sessions: Vec<_> = self.sessions.values().collect();
+        sessions.sort_by_key(|session| std::cmp::Reverse(session.last_seen));
+        sessions
+    }
+
+    /// Shows another session (picked by the user). Returns the changes that redraw the
+    /// room for it; nothing if it is unknown or already shown.
+    pub fn show(&mut self, session_id: &str) -> Vec<Change> {
+        if self.shown.as_deref() == Some(session_id) || !self.sessions.contains_key(session_id) {
+            return Vec::new();
+        }
+        self.shown = Some(session_id.to_owned());
+        let mut changes = vec![Change::ShowSession];
+        changes.extend(self.replay_shown());
+        changes
+    }
+
     pub fn shown(&self) -> Option<&SessionState> {
         self.shown.as_ref().and_then(|id| self.sessions.get(id))
     }
@@ -125,6 +179,9 @@ impl Model {
         if event.cwd.is_some() {
             session.cwd = event.cwd.clone();
         }
+        self.events_seen += 1;
+        session.last_seen = self.events_seen;
+        session.ended = matches!(event.kind, EventKind::SessionEnded { .. });
         update_session(session, event, &mut changes);
 
         // The room follows one session: the first one seen, until the user starts or
@@ -183,6 +240,7 @@ fn update_session(session: &mut SessionState, event: &RoomEvent, changes: &mut V
                 changes.push(Change::Pose { who: Who::Main, pose });
             }
             if let Some(line) = line {
+                session.main_doing = Some(line.clone());
                 changes.push(Change::Say { who: Who::Main, line });
             }
         }
@@ -412,6 +470,23 @@ mod tests {
         assert!(model.apply(&ask).contains(&Change::Pose { who: Who::Main, pose: Pose::Waiting }));
         let done = event("s", None, json!({ "hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_use_id": "t" }));
         assert_eq!(model.apply(&done), vec![Change::Pose { who: Who::Main, pose: Pose::Thinking }]);
+    }
+
+    #[test]
+    fn sessions_are_listed_by_recent_activity_and_can_be_picked() {
+        let mut model = Model::default();
+        model.apply(&event("s1", None, json!({ "hook_event_name": "SessionStart", "cwd": "/Users/me/smart_haus" })));
+        model.apply(&sub_tool("s2", "a1"));
+        let order: Vec<_> = model.sessions().iter().map(|s| s.id.clone()).collect();
+        assert_eq!(order, ["s2", "s1"]);
+        assert_eq!(model.sessions()[1].name(), "smart_haus");
+        assert!(model.sessions()[0].is_busy());
+
+        assert!(model.show("s1").is_empty(), "already shown");
+        let changes = model.show("s2");
+        assert_eq!(changes[0], Change::ShowSession);
+        assert!(changes.iter().any(|c| matches!(c, Change::Joined { id, .. } if id == "a1")));
+        assert!(model.show("nope").is_empty());
     }
 
     #[test]
