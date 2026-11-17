@@ -17,6 +17,7 @@ mod server;
 mod stats;
 mod theme;
 mod view3d;
+mod world3d;
 mod ui;
 mod window;
 
@@ -115,7 +116,7 @@ fn main() -> AppExit {
                 settle_permissions,
                 stats::measure,
                 (theme::switch, theme::recolor, theme::stars).chain(),
-                (view3d::toggle, view3d::build, view3d::sync, view3d::cameras).chain(),
+                (view3d::toggle, view3d::build, view3d::sync, view3d::cameras, world3d::pulse).chain(),
                 pace_updates,
                 window::take_screenshots,
             )

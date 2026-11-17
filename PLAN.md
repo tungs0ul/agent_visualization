@@ -856,6 +856,44 @@ User: "does bevy support 3d? and can we do 3d? and support switching between 2d 
   Base Characters + Universal Animation Library (quaternius.com); KayKit Space Base
   Bits and Furniture Bits (kaylousberg.itch.io). Check each pack's page before use.
 
+### M17: Agentverse, a 3D autonomous workspace (requested 2026-11-17, in progress)
+
+The user's direction (with a reference image: a neon-lit space HQ, cute white robots
+with dark visors and glowing blue eyes): the 3D world becomes the main view, one look
+only (no theme switching for now; "just make this one good"). Movement shows the real
+execution trace, not busy-looking animation. Stays in Rust/Bevy (section 2); the
+React Three Fiber suggestion in the user's notes does not apply.
+
+Decisions (user, 2026-11-17): 2D room stays, switchable with the 3D button; mini mode
+always uses 2D (cheap). Robots are modelled, rigged and animated by a Blender Python
+script kept in the repo (`tools/blender/robot.py` → `assets/models/robot/robot.glb`).
+
+One shared workspace, five locations (agents move freely between them):
+
+| Location | What happens | Tools / events |
+|---|---|---|
+| Main desk (centre, round platform with rings) | main agent thinks, plans, coordinates | prompt, thinking, `Agent` delegation |
+| Bookshelf | retrieve and read files | Read, Grep, Glob, LS, WebFetch, WebSearch |
+| Processing lab (glass cylinders) | run scripts and programs | Bash, MCP tools |
+| Writing desk (holo screens) | create or edit files | Edit, Write, NotebookEdit |
+| Handover station (round pad) | sub-agent returns results to the main agent | sub-agent report |
+
+Events → animation: tool start ⇒ walk to its location and work there; sub-agent
+start ⇒ a new robot appears and the main agent hands it a glowing data capsule;
+sub-agent done ⇒ it walks to the handover station, a capsule travels to the main
+agent; turn end ⇒ back to the main desk. Permission waits show at the robot.
+
+UI (egui, dark glass style): top bar (title, agent count, active count, elapsed),
+right "Activity flow" (the log, restyled), bottom execution timeline (Reading →
+Research → Processing → Writing with done/running/pending), click a robot for its task,
+tools and history. Glowing floor paths between locations; bloom on emissive parts.
+
+Phases: (1) robot model + animations in Blender; (2) the workspace: layout, neon
+materials, bloom, space backdrop; (3) event-driven movement in 3D (own routing from
+the model's tool events, not copying 2D positions); (4) capsule hand-over and glowing
+paths; (5) UI panels; (6) power: 30 fps focused / 10 unfocused, 0 when idle; check
+the bloom cost.
+
 ### M16: Custom themes from the user's own models (requested 2026-11-17, not started)
 
 User: "allow user to do custom theme, like if they want they can create anime theme,
@@ -990,7 +1028,8 @@ config file, and can remove both cleanly.
 - [x] M13 Permission rules as part of Auto-accept (2026-11-17)
 - [x] M14 Themes: light, dark, spaceship (2026-11-17)
 - [x] M15 3D station view, first version (2026-11-17; see M15 "Next")
-- [ ] M16 Custom themes from the user's models
+- [ ] M16 Custom themes from the user's models (paused: one look for now, see M17)
+- [ ] M17 Agentverse 3D workspace (phases 1-6)
 - [x] M5 Permissions (2026-11-17; user still to try Y/N and a deny reason live)
 - [ ] M6 Polish
 - [x] M7 Distribution, code side (2026-11-17); publishing left to the user
