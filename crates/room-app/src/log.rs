@@ -73,10 +73,70 @@ pub struct AutoAccept(pub bool);
 /// Commands that still ask even with auto-accept on: hard to undo or outward-facing.
 const ALWAYS_ASK: [&str; 8] =
     ["rm -rf", "rm -fr", "git push", "git reset --hard", "sudo ", "mkfs", "dd if=", "git clean -f"];
+/// Of those, the ones that ask even inside a temporary folder (PLAN.md M13).
+const ASK_EVEN_IN_TMP: [&str; 2] = ["git push", "sudo "];
+/// Shell syntax that makes a command too hard to judge by its words: chaining, pipes,
+/// redirects, substitutions, home and parent paths, escapes.
+const UNCLEAR_SHELL: [&str; 13] = [";", "&", "|", "<", ">", "`", "$", "~", "..", "\\", "(", "{", "\n"];
 
-pub fn always_asks(tool: &ToolCall) -> bool {
+/// Auto-accept rules (PLAN.md M13, the user's words: "read, edit is allow, doing
+/// anything in tmp is allow, git push need to ask"). Read and Edit tools never match.
+pub fn always_asks(tool: &ToolCall, cwd: Option<&str>) -> bool {
+    always_asks_with(tool, cwd, &tmp_roots())
+}
+
+fn always_asks_with(tool: &ToolCall, cwd: Option<&str>, tmp: &[String]) -> bool {
     let Some(command) = tool.input.get("command").and_then(|v| v.as_str()) else { return false };
-    ALWAYS_ASK.iter().any(|pattern| command.contains(pattern))
+    if !ALWAYS_ASK.iter().any(|pattern| command.contains(pattern)) {
+        return false;
+    }
+    ASK_EVEN_IN_TMP.iter().any(|pattern| command.contains(pattern)) || !only_touches_tmp(command, cwd, tmp)
+}
+
+/// The temporary folders: `/tmp`, `$TMPDIR`, and their `/private` real paths on macOS.
+fn tmp_roots() -> Vec<String> {
+    let mut roots = vec!["/tmp".to_owned(), "/private/tmp".to_owned()];
+    if let Ok(dir) = std::env::var("TMPDIR") {
+        let dir = dir.trim_end_matches('/').to_owned();
+        if dir.starts_with('/') && dir.len() > 1 {
+            roots.push(format!("/private{dir}"));
+            roots.push(dir);
+        }
+    }
+    roots
+}
+
+fn inside(path: &str, roots: &[String]) -> bool {
+    roots.iter().any(|root| path.strip_prefix(root.as_str()).is_some_and(|rest| rest.len() > 1 && rest.starts_with('/')))
+}
+
+/// True when the command is one simple command whose every argument is a path strictly
+/// inside a temporary folder (or a relative one while the working folder is there).
+/// Anything unclear counts as outside.
+fn only_touches_tmp(command: &str, cwd: Option<&str>, tmp: &[String]) -> bool {
+    let mut command = command.to_owned();
+    // `tmp_roots` puts `$TMPDIR` itself fourth.
+    for (name, roots) in [("${TMPDIR}", tmp.get(3)), ("$TMPDIR", tmp.get(3))] {
+        if let Some(root) = roots {
+            command = command.replace(name, root);
+        }
+    }
+    if UNCLEAR_SHELL.iter().any(|unclear| command.contains(unclear)) {
+        return false;
+    }
+    let cwd_in_tmp = cwd.is_some_and(|cwd| inside(cwd, tmp) || tmp.iter().any(|root| root == cwd.trim_end_matches('/')));
+    let mut words = command.split_whitespace().map(|word| word.trim_matches(|c| c == '"' || c == '\''));
+    words.next();
+    words.all(|word| {
+        let value = word.split_once('=').map_or(word, |(_, value)| value);
+        if word.starts_with('-') && !word.contains('=') {
+            true
+        } else if value.starts_with('/') {
+            inside(value, tmp)
+        } else {
+            cwd_in_tmp && !value.contains('\'') && !value.contains('"')
+        }
+    })
 }
 
 pub struct QuestionOption {
@@ -230,11 +290,31 @@ mod tests {
 
     #[test]
     fn auto_accept_still_asks_for_dangerous_commands() {
+        let tmp = ["/tmp".to_owned(), "/private/tmp".to_owned(), "/private/var/T".to_owned(), "/var/T".to_owned()];
         let bash = |command: &str| ToolCall { name: "Bash".into(), input: json!({ "command": command }) };
-        assert!(always_asks(&bash("rm -rf target")));
-        assert!(always_asks(&bash("git push origin main")));
-        assert!(!always_asks(&bash("cargo test")));
-        assert!(!always_asks(&ToolCall { name: "Edit".into(), input: json!({ "file_path": "a.rs" }) }));
+        let asks = |command: &str, cwd: &str| always_asks_with(&bash(command), Some(cwd), &tmp);
+        let repo = "/Users/me/repo";
+        assert!(asks("rm -rf target", repo));
+        assert!(asks("git push origin main", repo));
+        assert!(!asks("cargo test", repo));
+        assert!(!always_asks_with(&ToolCall { name: "Edit".into(), input: json!({ "file_path": "a.rs" }) }, Some(repo), &tmp));
+        // Anything inside a temporary folder is allowed (PLAN.md M13)...
+        assert!(!asks("rm -rf /tmp/ar-test", repo));
+        assert!(!asks("rm -rf \"$TMPDIR/ar-test\" /private/tmp/x", repo));
+        assert!(!asks("rm -rf build", "/tmp/ar-test"));
+        assert!(!asks("git reset --hard", "/var/T/clone"));
+        // ...but git push still asks, and anything that could reach outside does.
+        assert!(asks("git push", "/tmp/ar-test"));
+        assert!(asks("sudo rm -rf /tmp/x", repo));
+        assert!(asks("rm -rf /tmp", repo));
+        assert!(asks("rm -rf /tmp/../Users/me", repo));
+        assert!(asks("rm -rf /tmp/x ~", repo));
+        assert!(asks("cd /tmp && rm -rf repo", repo));
+        assert!(asks("rm -rf /tmp/x; rm -rf build", repo));
+        assert!(asks("rm -rf $HOME/x", repo));
+        assert!(asks("rm -rf /tmpfoo", repo));
+        assert!(asks("rm -rf build", repo));
+        assert!(asks("dd if=/tmp/a of=/dev/disk2", repo));
     }
 
     #[test]
@@ -280,6 +360,7 @@ mod tests {
             agent: AgentRef::Main,
             kind: EventKind::UserPrompt { text: "hi".into() },
             headless: false,
+            claude_pid: None,
         };
         for _ in 0..MAX_LINES + 10 {
             log.push(&event);

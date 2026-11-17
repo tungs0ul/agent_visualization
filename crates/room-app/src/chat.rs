@@ -11,7 +11,8 @@ use bevy::prelude::*;
 use crossbeam_channel::{Receiver, unbounded};
 use serde_json::{Value, json};
 
-use crate::server::Waker;
+use crate::model::SessionState;
+use crate::server::{Channel, Waker};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Speaker {
@@ -147,6 +148,10 @@ pub struct Chats {
     /// the folder changes).
     pub past: Vec<PastSession>,
     past_folder: String,
+    /// Channels of sessions open in a terminal (PLAN.md M8b).
+    channels: Vec<Channel>,
+    /// What the user sent to terminal sessions, by session id, oldest first.
+    pub sent: Vec<(String, String)>,
 }
 
 /// A session Claude Code saved on disk, which `claude --resume <id>` continues.
@@ -184,6 +189,33 @@ impl Chats {
 
     pub fn resume(&mut self, id: &str, waker: Waker) {
         self.launch(Some(id), waker);
+    }
+
+    /// The session has a channel the app can type into: it was started with
+    /// `--dangerously-load-development-channels plugin:agent-room@agent-room`.
+    pub fn has_channel(&self, session: &SessionState) -> bool {
+        self.channel_index(session).is_some()
+    }
+
+    fn channel_index(&self, session: &SessionState) -> Option<usize> {
+        // `/clear` and `/resume` start a new session in the same process: match the
+        // process first, the session id the channel started in second.
+        self.channels
+            .iter()
+            .position(|c| session.claude_pid == Some(c.info.claude_pid))
+            .or_else(|| self.channels.iter().position(|c| c.info.session_id.as_deref() == Some(session.id.as_str())))
+    }
+
+    /// Sends what the user typed to a terminal session, as if typed there.
+    pub fn send_to_terminal(&mut self, session: &SessionState, text: &str) {
+        let Some(index) = self.channel_index(session) else { return };
+        if self.channels[index].send(text) {
+            self.sent.push((session.id.clone(), text.to_owned()));
+            self.error = None;
+        } else {
+            self.channels.remove(index);
+            self.error = Some("That session's channel has closed.".to_owned());
+        }
     }
 
     fn launch(&mut self, resume: Option<&str>, waker: Waker) {
@@ -292,9 +324,19 @@ pub fn open_on_claude_click(
 /// How close (room units) to Claude a click must land.
 const CLICK_RADIUS: f32 = 60.0;
 
-pub fn read_chats(mut chats: ResMut<Chats>) {
+pub fn read_chats(mut chats: ResMut<Chats>, server: Res<crate::server::Server>) {
     if let Some(session) = chats.session.as_mut() {
         session.read();
+    }
+    let new: Vec<Channel> = server.channels.try_iter().collect();
+    for channel in new {
+        // A reconnect after the app restarted, or a process reusing a pid: keep the newest.
+        chats.channels.retain(|old| old.info.claude_pid != channel.info.claude_pid);
+        chats.channels.push(channel);
+    }
+    // Only while the window is open, so the closed app costs nothing per frame.
+    if chats.open {
+        chats.channels.retain(|channel| !channel.is_closed());
     }
 }
 

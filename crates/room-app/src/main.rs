@@ -152,6 +152,7 @@ fn receive_events(
     mut model: ResMut<Model>,
     mut log: ResMut<RoomLog>,
     auto: Res<AutoAccept>,
+    mode: Res<mini::ViewMode>,
     mut repos: ResMut<repo::RepoCache>,
     mut scene: MessageWriter<SceneChange>,
 ) {
@@ -193,7 +194,7 @@ fn receive_events(
         }
         let agent = agent_label(&event.agent);
         match (reply, &event.kind) {
-            (Some(reply), EventKind::PermissionAsked { tool }) if auto.0 && !always_asks(tool) => {
+            (Some(reply), EventKind::PermissionAsked { tool }) if auto.0 && !always_asks(tool, event.cwd.as_deref()) => {
                 reply.send(&PermissionReply { decision: Decision::Allow, message: None, answers: None });
                 log.note(&event.session_id, agent, format!("Auto-allowed {}", tool.describe().1));
             }
@@ -229,7 +230,10 @@ fn receive_events(
         let shown = model.shown().is_some_and(|session| session.id == event.session_id && !session.headless);
         match &event.kind {
             EventKind::TurnEnded { last_message: Some(text) } if shown && event.agent == AgentRef::Main => {
-                log.final_answer = Some(FinalAnswer { session: event.session_id.clone(), text: text.clone(), open: true });
+                // The mini widget is too small for it: it would hide the whole room. There
+                // the "Last answer" button opens it.
+                log.final_answer =
+                    Some(FinalAnswer { session: event.session_id.clone(), text: text.clone(), open: !mode.mini });
             }
             EventKind::UserPrompt { .. } => {
                 if let Some(answer) = log.final_answer.as_mut().filter(|answer| answer.session == event.session_id) {

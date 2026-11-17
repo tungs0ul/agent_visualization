@@ -730,7 +730,31 @@ Source: code.claude.com/docs/en/channels-reference.md.
   session when its channel is connected; otherwise it shows how to start Claude with
   the flag. Never send without the user pressing Send.
 - Decision needed from the user before building: accept starting sessions with the
-  development flag (and its dialog) until the channel is allowlisted.
+  development flag (and its dialog) until the channel is allowlisted. **Accepted
+  2026-11-17 ("it is okay").**
+
+**M8b built (2026-11-17):**
+- `plugin/.mcp.json` starts `room-hook --channel` (`crates/room-hook/src/channel.rs`):
+  answers `initialize` (capability `experimental["claude/channel"]`, instructions) and
+  `ping`. Only when its `claude` parent was started with
+  `--dangerously-load-development-channels`/`--channels` `plugin:agent-room@…` does it
+  connect to the app (`ChannelHello {claude_pid, session_id}`, reconnecting every 3 s
+  while the app is closed); otherwise it stays away, so the app never offers to send
+  to a session that would drop the message.
+- MCP servers get `CLAUDE_CODE_SESSION_ID` (verified); `CLAUDE_PID` is inherited and
+  not reliable, so the pid comes from walking up the process tree, as in the hook.
+  `room-hook` adds `agent_room_claude_pid` to SessionStart/UserPromptSubmit, and the
+  app matches a session to its channel by pid first (survives `/clear`), session id
+  second (`chat::Chats::channel_index`).
+- App: `server::Channel`; the chat window for a live terminal session shows an input
+  when a channel is connected, else the command to start Claude with (Copy button).
+- Verified end to end with a real interactive `claude --plugin-dir plugin
+  --dangerously-load-development-channels plugin:agent-room@inline` (Haiku) driven in a
+  pty against a fake app: the hello arrived with the same pid as the hooks, the sent
+  text reached Claude and it answered. Not yet through the real app's chat window.
+- The installed plugin is a cached copy (`~/.claude/plugins/cache/agent-room/…/0.1.0`),
+  so the plugin version went to 0.2.0 and `install-dev.sh` updates it.
+- Not built: permission relay over the channel (hooks already do it).
 
 ### M8: Chat with Claude from the app (later; requested 2026-11-17)
 
@@ -754,17 +778,60 @@ A button (and key, e.g. L) to hide the side panel with the old messages and show
 again, so the room gets the whole window. Remember the choice in `window.json`. The
 ticker/mini views are unaffected.
 
-### M13: Permission rules (requested 2026-11-17, not started)
+### M13: Permission rules (requested 2026-11-17, done 2026-11-17)
 
 User: "read, edit is allow, doing anything in tmp is allow, git push need to ask".
-- Open question for the user: do these rules apply only while Auto-accept is ON, or
-  always? "Always" conflicts with AGENTS.md ("never answer allow without an explicit
-  user action"), so it would have to be an opt-in setting the user turns on.
+- Answered: the rules are what **Auto-accept** does ("the permissions i mentioned is
+  when the auto accept permissions"); with Auto-accept off every request still asks.
+- Built (`log::always_asks`): Auto-accept already allowed Read/Edit and ordinary
+  commands; the risky commands in `ALWAYS_ASK` (`rm -rf`, `git reset --hard`, …) are
+  now allowed too when they only touch a temporary folder (`/tmp`, `/private/tmp`,
+  `$TMPDIR` and its `/private` path): one simple command (no `;`, `&`, `|`, redirects,
+  `$`, `~`, `..`, …) whose every argument is a path strictly inside one, or relative
+  while the session's cwd is inside one. `git push` and `sudo` always ask.
+- If the user meant something stricter (Auto-accept allows *only* read/edit/tmp and
+  asks for every other command), that is a small change in `always_asks`.
 - Read/Glob/Grep normally don't ask at all; Edit/Write/NotebookEdit do.
 - "In tmp": only when every path in the tool call is under `/tmp`, `/private/tmp`,
   `$TMPDIR`. Bash must be parsed carefully (`cd /tmp && rm -rf ~` must still ask);
   allow only simple commands whose path arguments are all inside tmp.
 - `git push` already asks (`log::ALWAYS_ASK`).
+
+### M14: Themes, light and dark mode (requested 2026-11-17, not started)
+
+User: "light mode, dark mode, theme switching, and add another theme which is
+futuristic in a space ship".
+- A `Theme` resource with the colours now spread over `scene.rs`/`ui.rs` constants
+  (backdrop, floor, zones, furniture, bubbles, egui visuals). Light and Dark follow the
+  macOS appearance by default, with a manual switch; remembered in `ui.json`.
+- "Spaceship" theme: dark hull, metal floor plates, glowing consoles instead of
+  desks, a window with stars; same layout and zones so nothing else changes.
+- 2D first (the current lyon shapes); a theme only changes colours and props.
+
+### M15: 3D room (requested 2026-11-17, research only)
+
+User: "does bevy support 3d? and can we do 3d? and support switching between 2d and 3d".
+- Bevy has a full 3D renderer (PBR materials, lights, shadows, glTF scenes and
+  skeletal animation), so yes. The room logic (model, routing, zones, poses) is
+  independent of drawing; a 3D view would be a second set of draw systems over the
+  same entities, with a perspective camera, switched by a key.
+- Costs to weigh: GPU/power use (PLAN.md 6: the app must stay cheap while idle, and
+  3D with shadows redraws more), and animated characters need rigged models.
+- Free models (CC0, glTF): Kenney Space Station Kit / Space Kit and furniture kits
+  (kenney.nl); Quaternius Modular Sci-Fi Megakit, Sci-Fi Essentials Kit, Universal
+  Base Characters + Universal Animation Library (quaternius.com); KayKit Space Base
+  Bits and Furniture Bits (kaylousberg.itch.io). Check each pack's page before use.
+
+### M16: Custom themes from the user's own models (requested 2026-11-17, not started)
+
+User: "allow user to do custom theme, like if they want they can create anime theme,
+any game, film theme when they provide the 3d model for the agent and background".
+- A theme folder (`~/.agent-room/themes/<name>/theme.toml` + files): colours, a
+  background image or glTF room, a model or sprite for Claude and for sub-agents,
+  optional per-pose animations. Loaded at start and when the folder changes; a bad
+  theme falls back to the default with a note in the log.
+- The app ships only its own and CC0 themes; what users load is up to them.
+- Depends on M14 (theme switching) and, for 3D models, M15.
 
 ### M9: Auto-accept mode and centre pop-ups (requested 2026-11-17)
 
@@ -880,13 +947,16 @@ config file, and can remove both cleanly.
 - [ ] M4d Rooms per repository (part 1 done 2026-11-17: repo + branch detection, shown in roster/title; part 2: separate rooms in the scene)
 - [x] M4e Waiting at the Approval desk with the card in the scene (2026-11-17)
 - [x] M4f Camera controls: zoom, pan (2026-11-17; pinning dropped by the user)
-- [ ] M8 Chat with Claude from the app (8a done: new/continue/resume sessions; 8b
-      researched, waiting for the user's OK on the development-channels flag)
+- [x] M8 Chat with Claude from the app (8a: new/continue/resume sessions; 8b: send to
+      a terminal session through the plugin channel, 2026-11-17; needs the user's try)
 - [x] M9 Auto-accept mode and centre pop-ups (2026-11-17)
 - [ ] M10 Context, 5-hour and weekly limits in the app
 - [x] M12 Hide/show the side panel (2026-11-17; needs a look on screen)
 - [x] M11 Own CPU/RAM/FPS overlay (2026-11-17; needs a look on screen)
-- [ ] M13 Permission rules (waiting for the user's answer, see M13)
+- [x] M13 Permission rules as part of Auto-accept (2026-11-17)
+- [ ] M14 Themes: light, dark, spaceship
+- [ ] M15 3D room (researched)
+- [ ] M16 Custom themes from the user's models
 - [x] M5 Permissions (2026-11-17; user still to try Y/N and a deny reason live)
 - [ ] M6 Polish
 - [x] M7 Distribution, code side (2026-11-17); publishing left to the user
@@ -1175,7 +1245,7 @@ Later in the session (2026-11-17):
   events for `QUIET_EVENTS` (5) events from other sessions, or ended (test added).
 - Fixed: switching mini mode made one frame mix old/new window sizes; wgpu rejected it
   and Bevy quit. A `RenderErrorHandler` now ignores such errors (logged, frame skipped).
-  `AGENT_ROOM_SCREENSHOT_TOGGLE_MINI=1` toggles mini after the 2nd shot and back after
+  `AGENT_ROOM_SCREENSHOT_TOGGLE_MINI=1` (or `=stay`) toggles mini after the 2nd shot and back after
   the 4th; verified 2200→640→2200 px with the app still running.
 - New milestones M9 (auto-accept + centre pop-ups) and M10 (context and limits).
 - Not pushed: `git push` is blocked for agents by the auto-mode classifier; the user
@@ -1274,3 +1344,18 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   then (screenshots all black, also for the unchanged build). Commits pushed.
   **Next:** user checks M11/M12/chat on screen; answers M13 (rules only with
   Auto-accept, or an opt-in setting) and M8b (accept the development flag?).
+- 2026-11-17, Claude Opus 5.5 (same session, after the user's answers): **M13 done**
+  (Auto-accept also allows risky commands confined to a temporary folder; `git push`,
+  `sudo` always ask). **M8b done**: `room-hook --channel` MCP channel server +
+  `plugin/.mcp.json`; the chat window types into a live terminal session started with
+  the development-channels flag; verified with a real interactive session in a pty
+  (Haiku), not yet through the app's own window. Fixes from the user's reports:
+  dragging/scrolling the room follows the hand at once (no easing while manual) and
+  is clamped where it is stored, so dragging past the edge no longer piles up;
+  scrolling over the log panel no longer pans the room (pointer must be over the room
+  viewport); in mini mode Claude's answer no longer pops up over the whole widget
+  ("Last answer" opens it). New requests recorded: **M14** themes (light/dark/
+  spaceship), **M15** 3D (researched, free CC0 model sources listed), **M16** custom
+  themes. Plugin version 0.2.0. **Next:** user runs `scripts/install-dev.sh`
+  (binaries + plugin update), restarts Claude Code with the flag, tries sending from
+  the chat window; checks camera drag, panel scrolling and mini mode.

@@ -224,8 +224,10 @@ pub fn take_screenshots(
 ) {
     let Some(mut mode) = mode else { return };
     // `AGENT_ROOM_SCREENSHOT_TOGGLE_MINI=1`: switch to mini mode after the 2nd shot and
-    // back after the 4th, to test the switch without a key press.
-    if matches!(mode.taken, 2 | 4) && Instant::now() >= mode.next && std::env::var_os("AGENT_ROOM_SCREENSHOT_TOGGLE_MINI").is_some() {
+    // back after the 4th, to test the switch without a key press. `=stay` stays mini.
+    let toggle = std::env::var("AGENT_ROOM_SCREENSHOT_TOGGLE_MINI").ok();
+    let at = if toggle.as_deref() == Some("stay") { mode.taken == 2 } else { matches!(mode.taken, 2 | 4) };
+    if at && Instant::now() >= mode.next && toggle.is_some() {
         toggle_mini.write(crate::mini::ToggleMini);
     }
     if mode.taken >= MAX_SHOTS || Instant::now() < mode.next {

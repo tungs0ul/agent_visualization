@@ -64,6 +64,8 @@ pub struct RoomEvent {
     pub kind: EventKind,
     /// Started with `claude -p` by another tool ([`crate::HEADLESS_FIELD`]).
     pub headless: bool,
+    /// The session's `claude` process ([`crate::CLAUDE_PID_FIELD`]).
+    pub claude_pid: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -148,6 +150,7 @@ impl RoomEvent {
             agent,
             kind,
             headless: hook.get(crate::HEADLESS_FIELD).and_then(Value::as_bool).unwrap_or(false),
+            claude_pid: hook.get(crate::CLAUDE_PID_FIELD).and_then(Value::as_u64).and_then(|pid| u32::try_from(pid).ok()),
         })
     }
 }

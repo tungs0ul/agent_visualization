@@ -45,6 +45,31 @@ pub fn state_dir() -> Option<PathBuf> {
 /// started with `claude -p` by other tools (not by the app).
 pub const HEADLESS_FIELD: &str = "agent_room_headless";
 
+/// Added by `room-hook` to the same payloads: the pid of the `claude` process that runs
+/// the session, so the app can find the session's channel (PLAN.md M8b).
+pub const CLAUDE_PID_FIELD: &str = "agent_room_claude_pid";
+
+/// First line `room-hook --channel` sends on the socket (instead of a `HookEnvelope`).
+/// The connection then stays open and the app writes [`ChannelMessage`] lines to it,
+/// one per message the user sends to that terminal session (PLAN.md M8b).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChannelHello {
+    pub channel: ChannelInfo,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChannelInfo {
+    /// The `claude` process that started the channel server.
+    pub claude_pid: u32,
+    /// The session it started in; `/clear` and `/resume` change the session but not the pid.
+    pub session_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChannelMessage {
+    pub text: String,
+}
+
 /// One hook event, sent by `room-hook` to the app.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HookEnvelope {

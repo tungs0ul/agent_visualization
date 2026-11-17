@@ -8,5 +8,9 @@ for hook in "$AGENT_ROOM_HOOK" "$HOME/.cargo/bin/room-hook" /opt/homebrew/bin/ro
         exec "$hook" "$@"
     fi
 done
+# As the channel's MCP server (--channel) there is nothing to serve: end at once.
+if [ "$1" = "--channel" ]; then
+    exit 1
+fi
 cat > /dev/null
 exit 0

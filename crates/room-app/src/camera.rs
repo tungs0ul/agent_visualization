@@ -9,7 +9,7 @@ use bevy::window::PrimaryWindow;
 use bevy_egui::input::EguiWantsInput;
 
 use crate::mini::ViewMode;
-use crate::scene::WorldCamera;
+use crate::scene::{ROOM_SIZE, WorldCamera};
 
 /// The smallest and largest part of the office the camera can show.
 const MIN_SIZE: Vec2 = Vec2::new(280.0, 180.0);
@@ -48,7 +48,11 @@ pub fn camera_input(
     mut clicks: MessageWriter<RoomClick>,
 ) {
     let (camera, camera_transform, projection) = camera.into_inner();
-    if egui_input.wants_any_pointer_input() {
+    // egui's answer is from the previous frame, so a scroll over the log panel could
+    // still pan the room; check where the pointer is now as well. A drag that started
+    // in the room keeps going when it leaves it.
+    let dragging = control.press.is_some() && buttons.pressed(MouseButton::Left);
+    if egui_input.wants_any_pointer_input() || !(dragging || over_room(camera, window.cursor_position())) {
         wheel.clear();
         pinch.clear();
         control.press = None;
@@ -121,6 +125,19 @@ pub fn camera_input(
     }
 
     if moved {
-        control.manual = Some((center, size.clamp(MIN_SIZE, MAX_SIZE)));
+        // Clamp here, not when drawing: otherwise a drag past the edge piles up and has to
+        // be undone before the view moves back.
+        let size = size.clamp(MIN_SIZE, MAX_SIZE);
+        let half_room = ROOM_SIZE.max(size) / 2.0;
+        control.manual = Some((center.clamp(-half_room, half_room), size));
+    }
+}
+
+/// The pointer is over the room itself, not a panel beside or below it.
+fn over_room(camera: &Camera, cursor: Option<Vec2>) -> bool {
+    match (camera.logical_viewport_rect(), cursor) {
+        (Some(rect), Some(cursor)) => rect.contains(cursor),
+        (None, Some(_)) => true,
+        (_, None) => false,
     }
 }

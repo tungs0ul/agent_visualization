@@ -410,9 +410,13 @@ pub fn follow_action(
     let ScalingMode::AutoMin { min_width, min_height } = &mut ortho.scaling_mode else { return };
 
     let (target_center, target_size) = if let Some((center, size)) = control.manual {
-        // The user zoomed or panned: hold that view until a double-click resets it.
-        let half_room = ((ROOM_SIZE - size) / 2.0).max(Vec2::ZERO) + size / 2.0;
-        (center.clamp(-half_room, half_room), size)
+        // The user zoomed or panned: follow the hand at once (easing made dragging feel
+        // laggy) and hold that view until a double-click resets it. `camera_input`
+        // already keeps it inside the room.
+        transform.translation.x = center.x;
+        transform.translation.y = center.y;
+        (*min_width, *min_height) = (size.x, size.y);
+        (center, size)
     } else if viewport.x >= FOLLOW_BELOW_WIDTH {
         (Vec2::ZERO, ROOM_SIZE)
     } else {

@@ -5,6 +5,8 @@
 //! prints nothing unless it is answering a permission request.
 //!
 //!     room-hook              forward the event to the Agent Room app (PLAN.md 3.2)
+//!     room-hook --channel    MCP channel server: passes messages the user types in the
+//!                            app into this terminal session (PLAN.md M8b)
 //!     room-hook --log [path] append `{"ts_ms":<unix ms>,"hook":<stdin>}` as one line to
 //!                            `path`, by default `~/.agent-room/spike/events.jsonl`
 //!
@@ -21,6 +23,8 @@ use std::process::ExitCode;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use room_proto::{HookEnvelope, PermissionReply, SOCKET_NAME, permission_timeout};
+
+mod channel;
 
 const WRITE_TIMEOUT: Duration = Duration::from_secs(1);
 
@@ -42,6 +46,7 @@ fn run() -> Result<(), String> {
             };
             append_event(&path, &read_stdin()?)
         }
+        Some("--channel") => channel::serve(),
         Some(other) => Err(format!("unknown argument: {other}")),
         None => forward(&read_stdin()?),
     }
@@ -62,7 +67,7 @@ fn state_dir() -> Result<PathBuf, String> {
 /// Sends the event to the app; for permission requests prints the user's answer.
 fn forward(raw: &str) -> Result<(), String> {
     let mut hook: serde_json::Value = serde_json::from_str(raw).map_err(|e| format!("hook JSON: {e}"))?;
-    mark_headless(&mut hook);
+    mark_session(&mut hook);
     let envelope = HookEnvelope::new(hook);
 
     // App not running (no socket, or a stale one): nothing to do.
@@ -99,43 +104,41 @@ fn forward(raw: &str) -> Result<(), String> {
 /// Sessions started with `claude -p` by other tools (e.g. another plugin's Stop hook
 /// that writes a summary) must not take over the room or close Claude's answer
 /// (PLAN.md M8a status). Claude Code doesn't say so in the payload, so look at the
-/// `claude` process that runs this hook. Only for the events that can switch the room,
+/// `claude` process that runs this hook; its pid also tells the app which channel
+/// belongs to the session (PLAN.md M8b). Only for the events that can switch the room,
 /// since it runs `ps`. Sessions the app starts itself set `AGENT_ROOM_CHAT` and count as
 /// interactive.
-fn mark_headless(hook: &mut serde_json::Value) {
+fn mark_session(hook: &mut serde_json::Value) {
     let event = hook.get("hook_event_name").and_then(serde_json::Value::as_str);
     if !matches!(event, Some("SessionStart" | "UserPromptSubmit")) || std::env::var_os("AGENT_ROOM_CHAT").is_some() {
         return;
     }
-    if claude_is_headless()
-        && let Some(object) = hook.as_object_mut()
-    {
+    let Some((pid, args)) = find_claude(std::os::unix::process::parent_id()) else { return };
+    let Some(object) = hook.as_object_mut() else { return };
+    object.insert(room_proto::CLAUDE_PID_FIELD.to_owned(), pid.into());
+    if args.iter().any(|arg| matches!(arg.as_str(), "-p" | "--print")) {
         object.insert(room_proto::HEADLESS_FIELD.to_owned(), serde_json::Value::Bool(true));
     }
 }
 
-/// Walks up from this process (through the plugin's shell shim, if any) to the first
-/// `claude` process and checks its arguments for `-p` / `--print`.
-fn claude_is_headless() -> bool {
-    let mut pid = std::os::unix::process::parent_id();
+/// Walks up from `pid` (through the plugin's shell shim, if any) to the first `claude`
+/// process: its pid and arguments.
+pub(crate) fn find_claude(mut pid: u32) -> Option<(u32, Vec<String>)> {
     for _ in 0..4 {
-        let Ok(output) = std::process::Command::new("ps").args(["-o", "ppid=,args=", "-p", &pid.to_string()]).output()
-        else {
-            return false;
-        };
+        let output = std::process::Command::new("ps").args(["-o", "ppid=,args=", "-p", &pid.to_string()]).output().ok()?;
         let line = String::from_utf8_lossy(&output.stdout);
         let mut fields = line.split_whitespace();
-        let Some(parent) = fields.next().and_then(|p| p.parse::<u32>().ok()) else { return false };
+        let parent = fields.next()?.parse::<u32>().ok()?;
         let args: Vec<&str> = fields.collect();
         if is_claude(&args) {
-            return args.iter().any(|arg| matches!(*arg, "-p" | "--print"));
+            return Some((pid, args.into_iter().map(str::to_owned).collect()));
         }
         if parent <= 1 {
-            return false;
+            return None;
         }
         pid = parent;
     }
-    false
+    None
 }
 
 /// `claude …` or `node …/claude …`.

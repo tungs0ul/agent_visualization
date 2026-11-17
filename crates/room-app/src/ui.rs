@@ -515,15 +515,37 @@ fn session_chooser(
             if ui.button("Continue this session").on_hover_text("claude --resume: Claude keeps its history").clicked() {
                 *resume = Some((session.id.clone(), session.cwd.clone()));
             }
-        } else {
-            // A live terminal session can't take input from here yet (PLAN.md M8b).
-            ui.label(
-                egui::RichText::new(
-                    "This session is open in a terminal. Type there for now; sending to it from \
-                     here needs a plugin channel (in progress).",
-                )
-                .weak(),
+        } else if chats.has_channel(session) {
+            // Typed into the terminal session through its channel (PLAN.md M8b).
+            let sent: Vec<&str> =
+                chats.sent.iter().filter(|(id, _)| *id == session.id).map(|(_, text)| text.as_str()).collect();
+            for text in &sent[sent.len().saturating_sub(3)..] {
+                ui.label(egui::RichText::new(format!("You: {}", truncate(text, 200))).weak());
+            }
+            let response = ui.add(
+                egui::TextEdit::multiline(&mut chats.input)
+                    .hint_text("Message this terminal session (Enter sends)")
+                    .desired_rows(2)
+                    .desired_width(f32::INFINITY),
             );
+            let enter = response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift);
+            if enter || ui.button("Send").clicked() {
+                let text = chats.input.trim().to_owned();
+                if !text.is_empty() {
+                    chats.send_to_terminal(session, &text);
+                    chats.input.clear();
+                }
+            }
+            ui.label(egui::RichText::new("Claude's answer shows in the room.").small().weak());
+        } else {
+            ui.label(
+                egui::RichText::new("This session is open in a terminal. To send to it from here, start Claude with:")
+                    .weak(),
+            );
+            ui.code(CHANNEL_COMMAND);
+            if ui.small_button("Copy").clicked() {
+                ui.ctx().copy_text(CHANNEL_COMMAND.to_owned());
+            }
         }
         ui.separator();
     }
@@ -553,6 +575,9 @@ fn session_chooser(
         ui.colored_label(DENY, error);
     }
 }
+
+/// Starts a terminal session the app can send to (PLAN.md M8b).
+const CHANNEL_COMMAND: &str = "claude --dangerously-load-development-channels plugin:agent-room@agent-room";
 
 /// "5 min ago", "3 h ago", "2 d ago".
 fn ago(secs: u64) -> String {

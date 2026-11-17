@@ -108,6 +108,8 @@ pub struct SessionState {
     /// Started with `claude -p` by another tool (e.g. a plugin writing a summary). Such
     /// sessions never take the room from a session the user works in.
     pub headless: bool,
+    /// The `claude` process running it, to find its channel (PLAN.md M8b).
+    pub claude_pid: Option<u32>,
     /// Tasks handed out with the `Agent` tool, by sub-agent id, until the agent shows up.
     briefs: HashMap<String, String>,
     /// Order of last activity across sessions (higher is more recent).
@@ -219,6 +221,9 @@ impl Model {
         session.last_seen = self.events_seen;
         session.ended = matches!(event.kind, EventKind::SessionEnded { .. });
         session.headless |= event.headless;
+        if event.claude_pid.is_some() {
+            session.claude_pid = event.claude_pid;
+        }
         let headless = session.headless;
         update_session(session, event, &mut changes);
 

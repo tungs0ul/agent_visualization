@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "agent-room": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/libexec/room-hook",
+      "args": ["--channel"]
+    }
+  }
+}
