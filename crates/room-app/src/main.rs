@@ -116,7 +116,7 @@ fn main() -> AppExit {
                 settle_permissions,
                 stats::measure,
                 (theme::switch, theme::recolor, theme::stars).chain(),
-                (view3d::toggle, view3d::build, view3d::sync, view3d::frame, view3d::cameras, world3d::pulse).chain(),
+                (view3d::toggle, view3d::build, view3d::sync, view3d::deliver, view3d::frame, view3d::cameras, world3d::pulse).chain(),
                 pace_updates,
                 window::take_screenshots,
             )

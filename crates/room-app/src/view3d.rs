@@ -78,6 +78,8 @@ pub(crate) struct Avatar {
     /// The animation player inside the loaded model.
     player: Option<Entity>,
     playing: Option<Act>,
+    /// Its current report has been handed over or left on the desk.
+    reported: bool,
 }
 
 
@@ -233,7 +235,7 @@ pub fn sync(
         .iter()
         .filter_map(|(entity, avatar, _)| {
             let (_, _, pose) = characters.get(avatar.of).ok()?;
-            Some((entity, location_for(*pose, Some(avatar.of) == main)))
+            Some((entity, location_for(*pose)))
         })
         .collect();
     wanted.sort_by_key(|(entity, location)| (*location as u8, entity.to_bits()));
@@ -252,12 +254,13 @@ pub fn sync(
         };
         have.insert(avatar.of, ());
         let Some(&(location, slot)) = slots.get(&avatar_entity) else { continue };
-        // Sub-agents report beside the main desk; the main agent never stands in its
-        // own report spot.
-        let (target, face) = if location == Location::MainDesk && Some(avatar.of) != main {
-            (Location::MainDesk.center() + Vec3::new(-1.0 + 2.0 * (slot % 2) as f32, 0.0, 2.3 + 0.5 * (slot / 2) as f32), PI)
-        } else {
-            location.work_spot(slot)
+        // Claude has its own spot at the main desk; sub-agents there stand in front of
+        // the platform, facing it.
+        let is_main = Some(avatar.of) == main;
+        let (target, face) = match location {
+            Location::MainDesk if is_main => location.work_spot(0),
+            Location::MainDesk => (visitor_spot(slot), PI),
+            _ => location.work_spot(slot),
         };
         // Walk there in a straight line at a robot's pace.
         let here = transform.translation;
@@ -302,11 +305,11 @@ pub fn sync(
         }
         let is_main = Some(entity) == main;
         let (scale, glow) = if is_main { (1.6, MAIN_GLOW) } else { (1.3, accent.0.to_linear() * 3.0) };
-        // Claude starts at its desk; a new sub-agent appears on the handover pad.
-        let start = if is_main { Location::MainDesk.work_spot(0).0 } else { Location::Handover.work_spot(0).0 };
+        // Claude starts at its desk; a new sub-agent appears beside it to get its task.
+        let start = if is_main { Location::MainDesk.work_spot(0).0 } else { visitor_spot(0) };
         let avatar = commands
             .spawn((
-                Avatar { of: entity, rig: Rig::Robot, glow, accent: accent.0, player: None, playing: None },
+                Avatar { of: entity, rig: Rig::Robot, glow, accent: accent.0, player: None, playing: None, reported: false },
                 Transform::from_translation(start).with_scale(Vec3::splat(scale)),
                 Visibility::default(),
             ))
@@ -319,17 +322,91 @@ pub fn sync(
 /// A robot's walking pace (metres per second).
 const WALK_SPEED: f32 = 1.8;
 
-/// Where a robot goes for what it is doing (PLAN.md M17).
-fn location_for(pose: Pose, main: bool) -> Location {
+/// Where a robot goes for what it is doing (PLAN.md M17). Sub-agents waiting, getting
+/// their task or bringing a report go to the main desk too (to its visitor spots).
+fn location_for(pose: Pose) -> Location {
     match pose {
-        Pose::Reading | Pose::Web => Location::Bookshelf,
+        Pose::Reading => Location::FileReading,
+        Pose::Web => Location::Bookshelf,
         Pose::Typing => Location::WritingDesk,
         Pose::Terminal => Location::Lab,
-        // Sub-agents bring their report to the main agent.
-        Pose::Reporting => Location::MainDesk,
-        Pose::Idle | Pose::Thinking | Pose::Delegating | Pose::Waiting if main => Location::MainDesk,
-        // A sub-agent between jobs waits on the handover pad.
-        Pose::Idle | Pose::Thinking | Pose::Delegating | Pose::Waiting => Location::Handover,
+        Pose::Idle | Pose::Thinking | Pose::Delegating | Pose::Waiting | Pose::Reporting => Location::MainDesk,
+    }
+}
+
+/// Where a sub-agent stands at the main desk: in front of the platform, facing Claude.
+fn visitor_spot(slot: usize) -> Vec3 {
+    Location::MainDesk.center() + Vec3::new(-1.0 + 2.0 * (slot % 2) as f32, 0.0, 2.4 + 0.6 * (slot / 2) as f32)
+}
+
+/// A report a sub-agent left on the main desk while Claude was away.
+#[derive(Component)]
+pub(crate) struct Document;
+
+/// Where documents are left: the main console's inbox.
+const INBOX: Vec3 = Vec3::new(0.75, 0.95, -0.15);
+
+/// Sub-agents with a report hand it over in person when Claude is at its desk;
+/// otherwise they leave it there as a glowing document, and Claude picks the
+/// documents up when it gets back.
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
+pub fn deliver(
+    mut commands: Commands,
+    view: Res<View3d>,
+    time: Res<Time>,
+    roster: Res<Roster>,
+    characters: Query<&Pose, With<Agent>>,
+    mut avatars: Query<(&mut Avatar, &Transform), Without<Document>>,
+    mut documents: Query<(Entity, &mut Transform), With<Document>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    if !view.on {
+        return;
+    }
+    let main = roster.character(&Who::Main);
+    let desk = Location::MainDesk.work_spot(0).0;
+    let main_at_desk = avatars.iter().any(|(avatar, at)| Some(avatar.of) == main && at.translation.distance(desk) < 0.15);
+    let mut left = documents.iter().count();
+    for (mut avatar, at) in &mut avatars {
+        if Some(avatar.of) == main {
+            continue;
+        }
+        let reporting = characters.get(avatar.of).is_ok_and(|pose| *pose == Pose::Reporting);
+        if !reporting {
+            avatar.reported = false;
+            continue;
+        }
+        let arrived = (0..8).any(|slot| at.translation.distance(visitor_spot(slot)) < 0.15);
+        if arrived && !avatar.reported && !main_at_desk {
+            avatar.reported = true;
+            let glow = materials.add(StandardMaterial {
+                base_color: Color::LinearRgba(LinearRgba::new(0.6, 0.9, 1.0, 0.8)),
+                emissive: LinearRgba::rgb(0.6, 2.5, 4.0),
+                alpha_mode: AlphaMode::Blend,
+                ..default()
+            });
+            commands.spawn((
+                Document,
+                Mesh3d(meshes.add(Cuboid::new(0.24, 0.02, 0.32))),
+                MeshMaterial3d(glow),
+                Transform::from_translation(INBOX + Vec3::Y * 0.04 * left as f32),
+            ));
+            left += 1;
+        }
+    }
+    // Claude is back: it takes the documents.
+    if main_at_desk {
+        for (entity, _) in &documents {
+            commands.entity(entity).despawn();
+        }
+        return;
+    }
+    // Waiting documents bob gently so they catch the eye.
+    let t = time.elapsed_secs();
+    for (i, (_, mut at)) in documents.iter_mut().enumerate() {
+        at.translation.y = INBOX.y + 0.04 * i as f32 + 0.03 * (t * 2.0 + i as f32).sin();
+        at.rotation = Quat::from_rotation_y(t * 0.6);
     }
 }
 

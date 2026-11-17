@@ -15,26 +15,26 @@ use bevy::world_serialization::{WorldAssetRoot, WorldInstanceReady};
 pub enum Location {
     /// Centre platform: the main agent thinks, plans and coordinates.
     MainDesk,
-    /// Retrieve and read files.
+    /// Research: web pages and references.
     Bookshelf,
     /// Run scripts and programs.
     Lab,
     /// Create or edit files.
     WritingDesk,
-    /// Sub-agents hand their results to the main agent.
-    Handover,
+    /// Read files (Read, Grep, Glob).
+    FileReading,
 }
 
 impl Location {
-    pub const ALL: [Location; 5] = [Self::MainDesk, Self::Bookshelf, Self::Lab, Self::WritingDesk, Self::Handover];
+    pub const ALL: [Location; 5] = [Self::MainDesk, Self::Bookshelf, Self::FileReading, Self::Lab, Self::WritingDesk];
 
     pub fn center(self) -> Vec3 {
         match self {
             Self::MainDesk => Vec3::new(0.0, 0.0, 0.0),
-            Self::Bookshelf => Vec3::new(-5.2, 0.0, -2.6),
-            Self::Lab => Vec3::new(5.2, 0.0, -2.6),
-            Self::WritingDesk => Vec3::new(5.4, 0.0, 2.2),
-            Self::Handover => Vec3::new(-4.6, 0.0, 2.6),
+            Self::Bookshelf => Vec3::new(-4.2, 0.0, -3.4),
+            Self::Lab => Vec3::new(4.4, 0.0, -3.4),
+            Self::WritingDesk => Vec3::new(5.8, 0.0, 1.2),
+            Self::FileReading => Vec3::new(-5.8, 0.0, 1.2),
         }
     }
 
@@ -44,17 +44,17 @@ impl Location {
             Self::Bookshelf => "Bookshelf",
             Self::Lab => "Processing lab",
             Self::WritingDesk => "Writing desk",
-            Self::Handover => "Handover",
+            Self::FileReading => "File reading",
         }
     }
 
     pub fn subtitle(self) -> &'static str {
         match self {
             Self::MainDesk => "Plan & coordinate",
-            Self::Bookshelf => "Read files",
+            Self::Bookshelf => "Research & reference",
             Self::Lab => "Run scripts",
             Self::WritingDesk => "Write files",
-            Self::Handover => "Hand over results",
+            Self::FileReading => "Read files",
         }
     }
 
@@ -65,7 +65,7 @@ impl Location {
             Self::Bookshelf => LinearRgba::rgb(2.4, 1.2, 0.2),
             Self::Lab => LinearRgba::rgb(0.3, 2.2, 2.6),
             Self::WritingDesk => LinearRgba::rgb(1.6, 0.5, 3.0),
-            Self::Handover => LinearRgba::rgb(0.4, 2.6, 1.0),
+            Self::FileReading => LinearRgba::rgb(0.4, 2.6, 1.0),
         }
     }
 
@@ -79,7 +79,7 @@ impl Location {
             Self::Bookshelf => (c + Vec3::new(side, 0.0, 0.9), 0.0),
             Self::Lab => (c + Vec3::new(side, 0.0, 1.0), 0.0),
             Self::WritingDesk => (c + Vec3::new(-0.9, 0.0, side * 0.6), FRAC_PI_2),
-            Self::Handover => (c + Vec3::new(side * 0.7, 0.16, 0.0), 0.0),
+            Self::FileReading => (c + Vec3::new(side * 0.7, 0.0, 0.9), 0.0),
         }
     }
 }
@@ -215,7 +215,7 @@ pub fn build(kit: &mut Kit) {
     bookshelf(kit);
     lab(kit);
     writing_desk(kit);
-    handover(kit);
+    file_reading(kit);
     // Glowing paths from the main desk to every location.
     for location in Location::ALL.into_iter().skip(1) {
         let from = Location::MainDesk.center();
@@ -393,15 +393,6 @@ fn writing_desk(kit: &mut Kit) {
     kit.ring(c + Vec3::new(-0.9, 0.01, 0.0), 0.9, 0.04, Location::WritingDesk.glow(), 0.8);
 }
 
-fn handover(kit: &mut Kit) {
-    let c = Location::Handover.center();
-    let metal = kit.solid(Color::srgb(0.2, 0.21, 0.3), 0.8, 0.3);
-    kit.mesh(Cylinder::new(1.3, 0.16), metal, Transform::from_translation(c + Vec3::Y * 0.08));
-    kit.ring(c + Vec3::Y * 0.165, 1.3, 0.05, Location::Handover.glow(), 1.2);
-    kit.ring(c + Vec3::Y * 0.17, 0.8, 0.03, Location::Handover.glow(), 2.0);
-    let glass = kit.glass(Location::Handover.glow());
-    kit.mesh(Cylinder::new(1.1, 1.0), glass, Transform::from_translation(c + Vec3::Y * 0.66));
-}
 
 /// Night look for loaded models: darker, slightly blue.
 fn darken_model(
@@ -447,4 +438,15 @@ pub fn pulse(
             material.emissive = pulse.base * k;
         }
     }
+}
+
+/// A reading workstation: a desk with document holo screens (until the Blender
+/// station models replace these placeholders).
+fn file_reading(kit: &mut Kit) {
+    let c = Location::FileReading.center();
+    kit.model("models/station/table-large.glb", c + Vec3::new(0.0, 0.0, -0.2), 0.0, 1.4, 0.6);
+    for (x, turn) in [(-0.45, 0.25), (0.45, -0.25)] {
+        kit.holo(c + Vec3::new(x, 1.35, -0.1), turn, Vec2::new(0.5, 0.65), Location::FileReading.glow());
+    }
+    kit.ring(c + Vec3::new(0.0, 0.01, 0.9), 0.9, 0.04, Location::FileReading.glow(), 0.8);
 }
