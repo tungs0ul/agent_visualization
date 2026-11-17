@@ -14,11 +14,13 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 [profile.release]
-opt-level = "z"
-lto = true
-codegen-units = 1
-panic = "abort"
+lto = "thin"
 strip = true
+
+# The hook runs on every Claude Code event: keep it small and quick to start.
+[profile.release.package.room-hook]
+opt-level = "z"
+codegen-units = 1
 
 # Bevy is unusably slow unoptimized; keep our own code fast to rebuild.
 [profile.dev]

@@ -92,13 +92,13 @@ claude-room/
 ├── plugin/                 # the Claude Code plugin users install
 │   ├── .claude-plugin/plugin.json
 │   ├── hooks/hooks.json    # all hook events ⇒ ${CLAUDE_PLUGIN_ROOT}/libexec/room-hook
-│   └── libexec/room-hook   # built binary (gitignored in dev; release artifact)
+│   └── libexec/room-hook   # sh shim: execs the installed room-hook, silent if missing
 ├── .claude-plugin/
 │   └── marketplace.json    # (M7) lets users `/plugin marketplace add <owner>/<repo>`
 ├── assets/                 # fonts (e.g. Inter / a rounded sans), optional SVG icons
 ├── spike/                  # notes from the M1 spike (raw logs live in ~/.agent-room)
 └── scripts/
-    ├── build-plugin.sh     # builds room-hook (release) and copies it into plugin/libexec/
+    ├── install-dev.sh      # cargo install this checkout's agent-room + room-hook
     └── replay.sh           # feeds a recorded events.jsonl into a running app
 ```
 
@@ -478,7 +478,7 @@ The machine runs 24/7; wasted CPU/GPU costs money.
   events in the last 60 s.
 - Single process. Closing the window exits everything. No helper daemons.
 - **Every dev session:** after running the app, tests or replay scripts, check
-  `pgrep -fl room-app` / `pgrep -fl room-hook` / `pgrep -fl -- --plugin-dir` /
+  `pgrep -fl agent-room` / `pgrep -fl room-hook` / `pgrep -fl -- --plugin-dir` /
   `ps -Ao pid,pcpu,etime,comm -r | head`
   and kill leftovers before finishing.
 
@@ -658,7 +658,7 @@ config file, and can remove both cleanly.
 - [ ] M4b Office zones (agents walk to where the work is)
 - [x] M5 Permissions (2026-11-17; user still to try Y/N and a deny reason live)
 - [ ] M6 Polish
-- [ ] M7 Distribution
+- [x] M7 Distribution, code side (2026-11-17); publishing left to the user
 
 ## 12. Handoff log
 
@@ -845,3 +845,24 @@ anything surprising.
     panel: it draws a guide line.
   - egui's default font has no "●"; draw dots with the painter.
   **Next:** step 4: M7 distribution.
+- 2026-11-17, Claude Opus 5.5: Step 4 (M7 distribution), code side done.
+  - **Changed from the original M7 plan:** no binaries in git. `cargo install --git …
+    room-app room-hook` (or the Homebrew formula) installs `agent-room` and `room-hook`
+    into `~/.cargo/bin` / Homebrew's bin. The plugin ships `plugin/libexec/room-hook`, a
+    POSIX sh shim that execs the first of `$AGENT_ROOM_HOOK`, `~/.cargo/bin/room-hook`,
+    `/opt/homebrew/bin/room-hook`, `/usr/local/bin/room-hook`, and otherwise drains stdin
+    and exits 0 (so a plugin without the app installed is silent). Overhead ~6 ms per
+    event. No universal binary, no quarantine question, no release artifacts.
+  - `room-app` builds a binary named `agent-room` (`[[bin]]`).
+  - Release profile: thin LTO + strip for all; `room-hook` additionally `opt-level = "z"`,
+    one codegen unit.
+  - `.claude-plugin/marketplace.json` (marketplace and plugin both named `agent-room`;
+    users: `/plugin marketplace add <owner>/agent-room`, `/plugin install
+    agent-room@agent-room`). `claude plugin validate .` and `… plugin` pass.
+  - `README.md` (install, use, privacy, uninstall, dev), `LICENSE` (MIT, tungs0ul),
+    `packaging/homebrew/agent-room.rb` (build-from-source formula template; needs the
+    GitHub owner, a release tag and its sha256).
+  - `scripts/build-plugin.sh` replaced by `scripts/install-dev.sh`.
+  **Left for the user (outward-facing, not done by agents):** create the GitHub repo and
+  push, replace `<owner>` in README and the formula, tag a release, optionally publish
+  the tap. Then test the real install path on a clean machine/user.

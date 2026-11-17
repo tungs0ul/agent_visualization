@@ -4,8 +4,13 @@
 - Do not re-open decisions listed in PLAN.md section 2 unless the user asks.
 - Bevy API changes between versions: check the examples for the exact Bevy version in
   `Cargo.lock` before writing Bevy code.
-- Hooks ship in the plugin under `plugin/`. Test with `claude --plugin-dir plugin`.
+- Hooks ship in the plugin under `plugin/`; `plugin/libexec/room-hook` is a shell shim
+  that runs the installed `room-hook`. Test with
+  `AGENT_ROOM_HOOK=$PWD/target/debug/room-hook claude --plugin-dir plugin`.
   Never write hooks into `~/.claude/settings.json`.
-- Before finishing a session: kill every process you started (`room-app`, test servers,
+- Check visuals yourself with screenshot mode (`AGENT_ROOM_SCREENSHOT_DIR`, see
+  `window.rs`) and `scripts/replay.py`, using an `AGENT_ROOM_DIR` under `$TMPDIR` so
+  the real `~/.agent-room` isn't touched.
+- Before finishing a session: kill every process you started (`agent-room`, test servers,
   replay scripts), then update PLAN.md "Status" and "Handoff log".
 - Never make the app or `room-hook` answer "allow" without an explicit user action.

@@ -1,0 +1,12 @@
+#!/bin/sh
+# Claude Code runs this for every hook event (see ../hooks/hooks.json). It hands the
+# event to the room-hook binary installed with Agent Room (`cargo install` or Homebrew).
+# When Agent Room isn't installed it exits silently, so the plugin never disturbs
+# Claude Code. Set AGENT_ROOM_HOOK to use a specific binary (development).
+for hook in "$AGENT_ROOM_HOOK" "$HOME/.cargo/bin/room-hook" /opt/homebrew/bin/room-hook /usr/local/bin/room-hook; do
+    if [ -n "$hook" ] && [ -x "$hook" ]; then
+        exec "$hook" "$@"
+    fi
+done
+cat > /dev/null
+exit 0

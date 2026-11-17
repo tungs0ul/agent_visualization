@@ -1,0 +1,14 @@
+{
+  "name": "agent-room",
+  "owner": {
+    "name": "tungs0ul"
+  },
+  "description": "Agent Room: watch Claude Code and its sub-agents work in an animated room, and answer permission prompts from a small always-on-top window.",
+  "plugins": [
+    {
+      "name": "agent-room",
+      "source": "./plugin",
+      "description": "Sends Claude Code events to the Agent Room app. Silent when the app isn't installed or running."
+    }
+  ]
+}
