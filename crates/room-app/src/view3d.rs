@@ -48,9 +48,9 @@ pub struct View3d {
 }
 
 impl View3d {
-    /// `AGENT_ROOM_VIEW3D=1` starts in 3D (screenshot tests).
+    /// 3D is the default view (PLAN.md M17); `AGENT_ROOM_VIEW3D=0` starts in 2D.
     pub fn from_env() -> Self {
-        Self { on: std::env::var_os("AGENT_ROOM_VIEW3D").is_some(), built: false }
+        Self { on: std::env::var("AGENT_ROOM_VIEW3D").map_or(true, |v| v != "0"), built: false }
     }
 }
 
@@ -151,7 +151,7 @@ pub fn build(
         Tonemapping::TonyMcMapface,
         Bloom::NATURAL,
         Msaa::Sample4,
-        Transform::from_xyz(0.0, 9.0, 10.5).looking_at(Vec3::new(0.0, 0.0, 0.2), Vec3::Y),
+        Transform::from_translation(FULL_EYE).looking_at(FULL_LOOK, Vec3::Y),
     ));
     commands.spawn((
         DirectionalLight { illuminance: 2500.0, color: Color::srgb(0.75, 0.75, 1.0), shadow_maps_enabled: true, ..default() },
@@ -413,7 +413,7 @@ pub fn labels(
     let Ok((camera, camera_at)) = camera.single() else { return Ok(()) };
     let offset = camera.logical_viewport_rect().map_or(Vec2::ZERO, |rect| rect.min);
     // A sign over each location, in its colour.
-    for location in crate::world3d::Location::ALL {
+    for location in crate::world3d::Location::ALL.into_iter().filter(|_| !mode.mini) {
         let Ok(screen) = camera.world_to_viewport(camera_at, location.center() + Vec3::Y * 2.6) else { continue };
         let screen = screen + offset;
         let glow = location.glow();
@@ -452,7 +452,8 @@ pub fn labels(
     }
     for (avatar, at) in &avatars {
         let Some((name, doing)) = lines.get(&avatar.of) else { continue };
-        let head = at.translation() + Vec3::Y * 1.05 * at.scale().y;
+        let lift = if mode.mini { 1.35 } else { 1.05 };
+        let head = at.translation() + Vec3::Y * lift * at.scale().y;
         let Ok(screen) = camera.world_to_viewport(camera_at, head) else { continue };
         let screen = screen + offset;
         egui::Area::new(egui::Id::new(("label3d", avatar.of)))
@@ -474,3 +475,34 @@ pub fn labels(
     }
     Ok(())
 }
+
+/// The full view shows the whole workspace; the mini widget follows Claude's robot
+/// up close, since the whole station would be too small to read there.
+pub fn frame(
+    view: Res<View3d>,
+    mode: Res<crate::mini::ViewMode>,
+    time: Res<Time>,
+    roster: Res<Roster>,
+    avatars: Query<(&Avatar, &Transform), Without<RoomCamera3d>>,
+    mut camera: Query<&mut Transform, With<RoomCamera3d>>,
+) {
+    if !view.on {
+        return;
+    }
+    let Ok(mut camera) = camera.single_mut() else { return };
+    let main = roster.character(&Who::Main);
+    let (eye, look) = match avatars.iter().find(|(avatar, _)| Some(avatar.of) == main) {
+        Some((_, at)) if mode.mini => (at.translation + Vec3::new(0.0, 3.0, 4.2), at.translation + Vec3::Y * 0.8),
+        _ => (FULL_EYE, FULL_LOOK),
+    };
+    let wanted = Transform::from_translation(eye).looking_at(look, Vec3::Y);
+    let blend = (time.delta_secs() * 4.0).min(1.0);
+    if camera.translation.distance(wanted.translation) > 0.001 {
+        camera.translation = camera.translation.lerp(wanted.translation, blend);
+        camera.rotation = camera.rotation.slerp(wanted.rotation, blend);
+    }
+}
+
+/// Where the camera looks at the whole workspace from.
+const FULL_EYE: Vec3 = Vec3::new(0.0, 9.0, 10.5);
+const FULL_LOOK: Vec3 = Vec3::new(0.0, 0.0, 0.2);
