@@ -7,6 +7,7 @@
 use std::f32::consts::{PI, TAU};
 
 use bevy::prelude::*;
+use bevy::text::{LineBreak, TextBounds, TextLayoutInfo};
 use bevy_prototype_lyon::prelude::*;
 use room_proto::describe::truncate;
 
@@ -23,6 +24,12 @@ const TRAIL_SPACING: f32 = 22.0;
 const TRAIL_Z: f32 = -5.0;
 const BUBBLE_FONT: f32 = 17.0;
 const BUBBLE_MAX_CHARS: usize = 42;
+/// Longer sentences wrap onto a second line instead of making a very wide bubble.
+const BUBBLE_TEXT_MAX_WIDTH: f32 = 260.0;
+/// Space between the text and the bubble's edge.
+const BUBBLE_PAD: Vec2 = Vec2::new(12.0, 5.0);
+/// A bubble is never smaller than this; its bottom edge stays where the tail starts.
+const BUBBLE_MIN_SIZE: Vec2 = Vec2::new(44.0, 32.0);
 /// Typewriter speed of speech bubbles.
 const CHARS_PER_SECOND: f32 = 45.0;
 /// After this long a bubble dims; it stays until the agent says something else.
@@ -197,6 +204,11 @@ pub struct Bubble {
     background: Entity,
     tail: Entity,
     label: Entity,
+    /// The not yet typed rest of the sentence: laid out but transparent, so the label's
+    /// layout size is the whole sentence's from the first letter on.
+    rest: Entity,
+    /// Current size of the background shape.
+    size: Vec2,
     /// Height above the character's feet at normal size (see `keep_text_readable`).
     base_y: f32,
 }
@@ -244,13 +256,31 @@ pub fn spawn_bubble(commands: &mut Commands, character: Entity, height: f32, fon
             Text2d::default(),
             TextFont::from_font_size(BUBBLE_FONT).with_font(font.0.clone()),
             TextColor(TEXT),
+            TextLayout::new(Justify::Center, LineBreak::WordOrCharacter),
+            TextBounds::new_horizontal(BUBBLE_TEXT_MAX_WIDTH),
             Transform::from_xyz(0.0, 0.0, 2.0),
             ChildOf(root),
         ))
         .id();
-    commands
-        .entity(root)
-        .insert(Bubble { text: String::new(), revealed: 0.0, age: 0.0, background, tail, label, base_y: height });
+    let rest = commands
+        .spawn((
+            TextSpan::default(),
+            TextFont::from_font_size(BUBBLE_FONT).with_font(font.0.clone()),
+            TextColor(Color::NONE),
+            ChildOf(label),
+        ))
+        .id();
+    commands.entity(root).insert(Bubble {
+        text: String::new(),
+        revealed: 0.0,
+        age: 0.0,
+        background,
+        tail,
+        label,
+        rest,
+        size: Vec2::ZERO,
+        base_y: height,
+    });
     root
 }
 
@@ -500,12 +530,22 @@ pub fn leave_when_done(
     }
 }
 
+/// Bubble size for text whose laid-out size is `text` (in room units).
+fn bubble_size(text: Vec2) -> Vec2 {
+    (text + 2.0 * BUBBLE_PAD).max(BUBBLE_MIN_SIZE).ceil()
+}
+
 /// Typewriter reveal, sizing to the text, dimming after a few seconds.
+///
+/// The label always lays out the whole sentence (the untyped rest is transparent), so
+/// the bubble is sized from Bevy's real text layout up front and doesn't grow while
+/// typing. The layout lands a frame after the text changes.
 pub fn update_bubbles(
     time: Res<Time>,
     mut bubbles: Query<(&mut Bubble, &mut Visibility)>,
-    mut shapes: Query<&mut Shape>,
-    mut labels: Query<(&mut Text2d, &mut TextColor)>,
+    mut shapes: Query<(&mut Shape, &mut Transform)>,
+    mut labels: Query<(&mut Text2d, &mut TextColor, &TextLayoutInfo, &mut Transform), Without<Shape>>,
+    mut rests: Query<&mut TextSpan>,
 ) {
     let dt = time.delta_secs();
     for (mut bubble, mut visibility) in &mut bubbles {
@@ -514,12 +554,11 @@ pub fn update_bubbles(
             continue;
         }
         visibility.set_if_neq(Visibility::Inherited);
-        let total = bubble.text.chars().count() as f32;
-        if bubble.revealed >= total && bubble.age > BUBBLE_FRESH + 0.5 {
+        let total = bubble.text.chars().count();
+        if bubble.revealed >= total as f32 && bubble.age > BUBBLE_FRESH + 0.5 {
             continue;
         }
-        let starting = bubble.revealed == 0.0;
-        bubble.revealed = (bubble.revealed + CHARS_PER_SECOND * dt).min(total);
+        bubble.revealed = (bubble.revealed + CHARS_PER_SECOND * dt).min(total as f32);
         bubble.age += dt;
         let alpha = if bubble.age <= BUBBLE_FRESH {
             1.0
@@ -527,32 +566,48 @@ pub fn update_bubbles(
             1.0 - (1.0 - BUBBLE_DIM_ALPHA) * ((bubble.age - BUBBLE_FRESH) / 0.5).min(1.0)
         };
 
-        // Only write when something changed: any write re-shapes the text, and doing
-        // that for every bubble 30 times a second cost a third of a CPU core.
-        if let Ok((mut text, mut color)) = labels.get_mut(bubble.label) {
-            let shown: String = bubble.text.chars().take(bubble.revealed.ceil() as usize).collect();
-            if text.0 != shown {
-                text.0 = shown;
-            }
-            let wanted = TEXT.with_alpha(alpha);
-            if color.0 != wanted {
-                color.0 = wanted;
-            }
+        let shown = bubble.revealed.ceil() as usize;
+        let split = bubble.text.char_indices().nth(shown).map_or(bubble.text.len(), |(i, _)| i);
+        let (typed, rest) = bubble.text.split_at(split);
+        if let Ok(mut span) = rests.get_mut(bubble.rest)
+            && span.0 != rest
+        {
+            span.0 = rest.to_owned();
         }
-        // Sized for the whole sentence up front, so it doesn't grow while typing.
-        if starting || alpha < 1.0 {
-            let width = (total * BUBBLE_FONT * 0.47 + 24.0).clamp(44.0, 420.0);
-            if let Ok(mut shape) = shapes.get_mut(bubble.background) {
-                *shape = rounded(
-                    Vec2::new(width, 32.0),
-                    9.0,
-                    BUBBLE_FILL.with_alpha(alpha),
-                    Some((BUBBLE_EDGE.with_alpha(alpha), 1.5)),
-                );
-            }
-            if let Ok(mut shape) = shapes.get_mut(bubble.tail) {
-                shape.fill = Some(Fill::color(BUBBLE_FILL.with_alpha(alpha)));
-            }
+        let Ok((mut text, mut color, layout, mut label_transform)) = labels.get_mut(bubble.label) else {
+            continue;
+        };
+        if text.0 != typed {
+            text.0 = typed.to_owned();
+        }
+        // Write only on change: any write re-shapes the text (that cost a third of a
+        // CPU core at 30 fps).
+        let wanted = TEXT.with_alpha(alpha);
+        if color.0 != wanted {
+            color.0 = wanted;
+        }
+        if layout.size == Vec2::ZERO || layout.scale_factor <= 0.0 {
+            continue;
+        }
+        let size = bubble_size(layout.size / layout.scale_factor);
+        if size == bubble.size && alpha >= 1.0 {
+            continue;
+        }
+        bubble.size = size;
+        // Taller bubbles (wrapped text) grow upwards so the bottom edge meets the tail.
+        let centre = (size.y - BUBBLE_MIN_SIZE.y) / 2.0;
+        label_transform.translation.y = centre;
+        if let Ok((mut shape, mut transform)) = shapes.get_mut(bubble.background) {
+            *shape = rounded(
+                size,
+                9.0,
+                BUBBLE_FILL.with_alpha(alpha),
+                Some((BUBBLE_EDGE.with_alpha(alpha), 1.5)),
+            );
+            transform.translation.y = centre;
+        }
+        if let Ok((mut shape, _)) = shapes.get_mut(bubble.tail) {
+            shape.fill = Some(Fill::color(BUBBLE_FILL.with_alpha(alpha)));
         }
     }
 }
@@ -646,4 +701,31 @@ pub fn detect_motion(
 pub fn phase_for(key: &str) -> f32 {
     let hash = key.bytes().fold(7u32, |h, b| h.wrapping_mul(31).wrapping_add(b as u32));
     (hash % 1000) as f32 / 1000.0 * TAU
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bubble_fits_its_text_with_padding() {
+        let text = Vec2::new(301.4, 23.0);
+        let size = bubble_size(text);
+        assert!(size.x >= text.x + 2.0 * BUBBLE_PAD.x);
+        assert!(size.y >= text.y + 2.0 * BUBBLE_PAD.y);
+        assert_eq!(size, size.ceil());
+    }
+
+    #[test]
+    fn short_text_keeps_the_minimum_bubble() {
+        assert_eq!(bubble_size(Vec2::new(5.0, 10.0)), BUBBLE_MIN_SIZE);
+    }
+
+    #[test]
+    fn wrapped_text_makes_a_taller_bubble() {
+        let one_line = bubble_size(Vec2::new(200.0, 23.0));
+        let two_lines = bubble_size(Vec2::new(BUBBLE_TEXT_MAX_WIDTH, 46.0));
+        assert!(two_lines.y > one_line.y);
+        assert!(two_lines.x <= BUBBLE_TEXT_MAX_WIDTH + 2.0 * BUBBLE_PAD.x);
+    }
 }
