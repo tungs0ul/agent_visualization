@@ -1029,7 +1029,7 @@ config file, and can remove both cleanly.
 - [x] M14 Themes: light, dark, spaceship (2026-11-17)
 - [x] M15 3D station view, first version (2026-11-17; see M15 "Next")
 - [ ] M16 Custom themes from the user's models (paused: one look for now, see M17)
-- [ ] M17 Agentverse 3D workspace (phases 1-6)
+- [ ] M17 Agentverse 3D workspace (phases 1-3 done 2026-11-17: robot, workspace, movement; 3D default incl. mini; one dark look. Next: 4 capsule hand-over + paths, 5 UI panels, 6 power)
 - [x] M5 Permissions (2026-11-17; user still to try Y/N and a deny reason live)
 - [ ] M6 Polish
 - [x] M7 Distribution, code side (2026-11-17); publishing left to the user
@@ -1432,3 +1432,12 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   themes. Plugin version 0.2.0. **Next:** user runs `scripts/install-dev.sh`
   (binaries + plugin update), restarts Claude Code with the flag, tries sending from
   the chat window; checks camera drag, panel scrolling and mini mode.
+- 2026-11-17, Claude Opus 5.5 (same session, evening): user switched direction to the
+  "Agentverse" 3D workspace (M17). Built: Blender robot (`tools/blender/robot.py`, a
+  subagent wrote it), `world3d.rs` workspace with five locations and bloom, robots walk
+  to the location for their pose, 3D is the default and also in mini mode (camera
+  follows Claude), one dark look (theme switching removed). Perf fix: bubble text was
+  re-shaped every frame; 10 fps while unfocused. Two earlier subagents (chibi 2D,
+  bubble overflow) were stopped unfinished because their separate worktree builds
+  heated the Mac; their worktrees are still in `.claude/worktrees` (12.8 GB), waiting
+  for the user's OK to delete. **Next:** M17 phases 4-6; bubble overflow fix in 2D.
