@@ -20,5 +20,9 @@ crossbeam-channel = "0.5"
 bevy_prototype_lyon = "0.18.0"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-# The frosted widget background of mini mode (NSVisualEffectView).
-window-vibrancy = "0.8.1"
+# The frosted widget background of mini mode: an NSVisualEffectView placed behind
+# Bevy's view (see mini.rs).
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSView", "NSResponder", "NSVisualEffectView", "NSGraphics"] }
+objc2-foundation = { version = "0.3", features = ["NSGeometry"] }
+raw-window-handle = "0.6"

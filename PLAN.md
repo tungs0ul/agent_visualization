@@ -1079,6 +1079,14 @@ Later in the session (2026-11-17):
   title shows "repo · branch"; roster rows add "· in other-repo · branch" when an agent
   works outside the home repo. Verified with real repos (claude-room · main, smart_haus ·
   master).
+- Fixed (user report): speech bubbles faded to 60 % after 4 s and were small, so the
+  text was unreadable; now font 17, box 32 high, dim only to 90 %, darker `TEXT`.
+- Fixed (user report): mini mode showed a blurred blob. `window-vibrancy` inserts its
+  effect view *inside* Bevy's NSView, above the CAMetalLayer, so it blurred the room
+  itself. Replaced by our own `NSVisualEffectView` (Popover material, behind-window
+  blending) added to the view's **superview**, below Bevy's view (`mini::set_glass`,
+  objc2 0.6 / objc2-app-kit 0.3). Toggle test passes; the look must be checked on screen
+  (no rounded corners yet).
 - **Next:** M4d part 2 — draw a room per repo in use: a second floor area beside the
   office (sign "repo · branch", a few desks, library/servers corners), agents whose
   `repo` differs from the home repo walk there instead of the home zones; rooms appear

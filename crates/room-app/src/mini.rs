@@ -14,9 +14,6 @@ use crate::window::SavedWindow;
 pub const MINI_SIZE: Vec2 = Vec2::new(320.0, 200.0);
 /// Logical gap to the screen's right edge and below the menu bar.
 const MINI_MARGIN: Vec2 = Vec2::new(12.0, 44.0);
-/// Rounded corners of the glass, like macOS widgets.
-#[cfg(target_os = "macos")]
-const CORNER_RADIUS: f64 = 18.0;
 
 /// Room parts hidden in mini mode, where only the characters are drawn.
 #[derive(Component)]
@@ -135,25 +132,43 @@ pub fn hide_new_desks(mode: Res<ViewMode>, mut desks: Query<&mut Visibility, Add
     }
 }
 
-/// Liquid Glass on macOS 26+, the classic frosted popover material before that.
+#[cfg(target_os = "macos")]
+thread_local! {
+    /// The frosted view while mini mode is on (AppKit objects live on the main thread).
+    static GLASS: std::cell::RefCell<Option<objc2::rc::Retained<objc2_app_kit::NSVisualEffectView>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// A frosted NSVisualEffectView *behind* Bevy's view. It has to be a sibling below
+/// Bevy's view, in its superview: inside Bevy's view it would sit above the Metal layer
+/// and blur the room itself (what `window-vibrancy` did).
 #[cfg(target_os = "macos")]
 fn set_glass(handle: &RawHandleWrapper, on: bool) {
-    use window_vibrancy::{
-        LiquidGlassOptions, NSGlassEffectViewStyle, NSVisualEffectMaterial, NSVisualEffectState, apply_liquid_glass,
-        apply_vibrancy, clear_liquid_glass, clear_vibrancy,
+    use objc2::{MainThreadMarker, MainThreadOnly};
+    use objc2_app_kit::{
+        NSAutoresizingMaskOptions, NSView, NSVisualEffectBlendingMode, NSVisualEffectMaterial, NSVisualEffectState,
+        NSVisualEffectView, NSWindowOrderingMode,
     };
-    // SAFETY: `apply_mode` runs on the main thread, as AppKit requires.
-    let window = unsafe { handle.get_handle() };
-    if on {
-        let glass = LiquidGlassOptions::new(NSGlassEffectViewStyle::Regular).radius(CORNER_RADIUS);
-        if apply_liquid_glass(&window, glass).is_err()
-            && let Err(err) =
-                apply_vibrancy(&window, NSVisualEffectMaterial::Popover, Some(NSVisualEffectState::Active), Some(CORNER_RADIUS))
-        {
-            warn!("no frosted background for mini mode: {err}");
+    GLASS.with_borrow_mut(|glass| {
+        if let Some(old) = glass.take() {
+            old.removeFromSuperview();
         }
-    } else {
-        let _ = clear_liquid_glass(&window);
-        let _ = clear_vibrancy(&window);
-    }
+        if !on {
+            return;
+        }
+        let raw_window_handle::RawWindowHandle::AppKit(handle) = handle.get_window_handle() else { return };
+        // `apply_mode` runs on the main thread (`NonSendMarker`).
+        let Some(main_thread) = MainThreadMarker::new() else { return };
+        // SAFETY: the handle points at the live NSView of our window.
+        let view: &NSView = unsafe { handle.ns_view.cast::<NSView>().as_ref() };
+        // SAFETY: plain AppKit getter, on the main thread.
+        let Some(container) = (unsafe { view.superview() }) else { return };
+        let effect = NSVisualEffectView::initWithFrame(NSVisualEffectView::alloc(main_thread), container.bounds());
+        effect.setMaterial(NSVisualEffectMaterial::Popover);
+        effect.setBlendingMode(NSVisualEffectBlendingMode::BehindWindow);
+        effect.setState(NSVisualEffectState::Active);
+        effect.setAutoresizingMask(NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewHeightSizable);
+        container.addSubview_positioned_relativeTo(&effect, NSWindowOrderingMode::Below, Some(view));
+        *glass = Some(effect);
+    });
 }

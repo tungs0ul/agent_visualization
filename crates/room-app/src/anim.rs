@@ -21,13 +21,13 @@ const MAX_WALK_SECONDS: f32 = 2.2;
 const TRAIL_SPACING: f32 = 22.0;
 /// Path dots lie on the floor: above the zone rugs, below every character and desk.
 const TRAIL_Z: f32 = -5.0;
-const BUBBLE_FONT: f32 = 13.0;
+const BUBBLE_FONT: f32 = 17.0;
 const BUBBLE_MAX_CHARS: usize = 42;
 /// Typewriter speed of speech bubbles.
 const CHARS_PER_SECOND: f32 = 45.0;
 /// After this long a bubble dims; it stays until the agent says something else.
 const BUBBLE_FRESH: f32 = 4.0;
-const BUBBLE_DIM_ALPHA: f32 = 0.6;
+const BUBBLE_DIM_ALPHA: f32 = 0.9;
 /// How long the paper takes to pass from the sub-agent's hand into Claude's.
 const HAND_OVER_SECONDS: f32 = 0.45;
 const PAPER_Z: f32 = 60.0;
@@ -219,7 +219,7 @@ pub fn spawn_bubble(commands: &mut Commands, character: Entity, height: f32, fon
         .spawn((Transform::from_xyz(0.0, height, 30.0), Visibility::Hidden, ChildOf(character)))
         .id();
     let background = commands
-        .spawn((rounded(Vec2::new(40.0, 26.0), 9.0, BUBBLE_FILL, Some((BUBBLE_EDGE, 1.5))), ChildOf(root)))
+        .spawn((rounded(Vec2::new(40.0, 32.0), 11.0, BUBBLE_FILL, Some((BUBBLE_EDGE, 1.5))), ChildOf(root)))
         .id();
     let tail_shape = shapes::Polygon {
         points: vec![Vec2::new(-6.0, 0.0), Vec2::new(6.0, 0.0), Vec2::new(0.0, -8.0)],
@@ -228,7 +228,7 @@ pub fn spawn_bubble(commands: &mut Commands, character: Entity, height: f32, fon
     let tail = commands
         .spawn((
             ShapeBuilder::with(&tail_shape).fill(BUBBLE_FILL).build(),
-            Transform::from_xyz(0.0, -12.5, 1.0),
+            Transform::from_xyz(0.0, -15.5, 1.0),
             ChildOf(root),
         ))
         .id();
@@ -495,10 +495,10 @@ pub fn update_bubbles(
         }
         // Sized for the whole sentence up front, so it doesn't grow while typing.
         if starting || alpha < 1.0 {
-            let width = (total * BUBBLE_FONT * 0.47 + 22.0).clamp(40.0, 320.0);
+            let width = (total * BUBBLE_FONT * 0.47 + 24.0).clamp(44.0, 420.0);
             if let Ok(mut shape) = shapes.get_mut(bubble.background) {
                 *shape = rounded(
-                    Vec2::new(width, 26.0),
+                    Vec2::new(width, 32.0),
                     9.0,
                     BUBBLE_FILL.with_alpha(alpha),
                     Some((BUBBLE_EDGE.with_alpha(alpha), 1.5)),
