@@ -7,6 +7,7 @@
 
 mod anim;
 mod camera;
+mod chat;
 mod log;
 mod mini;
 mod model;
@@ -75,16 +76,17 @@ fn main() -> AppExit {
         .init_resource::<repo::RepoCache>()
         .init_resource::<camera::CameraControl>()
         .init_resource::<ui::MarkdownCache>()
+        .init_resource::<chat::Chats>()
         .init_resource::<Model>()
         .init_resource::<Roster>()
         .init_resource::<Animating>()
-        .add_systems(Startup, ((scene::load_font, scene::spawn_room).chain(), spawn_ui_camera, connect_waker))
+        .add_systems(Startup, ((scene::load_font, scene::spawn_room).chain(), spawn_ui_camera, connect_waker, chat::init_folder))
         .add_systems(
             Update,
             (
                 (window::place_in_corner, window::hotkeys, mini::toggle, mini::drag, mini::apply_mode, window::remember_geometry)
                     .chain(),
-                receive_events,
+                (receive_events, chat::dev_chat, chat::read_chats),
                 scene::apply_changes,
                 scene::apply_pending,
                 mini::hide_new_desks,

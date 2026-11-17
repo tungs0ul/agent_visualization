@@ -614,6 +614,31 @@ repository appears and the agent walks there.
   follow it; click again (or Esc) to unpin. The pinned agent gets a highlight ring.
 - Manual camera input pauses the automatic follow until reset.
 
+### M8a status (2026-11-17, end of session: IN PROGRESS)
+
+- Done: `chat.rs` — `ChatSession` spawns `claude -p --input-format stream-json
+  --output-format stream-json --verbose` in a chosen folder (+ `--plugin-dir
+  $AGENT_ROOM_PLUGIN_DIR`, + `$AGENT_ROOM_CLAUDE_ARGS`), reader thread → channel → wakes
+  the app; `send()` writes `{"type":"user","message":{"role":"user","content":…}}`;
+  `assistant` text blocks → transcript, `result` → not busy + session id. Drop kills the
+  child; also, when the app dies, the child sees stdin close and exits (verified).
+  `Chats` resource; "Chat" button in the side panel; `ui::chat_window` (folder field +
+  Start, transcript with markdown, input with Enter-to-send, Stop).
+  Dev: `AGENT_ROOM_DEV_CHAT="<folder>|<message>"` starts a session and sends a message.
+- Verified: a session started from the app runs, its hooks reach the room (log shows the
+  prompt and "Done: - 2+2 = 4…").
+- **Bug to fix first:** in that run neither the chat window nor the final-answer pop-up
+  was visible in the screenshot (both should be). Suspect `chat_window`: the
+  `ScrollArea::max_height(ui.available_height() - 70.0)` inside a new `egui::Window` may
+  be negative/zero on the first frame, or the window is placed off-screen; check with a
+  fixed `min_size`/`fixed_size` and `.anchor(...)`, and check whether drawing it before
+  the final-answer pop-up hides that pop-up. Reproduce with the dev env var above plus
+  `AGENT_ROOM_CLAUDE_ARGS="--model haiku"`, `AGENT_ROOM_PLUGIN_DIR=$PWD/plugin`,
+  `AGENT_ROOM_HOOK=$PWD/target/debug/room-hook`, screenshot mode.
+- Requested, not started: **M11** show the app's own CPU, RAM and FPS (e.g. a small
+  toggleable overlay; `sysinfo` for the process, Bevy `FrameTimeDiagnosticsPlugin`).
+  Rendering is already capped: ~30 fps while animating (`FRAME` 33 ms), 0 when idle.
+
 ### M8 design update (2026-11-17, user asked: "can we start a new session in our app instead of opening a terminal?")
 
 Two parts; do **8a first**, it is simpler and fully supported:

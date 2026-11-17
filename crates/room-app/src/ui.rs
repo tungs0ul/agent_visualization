@@ -13,7 +13,9 @@ use room_proto::event::ToolCall;
 use room_proto::{Decision, PermissionReply};
 
 use crate::log::{AutoAccept, LogLine, PendingPermission, Question, RoomLog, keyboard_target};
+use crate::chat::{Chats, Speaker};
 use crate::mini::{ToggleMini, ViewMode};
+use crate::server::Server;
 use crate::model::{Model, Pose, SessionState, Status, Who};
 use crate::scene::{Agent, Roster};
 use bevy::ecs::system::SystemParam;
@@ -45,6 +47,7 @@ pub fn draw(
     window: Single<&Window, With<PrimaryWindow>>,
     mut camera: Single<&mut Camera, With<WorldCamera>>,
     in_room: InRoom,
+    mut chat: ChatParams,
     mut markdown: ResMut<MarkdownCache>,
     mut styled: Local<bool>,
 ) -> Result {
@@ -116,6 +119,9 @@ pub fn draw(
                     toggle_mini.write(ToggleMini);
                 }
                 auto_button(ui, &mut auto);
+                if ui.small_button("Chat").on_hover_text("Start and talk to a Claude session here").clicked() {
+                    chat.chats.open = !chat.chats.open;
+                }
             });
             ui.separator();
             if let Some(session) = model.shown() {
@@ -193,6 +199,7 @@ pub fn draw(
         };
         log.note(&pending.session, pending.agent, format!("{verb} {}", pending.tool.describe().1));
     }
+    chat_window(ctx, &mut chat, &mut markdown);
     question_popup(ctx, &mut log, now);
     final_answer_popup(ctx, &mut log, &mut markdown, mode.mini);
     Ok(())
@@ -328,6 +335,95 @@ fn final_answer_popup(ctx: &egui::Context, log: &mut RoomLog, markdown: &mut Mar
         });
     if close {
         log.final_answer = None;
+    }
+}
+
+/// The app's own Claude session (PLAN.md M8a).
+#[derive(SystemParam)]
+pub struct ChatParams<'w> {
+    chats: ResMut<'w, Chats>,
+    server: Res<'w, Server>,
+}
+
+fn chat_window(ctx: &egui::Context, chat: &mut ChatParams, markdown: &mut MarkdownCache) {
+    let waker = chat.server.waker.clone();
+    let chats = &mut *chat.chats;
+    if !chats.open {
+        return;
+    }
+    let mut open = true;
+    let (mut start, mut stop, mut send) = (false, false, false);
+    egui::Window::new("Chat with Claude")
+        .id("chat".into())
+        .open(&mut open)
+        .default_size(ctx.viewport_rect().size() * egui::vec2(0.45, 0.7))
+        .show(ctx, |ui| {
+            let Some(session) = chats.session.as_mut() else {
+                ui.label("Start a Claude Code session in a folder:");
+                ui.add(egui::TextEdit::singleline(&mut chats.folder).desired_width(f32::INFINITY));
+                if ui.button("Start session").clicked() {
+                    start = true;
+                }
+                if let Some(error) = &chats.error {
+                    ui.colored_label(DENY, error);
+                }
+                return;
+            };
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new(&session.cwd).small().weak());
+                if ui.small_button("Stop").on_hover_text("End this session").clicked() {
+                    stop = true;
+                }
+            });
+            ui.separator();
+            let input_height = 70.0;
+            egui::ScrollArea::vertical()
+                .stick_to_bottom(true)
+                .auto_shrink(false)
+                .max_height(ui.available_height() - input_height)
+                .show(ui, |ui| {
+                    for (speaker, text) in &session.transcript {
+                        match speaker {
+                            Speaker::You => {
+                                ui.label(egui::RichText::new(format!("You: {text}")).strong());
+                            }
+                            Speaker::Claude => {
+                                egui_commonmark::CommonMarkViewer::new().show(ui, &mut markdown.0, text);
+                            }
+                            Speaker::Note => {
+                                ui.label(egui::RichText::new(text).weak().italics());
+                            }
+                        }
+                        ui.add_space(6.0);
+                    }
+                    if session.busy {
+                        ui.label(egui::RichText::new("Claude is working…").weak().italics());
+                    }
+                });
+            let response = ui.add(
+                egui::TextEdit::multiline(&mut chats.input)
+                    .hint_text("Message Claude (Enter sends, Shift+Enter for a new line)")
+                    .desired_rows(2)
+                    .desired_width(f32::INFINITY),
+            );
+            let enter = response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift);
+            if enter || ui.button("Send").clicked() {
+                send = true;
+            }
+        });
+    if !open {
+        chats.open = false;
+    }
+    if start {
+        chats.start(waker);
+    }
+    if stop {
+        chats.session = None;
+    }
+    let message = chats.input.trim().to_owned();
+    if send && !message.is_empty() && let Some(session) = chats.session.as_mut() {
+        session.send(&message);
+        chats.input.clear();
     }
 }
 
