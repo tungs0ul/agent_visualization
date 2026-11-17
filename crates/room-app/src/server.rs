@@ -6,7 +6,7 @@
 //! user answers.
 
 use std::fs::{self, File, Permissions};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, ErrorKind, Read, Write};
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
@@ -35,6 +35,24 @@ pub struct Incoming {
 pub struct ReplyHandle(UnixStream);
 
 impl ReplyHandle {
+    /// True once the waiting `room-hook` is gone: Claude Code stopped waiting (the user
+    /// pressed Esc, the turn was interrupted) or the hook timed out.
+    pub fn is_closed(&self) -> bool {
+        if self.0.set_nonblocking(true).is_err() {
+            return false;
+        }
+        // The hook never sends anything after its request, so reading consumes nothing
+        // that matters: 0 bytes means the other end closed.
+        let mut probe = [0u8; 1];
+        let closed = match (&self.0).read(&mut probe) {
+            Ok(0) => true,
+            Ok(_) => false,
+            Err(err) => err.kind() != ErrorKind::WouldBlock,
+        };
+        let _ = self.0.set_nonblocking(false);
+        closed
+    }
+
     pub fn send(mut self, reply: &PermissionReply) {
         let Ok(mut line) = serde_json::to_string(reply) else { return };
         line.push('\n');
@@ -131,5 +149,29 @@ fn handle(stream: UnixStream, sender: &Sender<Incoming>, waker: &Waker) {
         && let Some(wake) = waker.get()
     {
         wake();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reply_handle_notices_when_the_hook_goes_away() {
+        let (app_side, hook_side) = UnixStream::pair().unwrap();
+        let handle = ReplyHandle(app_side);
+        assert!(!handle.is_closed());
+        assert!(!handle.is_closed(), "probing must not change the answer");
+        drop(hook_side);
+        assert!(handle.is_closed());
+    }
+
+    #[test]
+    fn reply_reaches_the_hook() {
+        let (app_side, hook_side) = UnixStream::pair().unwrap();
+        ReplyHandle(app_side).send(&PermissionReply { decision: room_proto::Decision::Allow, message: None });
+        let mut line = String::new();
+        BufReader::new(hook_side).read_line(&mut line).unwrap();
+        assert_eq!(line, "{\"decision\":\"allow\"}\n");
     }
 }

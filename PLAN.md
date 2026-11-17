@@ -656,7 +656,7 @@ config file, and can remove both cleanly.
       Spaces.
 - [x] M4 Life (2026-11-17)
 - [ ] M4b Office zones (agents walk to where the work is)
-- [ ] M5 Permissions
+- [x] M5 Permissions (2026-11-17; user still to try Y/N and a deny reason live)
 - [ ] M6 Polish
 - [ ] M7 Distribution
 
@@ -815,3 +815,19 @@ anything surprising.
   The log and UI read the model (`model.shown()`, `agent_type()`), so the roster list
   and office zones later only need drawing code. Visual replay unchanged.
   **Next:** M5 Permissions.
+- 2026-11-17, Claude Opus 5.5: M5 done (function part).
+  - Y / N answer the oldest card once its 300 ms guard has passed (`log::keyboard_target`);
+    keys are ignored while egui has keyboard focus (typing a reason). Buttons show the
+    key on the card the keys apply to.
+  - Optional deny reason per card; sent as "The user denied this: <reason>".
+  - `ReplyHandle::is_closed()` (non-blocking read: 0 bytes = hook gone). Cards whose hook
+    disappeared (Claude Code stopped waiting: Esc / interrupt) are removed as
+    "cancelled"; timed-out ones as "answered in the terminal" (`settle_permissions`).
+  - Hook timing tests warm the binary up first: macOS scans a freshly built binary on
+    first launch, which broke the 500 ms limits.
+  - Verified end to end: request through room-hook ⇒ card with reason field and key
+    hints; killing the hook ⇒ "Bash: cancelled".
+  - Deferred to the visual phase: card anchored above the asking agent in the scene;
+    "request attention" (needs the winit window via `bevy::winit::WINIT_WINDOWS`, a
+    main-thread `thread_local`, so a system with `NonSendMarker`).
+  **Next:** step 3: session picker + roster list.

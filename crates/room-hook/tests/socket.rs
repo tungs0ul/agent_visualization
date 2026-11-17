@@ -37,6 +37,16 @@ fn state_dir() -> StateDir {
     StateDir(dir)
 }
 
+/// macOS scans a freshly built binary on its first launch, which can take longer than the
+/// timing limits below. Launch it once, untimed, before measuring.
+fn warm_up() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let dir = state_dir();
+        run_hook(&dir, PRE_TOOL);
+    });
+}
+
 fn run_hook(dir: &Path, stdin: &str) -> Output {
     let mut child = Command::new(env!("CARGO_BIN_EXE_room-hook"))
         .env("AGENT_ROOM_DIR", dir)
@@ -79,6 +89,7 @@ fn assert_silent_success(output: &Output) {
 
 #[test]
 fn app_not_running_is_silent_and_fast() {
+    warm_up();
     let dir = state_dir();
     let started = Instant::now();
     let output = run_hook(&dir, PERMISSION);
@@ -89,6 +100,7 @@ fn app_not_running_is_silent_and_fast() {
 
 #[test]
 fn regular_event_is_forwarded_without_waiting() {
+    warm_up();
     let dir = state_dir();
     let app = fake_app(&dir, None);
     let started = Instant::now();

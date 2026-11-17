@@ -28,12 +28,19 @@ pub struct PendingPermission {
     pub shown_at: Instant,
     pub expires_at: Instant,
     pub reply: ReplyHandle,
+    /// Optional reason typed into the card; sent to Claude on Deny.
+    pub reason: String,
 }
 
 impl PendingPermission {
     pub fn accepts_input(&self, now: Instant) -> bool {
         now >= self.shown_at + INPUT_GUARD
     }
+}
+
+/// The card the Y and N keys answer: the oldest one that accepts input yet.
+pub fn keyboard_target(pending: &[PendingPermission], now: Instant) -> Option<usize> {
+    pending.first().filter(|card| card.accepts_input(now)).map(|_| 0)
 }
 
 #[derive(Resource, Default)]

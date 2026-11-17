@@ -1,6 +1,7 @@
 //! egui overlay: permission cards and the event log, beside the room when the window
 //! is wide, or a one-line ticker under it when the window is small (PLAN.md 4.6).
 
+use std::collections::VecDeque;
 use std::time::Instant;
 
 use bevy::camera::Viewport;
@@ -10,7 +11,7 @@ use bevy_egui::{EguiContexts, egui};
 use room_proto::event::ToolCall;
 use room_proto::{Decision, PermissionReply};
 
-use crate::log::RoomLog;
+use crate::log::{LogLine, PendingPermission, RoomLog, keyboard_target};
 use crate::model::Model;
 use crate::scene::WorldCamera;
 
@@ -47,25 +48,38 @@ pub fn draw(
     );
     let now = Instant::now();
     let mut answers: Vec<(usize, Decision)> = Vec::new();
+    // Y / N answer the oldest card, unless the user is typing a deny reason.
+    if !ctx.egui_wants_keyboard_input()
+        && let Some(index) = keyboard_target(&log.pending, now)
+    {
+        ctx.input(|input| {
+            if input.key_pressed(egui::Key::Y) {
+                answers.push((index, Decision::Allow));
+            } else if input.key_pressed(egui::Key::N) {
+                answers.push((index, Decision::Deny));
+            }
+        });
+    }
+    let RoomLog { lines, pending } = &mut *log;
 
     if ctx.viewport_rect().width() >= WIDE_LAYOUT {
         egui::Panel::right("side").exact_size(SIDE_PANEL_WIDTH).show(&mut root, |ui| {
             ui.add_space(4.0);
             ui.label(egui::RichText::new(session_title(&model)).strong());
             ui.separator();
-            permission_cards(ui, &log, now, &mut answers);
-            event_log(ui, &log);
+            permission_cards(ui, pending, now, &mut answers);
+            event_log(ui, lines);
         });
     } else {
-        if !log.pending.is_empty() {
+        if !pending.is_empty() {
             egui::Panel::top("permissions").show(&mut root, |ui| {
                 egui::ScrollArea::vertical()
                     .max_height(ctx.viewport_rect().height() * 0.6)
-                    .show(ui, |ui| permission_cards(ui, &log, now, &mut answers));
+                    .show(ui, |ui| permission_cards(ui, pending, now, &mut answers));
             });
         }
         egui::Panel::bottom("ticker").show(&mut root, |ui| {
-            let latest = log.lines.back();
+            let latest = lines.back();
             let text = latest.map_or_else(|| session_title(&model), |line| format!("{}: {}", line.agent, line.text));
             ui.add(egui::Label::new(text).truncate());
         });
@@ -75,9 +89,12 @@ pub fn draw(
 
     // Highest index first, so removing one doesn't shift the others.
     answers.sort_by_key(|&(index, _)| std::cmp::Reverse(index));
+    answers.dedup_by_key(|&mut (index, _)| index);
     for (index, decision) in answers {
         let pending = log.pending.remove(index);
-        let message = (decision == Decision::Deny).then(|| DENY_MESSAGE.to_owned());
+        let reason = pending.reason.trim();
+        let message = (decision == Decision::Deny)
+            .then(|| if reason.is_empty() { DENY_MESSAGE.to_owned() } else { format!("The user denied this: {reason}") });
         pending.reply.send(&PermissionReply { decision, message });
         let verb = match decision {
             Decision::Allow => "Allowed",
@@ -95,8 +112,14 @@ fn session_title(model: &Model) -> String {
     }
 }
 
-fn permission_cards(ui: &mut egui::Ui, log: &RoomLog, now: Instant, answers: &mut Vec<(usize, Decision)>) {
-    for (index, pending) in log.pending.iter().enumerate() {
+fn permission_cards(
+    ui: &mut egui::Ui,
+    cards: &mut [PendingPermission],
+    now: Instant,
+    answers: &mut Vec<(usize, Decision)>,
+) {
+    let keyboard = keyboard_target(cards, now);
+    for (index, pending) in cards.iter_mut().enumerate() {
         ui.group(|ui| {
             ui.label(egui::RichText::new(format!("{} wants to use {}", pending.agent, pending.tool.name)).strong());
             // Always the full input: a shortened command could hide what it does.
@@ -107,12 +130,20 @@ fn permission_cards(ui: &mut egui::Ui, log: &RoomLog, now: Instant, answers: &mu
             if let Some(cwd) = &pending.cwd {
                 ui.small(format!("in {cwd}"));
             }
+            ui.add(
+                egui::TextEdit::singleline(&mut pending.reason)
+                    .hint_text("Reason if you deny (optional)")
+                    .desired_width(f32::INFINITY),
+            );
             ui.horizontal(|ui| {
                 let enabled = pending.accepts_input(now);
-                if ui.add_enabled(enabled, colored_button("Allow", ALLOW)).clicked() {
+                let keys = keyboard == Some(index);
+                let allow = if keys { "Allow  Y" } else { "Allow" };
+                let deny = if keys { "Deny  N" } else { "Deny" };
+                if ui.add_enabled(enabled, colored_button(allow, ALLOW)).clicked() {
                     answers.push((index, Decision::Allow));
                 }
-                if ui.add_enabled(enabled, colored_button("Deny", DENY)).clicked() {
+                if ui.add_enabled(enabled, colored_button(deny, DENY)).clicked() {
                     answers.push((index, Decision::Deny));
                 }
                 let left = pending.expires_at.saturating_duration_since(now).as_secs();
@@ -126,12 +157,12 @@ fn colored_button(text: &str, fill: egui::Color32) -> egui::Button<'_> {
     egui::Button::new(egui::RichText::new(text).color(egui::Color32::WHITE).strong()).fill(fill)
 }
 
-fn event_log(ui: &mut egui::Ui, log: &RoomLog) {
+fn event_log(ui: &mut egui::Ui, lines: &VecDeque<LogLine>) {
     egui::ScrollArea::vertical()
         .stick_to_bottom(true)
         .auto_shrink(false)
         .show(ui, |ui| {
-            for line in &log.lines {
+            for line in lines {
                 ui.horizontal_wrapped(|ui| {
                     ui.label(egui::RichText::new(&line.agent).strong());
                     ui.label(&line.text);

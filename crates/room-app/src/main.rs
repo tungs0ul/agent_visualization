@@ -76,7 +76,7 @@ fn main() -> AppExit {
                 (anim::walk, anim::leave_when_done, anim::animate_parts, anim::update_bubbles),
                 (anim::hand_over, anim::pulse),
                 anim::detect_motion,
-                expire_permissions,
+                settle_permissions,
                 pace_updates,
                 window::take_screenshots,
             )
@@ -150,21 +150,32 @@ fn receive_events(
                 shown_at: now,
                 expires_at: now + room_proto::permission_timeout(),
                 reply,
+                reason: String::new(),
             });
         }
     }
 }
 
-/// The hook has given up by now and Claude Code asks in the terminal instead.
-fn expire_permissions(mut log: ResMut<RoomLog>) {
-    let now = Instant::now();
-    if log.pending.iter().all(|p| p.expires_at > now) {
+/// Removes cards nobody can answer here any more: the hook timed out (Claude Code asks
+/// in the terminal) or Claude Code stopped waiting (Esc, interrupted turn).
+fn settle_permissions(mut log: ResMut<RoomLog>) {
+    if log.pending.is_empty() {
         return;
     }
-    let (expired, waiting): (Vec<_>, Vec<_>) = log.pending.drain(..).partition(|p| p.expires_at <= now);
-    log.pending = waiting;
-    for pending in expired {
-        log.note(pending.agent, format!("{}: answered in the terminal", pending.tool.name));
+    let now = Instant::now();
+    let mut index = 0;
+    while index < log.pending.len() {
+        let card = &log.pending[index];
+        let outcome = if card.expires_at <= now {
+            "answered in the terminal"
+        } else if card.reply.is_closed() {
+            "cancelled"
+        } else {
+            index += 1;
+            continue;
+        };
+        let card = log.pending.remove(index);
+        log.note(card.agent, format!("{}: {outcome}", card.tool.name));
     }
 }
 
