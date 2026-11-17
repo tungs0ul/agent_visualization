@@ -1091,7 +1091,19 @@ Later in the session (2026-11-17):
   (egui 0.36): headings, lists, inline code, highlighted code blocks with a copy button,
   quotes. Covers 86 % of the window (`FINAL_ANSWER_SHARE`), body text 18 (13 in mini),
   scrolls. egui has no bold face, so `**bold**` shows as normal weight.
-- **Next:** M4d part 2 — draw a room per repo in use: a second floor area beside the
+- **M4d part 2 (compact) done:** a zone "Other repos" (bottom-left, `Place::Away`)
+  with two desks; sub-agents whose latest tool call is in another repository than the
+  session's go there instead of the home zones (except Approval). Its sign
+  (`AwaySign`, bottom edge) lists the repos in use, e.g. "Other repos: smart_haus ·
+  master". Separate rooms per repository (several rooms, own zones) remain an option.
+- Agents reading hold an open book (`Part::Book`, accent-colored pages, slow tilt).
+- Fixed: session drop-down grew with long paths (ComboBox fits its text) → `.truncate()`
+  and `ui.set_max_width` in the side panel; the stray line is gone.
+- Fixed: in the full view the title bar showed the desktop (the window is created
+  transparent). `mini::set_glass` now always installs a backdrop behind Bevy's view:
+  `WindowBackground`/within-window in full view, `Popover`/behind-window in mini.
+- **Next:** M8 (chat via plugin channel), then M10 (context/limits) last.
+- (older note) **Next:** M4d part 2 — draw a room per repo in use: a second floor area beside the
   office (sign "repo · branch", a few desks, library/servers corners), agents whose
   `repo` differs from the home repo walk there instead of the home zones; rooms appear
   on first use, fade when unused; the wide camera fits all rooms. Then M8 (chat), and

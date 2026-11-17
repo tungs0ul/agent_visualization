@@ -88,7 +88,7 @@ fn main() -> AppExit {
                 scene::apply_changes,
                 scene::apply_pending,
                 mini::hide_new_desks,
-                scene::route_agents,
+                (scene::route_agents, scene::update_away_sign),
                 (anim::walk, anim::leave_when_done, anim::animate_parts, anim::update_bubbles, anim::update_chips),
                 (anim::hand_over, anim::pulse),
                 anim::detect_motion,

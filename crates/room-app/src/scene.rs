@@ -14,7 +14,7 @@ use crate::anim::{
 };
 use crate::camera::CameraControl;
 use crate::mini::Furniture;
-use crate::model::{Change, Pose, Who};
+use crate::model::{Change, Model, Pose, Who};
 
 // Draw order is by z: room -100..-60, characters 0..9 (their desk 5..8 in front of the
 // body), bubbles +30, planes 60. Never change an entity's z after spawning it: Bevy 0.20
@@ -60,13 +60,15 @@ struct Zone {
     tint: Color,
 }
 
-const ZONES: [Zone; 5] = [
+const ZONES: [Zone; 6] = [
     Zone { place: Place::Library, center: Vec2::new(-500.0, 235.0), size: Vec2::new(300.0, 190.0), tint: rgb(0xEC, 0xEF, 0xE0) },
     Zone { place: Place::Servers, center: Vec2::new(500.0, 235.0), size: Vec2::new(300.0, 190.0), tint: rgb(0xE5, 0xE9, 0xF0) },
     Zone { place: Place::WebBay, center: Vec2::new(-500.0, -115.0), size: Vec2::new(300.0, 230.0), tint: rgb(0xE3, 0xEE, 0xF3) },
     Zone { place: Place::Approval, center: Vec2::new(500.0, -115.0), size: Vec2::new(300.0, 230.0), tint: rgb(0xF5, 0xE6, 0xE1) },
     // The lounge by the door: decoration and a place to pass on the way out.
     Zone { place: Place::Door, center: Vec2::new(0.0, -340.0), size: Vec2::new(460.0, 140.0), tint: rgb(0xF2, 0xE8, 0xDB) },
+    // Work in another repository than the session's (its sign lists them).
+    Zone { place: Place::Away, center: Vec2::new(-470.0, -345.0), size: Vec2::new(370.0, 150.0), tint: rgb(0xEC, 0xE6, 0xF4) },
 ];
 /// Standing spots in a zone, relative to its center (props fill the top half).
 const SPOTS: [Vec2; 4] =
@@ -259,6 +261,12 @@ fn spawn_zone(commands: &mut Commands, zone: &Zone, font: &UiFont) {
             put(circle(8.0, ALERT), Vec2::new(45.0, top - 52.0), 52.0);
             put(rounded(Vec2::new(36.0, 24.0), 3.0, Color::WHITE, Some((DESK_EDGE, 1.5))), Vec2::new(-30.0, top - 60.0), 51.0);
         }
+        Place::Away => {
+            for x in [-90.0, 90.0] {
+                put(rounded(Vec2::new(110.0, 38.0), 9.0, DESK, Some((DESK_EDGE, 3.0))), Vec2::new(x, top - 58.0), 50.0);
+                put(rounded(Vec2::new(36.0, 20.0), 3.0, LAPTOP, None), Vec2::new(x, top - 52.0), 51.0);
+            }
+        }
         _ => {
             // Lounge: sofa, coffee machine, plants.
             put(rounded(Vec2::new(170.0, 44.0), 14.0, SOFA, None), Vec2::new(-80.0, 6.0), 50.0);
@@ -269,13 +277,17 @@ fn spawn_zone(commands: &mut Commands, zone: &Zone, font: &UiFont) {
             put(circle(6.0, Color::WHITE), Vec2::new(120.0, 2.0), 51.0);
         }
     }
-    commands.spawn((
+    let mut label = commands.spawn((
         Text2d(zone.place.name().to_owned()),
         TextFont::from_font_size(13.0).with_font(font.0.clone()),
         TextColor(ZONE_LABEL),
         Transform::from_xyz(-zone.size.x / 2.0 + 44.0, top - 14.0, 60.0),
         ChildOf(root),
     ));
+    if zone.place == Place::Away {
+        // At the bottom edge, where speech bubbles of the agents inside don't cover it.
+        label.insert((AwaySign, bevy::sprite::Anchor::CENTER_LEFT, Transform::from_xyz(-zone.size.x / 2.0 + 14.0, -top + 14.0, 60.0)));
+    }
     if zone.place == Place::Door {
         spawn_plant(commands, zone.center + Vec2::new(-200.0, 10.0));
         spawn_plant(commands, zone.center + Vec2::new(200.0, 10.0));
@@ -305,6 +317,43 @@ fn zone_spot(place: Place, slot: usize) -> Vec2 {
 pub struct Home {
     seat: Vec2,
     slot: usize,
+    id: String,
+}
+
+/// The "Other repos" room's sign, listing the repositories in use there.
+#[derive(Component)]
+pub struct AwaySign;
+
+pub fn update_away_sign(model: Res<Model>, mut signs: Query<&mut Text2d, With<AwaySign>>) {
+    if !model.is_changed() {
+        return;
+    }
+    let Some(session) = model.shown() else { return };
+    let home = session.home_repo.as_ref().map(|repo| &repo.root);
+    let mut away: Vec<String> = session
+        .agents
+        .iter()
+        .filter(|(_, info)| info.status != crate::model::Status::Done)
+        .filter_map(|(_, info)| info.repo.as_ref())
+        .chain(session.main_repo.as_ref())
+        .filter(|repo| Some(&repo.root) != home)
+        .map(|repo| repo.label())
+        .collect();
+    away.dedup();
+    let text = if away.is_empty() { "Other repos".to_owned() } else { format!("Other repos: {}", away.join(", ")) };
+    for mut sign in &mut signs {
+        if sign.0 != text {
+            sign.0.clone_from(&text);
+        }
+    }
+}
+
+/// Whether a sub-agent's latest work is in another repository than the session's.
+fn works_elsewhere(model: &Model, id: &str) -> bool {
+    model.shown().is_some_and(|session| {
+        let repo = session.agent(id).and_then(|info| info.repo.as_ref());
+        repo.is_some_and(|repo| Some(&repo.root) != session.home_repo.as_ref().map(|home| &home.root))
+    })
 }
 
 type RoutableAgent<'a> = (Entity, &'a Transform, &'a Pose, &'a Home, &'a Station);
@@ -315,10 +364,15 @@ pub fn route_agents(
     mut commands: Commands,
     time: Res<Time>,
     agents: Query<RoutableAgent, (Without<Walk>, Without<Done>)>,
+    model: Res<Model>,
 ) {
     let now = time.elapsed_secs();
     for (entity, transform, pose, home, station) in &agents {
-        let Some(want) = place_for(*pose) else { continue };
+        let Some(mut want) = place_for(*pose) else { continue };
+        // Work in another repository happens in its own room, except asking permission.
+        if want != Place::Approval && works_elsewhere(&model, &home.id) {
+            want = Place::Away;
+        }
         if station.place == want || station.place == Place::Claude || now - station.since < MIN_DWELL {
             continue;
         }
@@ -501,7 +555,7 @@ fn seat_agent(commands: &mut Commands, roster: &mut Roster, id: &str, agent_type
     let accent = accent_for(agent_type);
     let character = spawn_character(commands, DOOR, 1.0, accent, id, font);
     let desk = spawn_desk(commands, seat, 1.0, accent, agent_type, font);
-    commands.entity(character).insert((Walk::new(DOOR, seat + BEHIND_DESK, seat, Arrive::Sit), Home { seat, slot }));
+    commands.entity(character).insert((Walk::new(DOOR, seat + BEHIND_DESK, seat, Arrive::Sit), Home { seat, slot, id: id.to_owned() }));
     roster.seated.insert(id.to_owned(), Seat { slot, character, desk });
     Some(character)
 }
@@ -568,6 +622,8 @@ fn spawn_character(commands: &mut Commands, at: Vec2, s: f32, accent: Color, key
     let arm = rounded(Vec2::new(10.0, 18.0) * s, 5.0 * s, accent, None);
     part(arm.clone(), Some(Part::ArmLeft), Transform::from_xyz(-25.0 * s, -2.0 * s, 6.5), root);
     part(arm, Some(Part::ArmRight), Transform::from_xyz(25.0 * s, -2.0 * s, 6.5), root);
+    // An open book in both hands while reading (above the desk and laptop).
+    part(anim::book(accent), Some(Part::Book), Transform::from_xyz(0.0, 4.0 * s, 8.6).with_scale(Vec3::splat(s)), root);
     // The report sheet in the right hand, shown only while walking it over to Claude.
     part(anim::paper(accent), Some(Part::Paper), Transform::from_xyz(27.0 * s, 12.0 * s, 8.5), root);
     // "Needs your OK" badge, shown while waiting for a permission answer.

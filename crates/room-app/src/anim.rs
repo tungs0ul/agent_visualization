@@ -52,6 +52,8 @@ pub enum Part {
     Badge,
     /// The report, held up while walking it over to Claude.
     Paper,
+    /// An open book, held while reading files.
+    Book,
 }
 
 /// The character root a part belongs to.
@@ -83,6 +85,8 @@ pub enum Place {
     Approval,
     Claude,
     Door,
+    /// The room for work in other repositories (PLAN.md M4d).
+    Away,
 }
 
 impl Place {
@@ -95,6 +99,7 @@ impl Place {
             Place::Approval => "Approval",
             Place::Claude => "Claude",
             Place::Door => "Door",
+            Place::Away => "Other repos",
         }
     }
 }
@@ -256,6 +261,29 @@ pub fn say(bubbles: &mut Query<&mut Bubble>, bubble: Entity, text: &str) {
     }
 }
 
+/// An open book: two pages with a few lines, in the reader's color.
+pub fn book(accent: Color) -> Shape {
+    let page = |x: f32| shapes::Rectangle {
+        extents: Vec2::new(17.0, 22.0),
+        origin: RectangleOrigin::CustomCenter(Vec2::new(x, 0.0)),
+        radii: Some(BorderRadii::single(2.0)),
+    };
+    let line = |x: f32, y: f32| shapes::Rectangle {
+        extents: Vec2::new(10.0, 0.1),
+        origin: RectangleOrigin::CustomCenter(Vec2::new(x, y)),
+        radii: None,
+    };
+    ShapeBuilder::with(&page(-9.0))
+        .add(&page(9.0))
+        .add(&line(-9.0, 5.0))
+        .add(&line(-9.0, 0.0))
+        .add(&line(9.0, 5.0))
+        .add(&line(9.0, 0.0))
+        .fill(Color::WHITE)
+        .stroke((accent, 1.5))
+        .build()
+}
+
 /// The report sheet: white paper with a few lines in the agent's color.
 pub fn paper(accent: Color) -> Shape {
     let sheet = shapes::Rectangle {
@@ -330,6 +358,14 @@ pub fn animate_parts(
                 } else if matches!(pose, Pose::Delegating | Pose::Reporting) && *part == Part::ArmRight {
                     next.translation.y += 14.0;
                     next.rotation = Quat::from_rotation_z(0.5);
+                }
+            }
+            Part::Book => {
+                if *pose == Pose::Reading && !walking {
+                    // Turning pages: a slow tilt.
+                    next.rotation = Quat::from_rotation_z(0.06 * (t * 1.3).sin());
+                } else {
+                    next.scale = Vec3::ZERO;
                 }
             }
             Part::Paper => {

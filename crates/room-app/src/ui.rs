@@ -8,6 +8,7 @@ use bevy::camera::Viewport;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_egui::{EguiContexts, egui};
+use room_proto::describe::truncate;
 use room_proto::event::ToolCall;
 use room_proto::{Decision, PermissionReply};
 
@@ -106,6 +107,8 @@ pub fn draw(
             });
     } else if ctx.viewport_rect().width() >= WIDE_LAYOUT {
         egui::Panel::right("side").exact_size(SIDE_PANEL_WIDTH).show(&mut root, |ui| {
+            // Nothing in here may grow the panel: widgets wrap or truncate to this width.
+            ui.set_max_width(SIDE_PANEL_WIDTH - 16.0);
             ui.add_space(4.0);
             picked = session_picker(ui, &model);
             ui.horizontal(|ui| {
@@ -345,6 +348,8 @@ fn session_picker(ui: &mut egui::Ui, model: &Model) -> Option<String> {
     egui::ComboBox::from_id_salt("session")
         .selected_text(egui::RichText::new(title).strong())
         .width(ui.available_width())
+        // A long path must not widen the panel (it leaves its old edge drawn as a line).
+        .truncate()
         .show_ui(ui, |ui| {
             for session in sessions {
                 let state = if session.ended {
@@ -354,7 +359,7 @@ fn session_picker(ui: &mut egui::Ui, model: &Model) -> Option<String> {
                 } else {
                     "idle"
                 };
-                let label = format!("{}  ·  {state}", session.name());
+                let label = format!("{}  ·  {state}", truncate(&session.name(), 32));
                 if ui.selectable_label(shown == Some(session.id.as_str()), label).clicked() {
                     picked = Some(session.id.clone());
                 }

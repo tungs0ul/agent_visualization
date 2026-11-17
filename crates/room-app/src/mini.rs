@@ -139,7 +139,8 @@ thread_local! {
         const { std::cell::RefCell::new(None) };
 }
 
-/// A frosted NSVisualEffectView *behind* Bevy's view. It has to be a sibling below
+/// The backdrop behind Bevy's view: frosted in mini mode (`on`), opaque otherwise. A
+/// frosted NSVisualEffectView *behind* Bevy's view. It has to be a sibling below
 /// Bevy's view, in its superview: inside Bevy's view it would sit above the Metal layer
 /// and blur the room itself (what `window-vibrancy` did).
 #[cfg(target_os = "macos")]
@@ -153,9 +154,6 @@ fn set_glass(handle: &RawHandleWrapper, on: bool) {
         if let Some(old) = glass.take() {
             old.removeFromSuperview();
         }
-        if !on {
-            return;
-        }
         let raw_window_handle::RawWindowHandle::AppKit(handle) = handle.get_window_handle() else { return };
         // `apply_mode` runs on the main thread (`NonSendMarker`).
         let Some(main_thread) = MainThreadMarker::new() else { return };
@@ -164,8 +162,16 @@ fn set_glass(handle: &RawHandleWrapper, on: bool) {
         // SAFETY: plain AppKit getter, on the main thread.
         let Some(container) = (unsafe { view.superview() }) else { return };
         let effect = NSVisualEffectView::initWithFrame(NSVisualEffectView::alloc(main_thread), container.bounds());
-        effect.setMaterial(NSVisualEffectMaterial::Popover);
-        effect.setBlendingMode(NSVisualEffectBlendingMode::BehindWindow);
+        // Mini: frosted glass showing the desktop. Full view: the window is still
+        // see-through (it's created transparent), so give it the standard opaque window
+        // background, or the title bar shows the desktop.
+        if on {
+            effect.setMaterial(NSVisualEffectMaterial::Popover);
+            effect.setBlendingMode(NSVisualEffectBlendingMode::BehindWindow);
+        } else {
+            effect.setMaterial(NSVisualEffectMaterial::WindowBackground);
+            effect.setBlendingMode(NSVisualEffectBlendingMode::WithinWindow);
+        }
         effect.setState(NSVisualEffectState::Active);
         effect.setAutoresizingMask(NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewHeightSizable);
         container.addSubview_positioned_relativeTo(&effect, NSWindowOrderingMode::Below, Some(view));
