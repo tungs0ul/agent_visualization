@@ -262,21 +262,24 @@ pub fn sync(
             Location::MainDesk => (visitor_spot(slot), PI),
             _ => location.work_spot(slot),
         };
-        // Walk there in a straight line at a robot's pace.
+        // Walk there at a robot's pace.
         let here = transform.translation;
         let to = target - here;
         let flat = Vec3::new(to.x, 0.0, to.z);
         let walking = flat.length() > 0.05;
         if walking {
+            // Around the main platform, not across it.
+            let goal = detour(here, target) - here;
+            let heading = Vec3::new(goal.x, 0.0, goal.z).normalize_or_zero();
             let step = (WALK_SPEED * time.delta_secs()).min(flat.length());
-            let next = here + flat.normalize() * step;
+            let next = here + heading * step;
             // Up or down a platform edge gradually.
             let y = here.y + (target.y - here.y) * (step / flat.length()).min(1.0);
             transform.translation = Vec3::new(next.x, y, next.z);
         } else {
             transform.translation = target;
         }
-        let facing = if walking { Quat::from_rotation_y(flat.x.atan2(flat.z)) } else { Quat::from_rotation_y(face) };
+        let facing = if walking { Quat::from_rotation_y(transform_heading(here, transform.translation, flat)) } else { Quat::from_rotation_y(face) };
         transform.rotation = transform.rotation.slerp(facing, (time.delta_secs() * 8.0).min(1.0));
         let act = if walking {
             Act::Walk
@@ -719,5 +722,51 @@ pub fn light_trails(
                 Transform::from_translation(Vec3::new(at.translation.x, at.translation.y + 0.012, at.translation.z)),
             ));
         }
+    }
+}
+
+/// Where to head for `target` from `here` without crossing the main platform: the
+/// target itself, or a point just outside the platform's rim when the straight line
+/// would cross it. Recomputed every frame, so the robot curves round the edge.
+fn detour(here: Vec3, target: Vec3) -> Vec3 {
+    const RIM: f32 = 2.4;
+    let centre = Location::MainDesk.center();
+    let (a, b, c) = (here.xz(), target.xz(), centre.xz());
+    if a.distance(c) < RIM || b.distance(c) < RIM {
+        return target;
+    }
+    let ab = b - a;
+    let t = ((c - a).dot(ab) / ab.length_squared().max(1e-6)).clamp(0.0, 1.0);
+    let closest = a + ab * t;
+    if closest.distance(c) >= RIM {
+        return target;
+    }
+    let out = (closest - c).try_normalize().unwrap_or_else(|| ab.perp().normalize_or_zero());
+    let point = c + out * (RIM + 0.5);
+    Vec3::new(point.x, here.y, point.y)
+}
+
+/// The way a walking robot faces: where it actually moved this frame.
+fn transform_heading(before: Vec3, after: Vec3, fallback: Vec3) -> f32 {
+    let moved = Vec3::new(after.x - before.x, 0.0, after.z - before.z);
+    let dir = if moved.length() > 1e-5 { moved } else { fallback };
+    dir.x.atan2(dir.z)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn robots_walk_round_the_main_platform() {
+        // Straight across: head for a point outside the rim instead.
+        let goal = detour(Vec3::new(-6.0, 0.0, 0.5), Vec3::new(6.0, 0.0, 0.5));
+        assert!(goal.xz().distance(Location::MainDesk.center().xz()) > 2.4);
+        // Clear of the platform: straight to the target.
+        let target = Vec3::new(6.0, 0.0, 4.0);
+        assert_eq!(detour(Vec3::new(-6.0, 0.0, 4.0), target), target);
+        // Going onto the platform (Claude's own desk): straight in.
+        let desk = Location::MainDesk.work_spot(0).0;
+        assert_eq!(detour(Vec3::new(-6.0, 0.0, 0.0), desk), desk);
     }
 }
