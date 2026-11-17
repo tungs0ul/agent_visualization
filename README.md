@@ -18,7 +18,7 @@ It is a native Rust app (Bevy), not a web view. Everything stays on your machine
 1. Install the app and its hook:
 
    ```sh
-   cargo install --locked --git https://github.com/<owner>/agent-room room-app room-hook
+   cargo install --locked --git https://github.com/tungs0ul/agent_visualization room-app room-hook
    ```
 
    The first build takes a few minutes. It installs `agent-room` and `room-hook` into
@@ -27,7 +27,7 @@ It is a native Rust app (Bevy), not a web view. Everything stays on your machine
 2. Add the Claude Code plugin, inside Claude Code:
 
    ```
-   /plugin marketplace add <owner>/agent-room
+   /plugin marketplace add tungs0ul/agent_visualization
    /plugin install agent-room@agent-room
    ```
 

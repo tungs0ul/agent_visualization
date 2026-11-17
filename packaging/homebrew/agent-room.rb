@@ -1,16 +1,16 @@
 # Homebrew formula for Agent Room. It builds from source, so the binaries are compiled on
 # the user's Mac and need no code signing. Publish it in a tap repository
-# (github.com/<owner>/homebrew-tap, file Formula/agent-room.rb), then users run
-#   brew install <owner>/tap/agent-room
-# Before publishing: replace <owner>, point `url` at a release tag and fill in `sha256`
+# (github.com/tungs0ul/homebrew-tap, file Formula/agent-room.rb), then users run
+#   brew install tungs0ul/tap/agent-room
+# Before publishing: replace tungs0ul, point `url` at a release tag and fill in `sha256`
 # (`shasum -a 256 <tarball>`).
 class AgentRoom < Formula
   desc "Watch Claude Code and its sub-agents work, and answer permission prompts"
-  homepage "https://github.com/<owner>/agent-room"
-  url "https://github.com/<owner>/agent-room/archive/refs/tags/v0.1.0.tar.gz"
+  homepage "https://github.com/tungs0ul/agent_visualization"
+  url "https://github.com/tungs0ul/agent_visualization/archive/refs/tags/v0.1.0.tar.gz"
   sha256 "<sha256 of the tarball>"
   license "MIT"
-  head "https://github.com/<owner>/agent-room.git", branch: "master"
+  head "https://github.com/tungs0ul/agent_visualization.git", branch: "master"
 
   depends_on "rust" => :build
   depends_on :macos
@@ -23,7 +23,7 @@ class AgentRoom < Formula
   def caveats
     <<~EOS
       Add the Claude Code plugin that feeds Agent Room, inside Claude Code:
-        /plugin marketplace add <owner>/agent-room
+        /plugin marketplace add tungs0ul/agent_visualization
         /plugin install agent-room@agent-room
       Then start the app with: agent-room
     EOS
