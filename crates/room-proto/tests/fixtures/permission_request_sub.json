@@ -1,0 +1,31 @@
+{
+  "session_id": "2f4d55f9-00ed-4c72-8e33-6f448c560ba2",
+  "transcript_path": "/Users/me/.claude/projects/-private-tmp-claude-501--Users-me-smart-haus-478cbcc6-46e1-48e4-bb72-dabc2e0dae12-scratchpad/2f4d55f9-00ed-4c72-8e33-6f448c560ba2.jsonl",
+  "cwd": "/private/tmp/claude-501/-Users-me-smart-haus/478cbcc6-46e1-48e4-bb72-dabc2e0dae12/scratchpad",
+  "prompt_id": "c560ba8a-14ac-4d7b-af45-515d46cb9af2",
+  "permission_mode": "default",
+  "agent_id": "a22f70bf2ae66dab9",
+  "agent_type": "Explore",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PermissionRequest",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "find /private/tmp/claude-501/-Users-me-smart-haus/478cbcc6-46e1-48e4-bb72-dabc2e0dae12/scratchpad -name 'note.txt' 2>/dev/null; echo \"---\"; find /Users/me/smart-haus -name 'note.txt' 2>/dev/null",
+    "description": "Search scratchpad, then smart-haus, for note.txt files"
+  },
+  "permission_suggestions": [
+    {
+      "type": "addRules",
+      "rules": [
+        {
+          "toolName": "Read",
+          "ruleContent": "//Users/me/**"
+        }
+      ],
+      "behavior": "allow",
+      "destination": "session"
+    }
+  ]
+}

@@ -1,0 +1,91 @@
+{
+  "session_id": "2f4d55f9-00ed-4c72-8e33-6f448c560ba2",
+  "transcript_path": "/Users/me/.claude/projects/-private-tmp-claude-501--Users-me-smart-haus-478cbcc6-46e1-48e4-bb72-dabc2e0dae12-scratchpad/2f4d55f9-00ed-4c72-8e33-6f448c560ba2.jsonl",
+  "cwd": "/private/tmp/claude-501/-Users-me-smart-haus/478cbcc6-46e1-48e4-bb72-dabc2e0dae12/scratchpad",
+  "prompt_id": "c560ba8a-14ac-4d7b-af45-515d46cb9af2",
+  "permission_mode": "default",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Agent",
+  "tool_input": {
+    "description": "Read note.txt content",
+    "prompt": "Find the file named note.txt (start in /private/tmp/claude-501/-Users-me-smart-haus/478cbcc6-46e1-48e4-bb72-dabc2e0dae12/scratchpad, then search wider under /Users/me/smart-haus if not found). Read it and report its full content verbatim. If there are multiple matches, report each path and content. …",
+    "subagent_type": "Explore",
+    "run_in_background": false
+  },
+  "tool_response": {
+    "status": "completed",
+    "prompt": "Find the file named note.txt (start in /private/tmp/claude-501/-Users-me-smart-haus/478cbcc6-46e1-48e4-bb72-dabc2e0dae12/scratchpad, then search wider under /Users/me/smart-haus if not found). Read it and report its full content verbatim. If there are multiple matches, report each path and content. …",
+    "agentId": "a22f70bf2ae66dab9",
+    "agentType": "Explore",
+    "toolsUsed": [
+      "Bash",
+      "Read"
+    ],
+    "harnessNoteCount": 1,
+    "harnessTailCount": 0,
+    "harnessSectionHash": "3be868419eee1778",
+    "content": [
+      {
+        "type": "text",
+        "text": "<tools-used-before-summary>Bash, Read</tools-used-before-summary>\n"
+      },
+      {
+        "type": "text",
+        "text": "I found one match: `/private/tmp/claude-501/-Users-me-smart-haus/478cbcc6-46e1-48e4-bb72-dabc2e0dae12/scratchpad/note.txt`\n\nIts full content is:\n\n```\nhello\n```\n\nThe search did not reach `/Users/me/smart-haus`. The sandbox blocked that path because it is outside the session's allowed working director…"
+      }
+    ],
+    "resolvedModel": "claude-haiku-5-5",
+    "totalDurationMs": 6091,
+    "totalTokens": 23004,
+    "totalToolUseCount": 3,
+    "usage": {
+      "output_tokens_details": {
+        "thinking_tokens": 51
+      },
+      "input_tokens": 2,
+      "cache_creation_input_tokens": 147,
+      "cache_read_input_tokens": 22644,
+      "output_tokens": 211,
+      "server_tool_use": {
+        "web_search_requests": 0,
+        "web_fetch_requests": 0
+      },
+      "service_tier": "standard",
+      "cache_creation": {
+        "ephemeral_1h_input_tokens": 0,
+        "ephemeral_5m_input_tokens": 147
+      },
+      "inference_geo": "global",
+      "iterations": [
+        {
+          "input_tokens": 2,
+          "output_tokens": 211,
+          "cache_read_input_tokens": 22644,
+          "cache_creation_input_tokens": 147,
+          "cache_creation": {
+            "ephemeral_5m_input_tokens": 147,
+            "ephemeral_1h_input_tokens": 0
+          },
+          "type": "message"
+        }
+      ],
+      "speed": "standard",
+      "fallback_credit": null
+    },
+    "toolStats": {
+      "readCount": 1,
+      "searchCount": 0,
+      "bashCount": 2,
+      "editFileCount": 0,
+      "linesAdded": 0,
+      "linesRemoved": 0,
+      "otherToolCount": 0
+    },
+    "canContinueAgent": true
+  },
+  "tool_use_id": "toolu_017bX4yFXqGGWEmZ1SspotBA",
+  "duration_ms": 6093
+}

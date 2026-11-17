@@ -1,0 +1,19 @@
+{
+  "session_id": "ede9843c-65b7-462c-93d3-3b0ee1f05f6f",
+  "transcript_path": "/Users/me/.claude/projects/-Users-me-claude-room/ede9843c-65b7-462c-93d3-3b0ee1f05f6f.jsonl",
+  "cwd": "/Users/me/claude-room",
+  "scratchpad_dir": "/private/tmp/claude-501/-Users-me-claude-room/ede9843c-65b7-462c-93d3-3b0ee1f05f6f/scratchpad",
+  "prompt_id": "dfe3eaeb-cd0f-422b-8fbb-d027e837e9ef",
+  "permission_mode": "auto",
+  "agent_id": "a7f0fb44b80dc8b7f",
+  "agent_type": "Explore",
+  "effort": {
+    "level": "low"
+  },
+  "hook_event_name": "PreToolUse",
+  "tool_name": "SubagentHandback",
+  "tool_input": {
+    "message": "I found 1 .rs file in /Users/me/claude-room/crates, leaving out target/ directories:\n\n/Users/me/claude-room/crates/room-hook/src/main.rs"
+  },
+  "tool_use_id": "toolu_01PvxCAey5TWTQLpJizmak6R"
+}

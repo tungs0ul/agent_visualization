@@ -237,6 +237,45 @@ an interactive permission answered by a human, parallel sub-agents.
   `PostToolUse(Agent)`.
 - room-hook cost: ~6 ms per call (100 calls in 0.57 s, including shell spawn).
 
+#### Seen in the interactive run (2026-11-17, Opus 5.5, two parallel sub-agents)
+
+Fixtures for every case below are in `crates/room-proto/tests/fixtures/` (redacted).
+
+- **Sub-agents usually run in the background.** `PostToolUse(Agent)` fires ~5 ms after
+  `PreToolUse(Agent)` with `tool_response = {isAsync: true, status: "async_launched",
+  agentId, description, prompt, resolvedModel, outputFile, ...}`. So `PostToolUse(Agent)`
+  is **not** completion. Synchronous runs (seen in `-p` mode) return
+  `status: "completed"` instead.
+- **`tool_response.agentId` links a delegation to its sub-agent exactly.** Use it
+  instead of matching by order. (`SubagentStart` can arrive before or after that
+  `PostToolUse`; buffer whichever comes first.)
+- **Report-back path for background agents:** sub-agent calls the `SubagentHandback` tool
+  (`tool_input.message` = the report) → `SubagentStop` **without**
+  `last_assistant_message` → main agent gets a `UserPromptSubmit` whose `prompt` starts
+  with `<agent-message from="<agent_id>">` and `[Subagent hand-back]`. Use the handback
+  `message` for the report bubble, and treat that `UserPromptSubmit` as "main agent
+  receives the report" (the catch animation), **not** as a user prompt.
+- `SubagentStop` without a matching `SubagentStart`, `agent_type: ""` and a
+  `last_assistant_message` was seen ~3 min after the last activity. It is an internal
+  Claude Code helper agent (looks like a session recap). Ignore `SubagentStop`s whose
+  `agent_id` was never started, or show them only in the log.
+- **Manual permission deny fires nothing.** `PermissionRequest` → user picks No in the
+  terminal → no `PostToolUse`, no `PostToolUseFailure`, no `PermissionDenied`
+  (that event is auto-mode only). Allow in the terminal ⇒ the normal `PostToolUse`.
+  So a pending permission that the app did not answer is resolved by: `PostToolUse` /
+  `PostToolUseFailure` for the same tool+input ⇒ allowed; any later event from the same
+  agent, or `Stop` ⇒ answered in the terminal (deny or interrupted).
+- `PermissionRequest.permission_suggestions` can be `addDirectories` as well as
+  `addRules`.
+- `PostToolUseFailure` for a failing Bash: `error` = `"Exit code 1\n<stderr>"`,
+  `is_interrupt: false`, `duration_ms`.
+- `SessionStart` also has `model` (`"claude-opus-5-5"`) and `scratchpad_dir` in an
+  interactive session.
+- `Notification` (idle) did not fire within the test window; it likely needs a longer
+  idle time. Not needed for v1 visuals; handle it if it arrives.
+- Each `UserPromptSubmit` from the user starts a turn; `Stop` ends it. Several sub-agent
+  handbacks can arrive within one turn.
+
 ### 3.5 Socket protocol (`room-proto`)
 
 - Unix domain socket at `~/.agent-room/room.sock`. Directory mode 0700, socket 0600.
@@ -535,8 +574,7 @@ config file, and can remove both cleanly.
 ## 11. Status
 
 - [x] Plan written (2026-11-17)
-- [ ] M1 Hook spike: workspace, room-hook log mode, plugin, first real run done.
-      Remaining: interactive session (see handoff log), fixtures.
+- [x] M1 Hook spike (2026-11-17)
 - [ ] M2 Protocol and app skeleton
 - [ ] M3 Static room and window behavior
 - [ ] M4 Life
@@ -565,3 +603,7 @@ anything surprising.
   3. Check the new events in `~/.agent-room/spike/events.jsonl`; update 3.4.
   4. Copy redacted samples of each event into `crates/room-proto/tests/fixtures/`.
   Then start M2 (room-proto crate, room-hook socket mode, Bevy skeleton).
+- 2026-11-17, Claude Opus 5.5: User ran the interactive session. Analyzed it (section
+  3.4 "Seen in the interactive run"): background sub-agents, `agentId` link,
+  SubagentHandback report path, silent manual deny. Wrote 20 redacted fixtures to
+  `crates/room-proto/tests/fixtures/`. M1 done. Next: M2.

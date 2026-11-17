@@ -1,0 +1,19 @@
+{
+  "session_id": "ede9843c-65b7-462c-93d3-3b0ee1f05f6f",
+  "transcript_path": "/Users/me/.claude/projects/-Users-me-claude-room/ede9843c-65b7-462c-93d3-3b0ee1f05f6f.jsonl",
+  "cwd": "/Users/me/claude-room",
+  "scratchpad_dir": "/private/tmp/claude-501/-Users-me-claude-room/ede9843c-65b7-462c-93d3-3b0ee1f05f6f/scratchpad",
+  "prompt_id": "bdf6698f-abe3-48af-a915-fd9787930742",
+  "permission_mode": "default",
+  "agent_id": "a3481ac825e4f289f",
+  "agent_type": "",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "SubagentStop",
+  "stop_hook_active": false,
+  "agent_transcript_path": "/Users/me/.claude/projects/-Users-me-claude-room/ede9843c-65b7-462c-93d3-3b0ee1f05f6f/subagents/agent-a3481ac825e4f289f.jsonl",
+  "last_assistant_message": "We're running a hook test to log events not seen yet, and the sub-agent and failing-Bash steps are done. Next, switch to default permission mode with shift+tab and say \"go\" so I can trigger the allow and deny prompts.",
+  "background_tasks": [],
+  "session_crons": []
+}

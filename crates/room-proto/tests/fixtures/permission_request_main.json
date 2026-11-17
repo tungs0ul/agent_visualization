@@ -1,0 +1,31 @@
+{
+  "session_id": "ede9843c-65b7-462c-93d3-3b0ee1f05f6f",
+  "transcript_path": "/Users/me/.claude/projects/-Users-me-claude-room/ede9843c-65b7-462c-93d3-3b0ee1f05f6f.jsonl",
+  "cwd": "/Users/me/claude-room",
+  "scratchpad_dir": "/private/tmp/claude-501/-Users-me-claude-room/ede9843c-65b7-462c-93d3-3b0ee1f05f6f/scratchpad",
+  "prompt_id": "bdf6698f-abe3-48af-a915-fd9787930742",
+  "permission_mode": "default",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PermissionRequest",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "touch ~/.agent-room/spike/perm-test-allow.marker && echo allowed",
+    "description": "Create allow-test marker file (please ALLOW)"
+  },
+  "permission_suggestions": [
+    {
+      "type": "addDirectories",
+      "directories": [
+        "/Users/me/.agent-room/spike"
+      ],
+      "destination": "session"
+    },
+    {
+      "type": "setMode",
+      "mode": "acceptEdits",
+      "destination": "session"
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "session_id": "2f4d55f9-00ed-4c72-8e33-6f448c560ba2",
+  "transcript_path": "/Users/me/.claude/projects/-private-tmp-claude-501--Users-me-smart-haus-478cbcc6-46e1-48e4-bb72-dabc2e0dae12-scratchpad/2f4d55f9-00ed-4c72-8e33-6f448c560ba2.jsonl",
+  "cwd": "/private/tmp/claude-501/-Users-me-smart-haus/478cbcc6-46e1-48e4-bb72-dabc2e0dae12/scratchpad",
+  "prompt_id": "c560ba8a-14ac-4d7b-af45-515d46cb9af2",
+  "permission_mode": "default",
+  "agent_id": "a22f70bf2ae66dab9",
+  "agent_type": "Explore",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "SubagentStop",
+  "stop_hook_active": false,
+  "agent_transcript_path": "/Users/me/.claude/projects/-private-tmp-claude-501--Users-me-smart-haus-478cbcc6-46e1-48e4-bb72-dabc2e0dae12-scratchpad/2f4d55f9-00ed-4c72-8e33-6f448c560ba2/subagents/agent-a22f70bf2ae66dab9.jsonl",
+  "last_assistant_message": "I found one match: `/private/tmp/claude-501/-Users-me-smart-haus/478cbcc6-46e1-48e4-bb72-dabc2e0dae12/scratchpad/note.txt`\n\nIts full content is:\n\n```\nhello\n```\n\nThe search did not reach `/Users/me/smart-haus`. The sandbox blocked that path because it is outside the session's allowed working director…",
+  "background_tasks": [],
+  "session_crons": []
+}
