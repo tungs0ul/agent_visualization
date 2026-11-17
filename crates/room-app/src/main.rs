@@ -27,7 +27,8 @@ use bevy_prototype_lyon::prelude::ShapePlugin;
 use room_proto::event::{AgentRef, EventKind};
 
 use crate::anim::Animating;
-use crate::log::{PendingPermission, RoomLog, agent_label};
+use crate::log::{AutoAccept, PendingPermission, PendingQuestion, RoomLog, agent_label, always_asks, parse_questions};
+use room_proto::{Decision, PermissionReply};
 use crate::model::Model;
 use crate::scene::{Roster, SceneChange};
 use crate::server::{Incoming, Server};
@@ -68,6 +69,7 @@ fn main() -> AppExit {
         .insert_resource(server)
         .insert_resource(NeedsCornerPlacement(saved.is_none()))
         .init_resource::<RoomLog>()
+        .init_resource::<AutoAccept>()
         .init_resource::<Model>()
         .init_resource::<Roster>()
         .init_resource::<Animating>()
@@ -133,6 +135,7 @@ fn receive_events(
     server: Res<Server>,
     mut model: ResMut<Model>,
     mut log: ResMut<RoomLog>,
+    auto: Res<AutoAccept>,
     mut scene: MessageWriter<SceneChange>,
 ) {
     let now = Instant::now();
@@ -157,17 +160,42 @@ fn receive_events(
             None if internal_helper => {}
             None => log.push(&event),
         }
-        if let (Some(reply), EventKind::PermissionAsked { tool }) = (reply, &event.kind) {
-            log.pending.push(PendingPermission {
+        let agent = agent_label(&event.agent);
+        match (reply, &event.kind) {
+            (Some(reply), EventKind::PermissionAsked { tool }) if auto.0 && !always_asks(tool) => {
+                reply.send(&PermissionReply { decision: Decision::Allow, message: None, answers: None });
+                log.note(&event.session_id, agent, format!("Auto-allowed {}", tool.describe().1));
+            }
+            (Some(reply), EventKind::PermissionAsked { tool }) => log.pending.push(PendingPermission {
                 session: event.session_id.clone(),
-                agent: agent_label(&event.agent),
+                agent,
                 tool: tool.clone(),
                 cwd: event.cwd.clone(),
                 shown_at: now,
                 expires_at: now + room_proto::permission_timeout(),
                 reply,
                 reason: String::new(),
-            });
+            }),
+            (Some(reply), EventKind::ToolStarted { tool, .. }) if tool.name == room_proto::QUESTION_TOOL => {
+                log.questions.push(PendingQuestion {
+                    session: event.session_id.clone(),
+                    agent,
+                    questions: parse_questions(&tool.input),
+                    shown_at: now,
+                    expires_at: now + room_proto::permission_timeout(),
+                    reply,
+                });
+            }
+            _ => {}
+        }
+        // Claude's final answer pops up in the middle (PLAN.md M9).
+        let shown = model.shown().is_some_and(|session| session.id == event.session_id);
+        match &event.kind {
+            EventKind::TurnEnded { last_message: Some(text) } if shown && event.agent == AgentRef::Main => {
+                log.final_answer = Some(text.clone());
+            }
+            EventKind::UserPrompt { .. } if shown => log.final_answer = None,
+            _ => {}
         }
     }
 }
@@ -175,10 +203,25 @@ fn receive_events(
 /// Removes cards nobody can answer here any more: the hook timed out (Claude Code asks
 /// in the terminal) or Claude Code stopped waiting (Esc, interrupted turn).
 fn settle_permissions(mut log: ResMut<RoomLog>) {
+    let now = Instant::now();
+    // Questions: same rules; the terminal shows them once the hook gives up.
+    let before = log.questions.len();
+    let mut gone = Vec::new();
+    log.questions.retain(|card| {
+        let keep = card.expires_at > now && !card.reply.is_closed();
+        if !keep {
+            gone.push((card.session.clone(), card.agent.clone()));
+        }
+        keep
+    });
+    if log.questions.len() != before {
+        for (session, agent) in gone {
+            log.note(&session, agent, "Question: answered in the terminal".to_owned());
+        }
+    }
     if log.pending.is_empty() {
         return;
     }
-    let now = Instant::now();
     let mut index = 0;
     while index < log.pending.len() {
         let card = &log.pending[index];
@@ -211,7 +254,7 @@ fn pace_updates(
     }
     let wanted = if animating.0 {
         Some(FRAME)
-    } else if !log.pending.is_empty() {
+    } else if !log.pending.is_empty() || !log.questions.is_empty() {
         Some(COUNTDOWN_TICK)
     } else {
         None

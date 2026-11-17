@@ -745,7 +745,7 @@ config file, and can remove both cleanly.
 - [ ] M4e Waiting at the Approval desk with the card in the scene
 - [ ] M4f Camera controls: zoom, pan, pin an agent
 - [ ] M8 Chat with Claude from the app
-- [ ] M9 Auto-accept mode and centre pop-ups (questions, final answer)
+- [x] M9 Auto-accept mode and centre pop-ups (2026-11-17)
 - [ ] M10 Context, 5-hour and weekly limits in the app
 - [x] M5 Permissions (2026-11-17; user still to try Y/N and a deny reason live)
 - [ ] M6 Polish
@@ -1044,6 +1044,21 @@ Later in the session (2026-11-17):
 - If the app shows nothing: the plugin's shim needs an installed `room-hook`
   (`scripts/install-dev.sh` or `AGENT_ROOM_HOOK=...`), and Claude sessions must be
   started after the plugin is enabled.
+
+- **M9 done:** `AutoAccept` (key A / "Auto-accept" button, amber when on, off at every
+  start) allows permission requests in `receive_events` except `log::ALWAYS_ASK`
+  (rm -rf, git push, git reset --hard, sudo, mkfs, dd if=, git clean -f); each is logged
+  "Auto-allowed …". `AskUserQuestion`: the hook now also waits on its `PreToolUse`
+  (`room_proto::needs_reply`), `PermissionReply.answers` carries question ⇒ answer, and
+  `hook_output(hook)` returns `permissionDecision: allow` + `updatedInput` (questions
+  echoed + `answers`). Centre pop-up "<agent> asks" (options, multi-select, free text,
+  Send, "Answer in terminal" = drop the reply so the terminal asks). Final answer of
+  the shown session pops up centre on `Stop` until closed / next prompt. Verified by
+  screenshots; the question hook prints nothing on timeout.
+- Fixed: starting in mini mode now creates the window at mini size (macOS ignored the
+  early resize, leaving Bevy drawing 640×400 into a 1536×924 window).
+- Fixed: the side panel header overflowed (drop-down 296 px + Mini button), pushing the
+  panel wider and leaving its old edge as a line through the text.
 
 Known gaps: macOS attention bounce not done; roster click-to-highlight not done
 (part of M4f); `agent-room` release binary is 96 MB (Bevy default features; could trim).

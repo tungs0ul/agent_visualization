@@ -92,7 +92,7 @@ fn forward(raw: &str) -> Result<(), String> {
     }
     let reply: PermissionReply = serde_json::from_str(reply.trim()).map_err(|e| format!("reply JSON: {e}"))?;
     let mut stdout = io::stdout().lock();
-    writeln!(stdout, "{}", reply.hook_output()).map_err(|e| format!("stdout: {e}"))
+    writeln!(stdout, "{}", reply.hook_output(&envelope.hook)).map_err(|e| format!("stdout: {e}"))
 }
 
 /// Wraps the raw hook JSON with a timestamp and appends it as a single line.

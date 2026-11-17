@@ -46,6 +46,7 @@ impl ToolCall {
                 (Activity::Delegating, format!("Asking {helper}: {}", field("description")))
             }
             "SubagentHandback" => (Activity::Reporting, "Reporting back".to_owned()),
+            "AskUserQuestion" => (Activity::Thinking, "Asking you a question".to_owned()),
             name if name.starts_with("mcp__") => (Activity::Terminal, mcp_label(name)),
             name => (Activity::Thinking, name.to_owned()),
         };

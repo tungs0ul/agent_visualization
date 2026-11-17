@@ -333,6 +333,9 @@ fn react(kind: &EventKind, current: Pose, session: &SessionState) -> (Option<Pos
     match kind {
         EventKind::SessionStarted { .. } => (Some(Pose::Idle), Some("Hello!".to_owned())),
         EventKind::UserPrompt { .. } => (Some(Pose::Thinking), Some("On it!".to_owned())),
+        EventKind::ToolStarted { tool, .. } if tool.name == room_proto::QUESTION_TOOL => {
+            (Some(Pose::Waiting), Some("I have a question for you".to_owned()))
+        }
         EventKind::ToolStarted { tool, .. } => {
             let (activity, label) = tool.describe();
             (Some(pose_for(activity)), Some(label))

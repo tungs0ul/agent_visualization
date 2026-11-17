@@ -83,7 +83,11 @@ fn state_path() -> Option<PathBuf> {
 }
 
 pub fn initial_window(saved: Option<SavedWindow>) -> Window {
-    let size = saved.map_or(START_SIZE, |s| Vec2::new(s.width, s.height));
+    // Starting in mini mode: create the window at mini size right away. macOS ignores
+    // resizes requested while the window is still appearing, which left Bevy drawing for
+    // a size the window never got (`mini::apply_mode` then only moves it).
+    let mini = saved.is_some_and(|s| s.mini);
+    let size = if mini { crate::mini::MINI_SIZE } else { saved.map_or(START_SIZE, |s| Vec2::new(s.width, s.height)) };
     let mut resolution = WindowResolution::default();
     resolution.set(size.x, size.y);
     Window {
@@ -94,7 +98,8 @@ pub fn initial_window(saved: Option<SavedWindow>) -> Window {
         // full view paints an opaque background over it (`mini::apply_mode`).
         transparent: true,
         composite_alpha_mode: CompositeAlphaMode::PostMultiplied,
-        window_level: if saved.is_none_or(|s| s.on_top) { WindowLevel::AlwaysOnTop } else { WindowLevel::Normal },
+        decorations: !mini,
+        window_level: if mini || saved.is_none_or(|s| s.on_top) { WindowLevel::AlwaysOnTop } else { WindowLevel::Normal },
         position: saved.map_or(WindowPosition::Automatic, |s| WindowPosition::At(IVec2::new(s.x, s.y))),
         ..default()
     }

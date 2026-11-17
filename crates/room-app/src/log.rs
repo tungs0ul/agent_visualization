@@ -49,6 +49,100 @@ pub fn keyboard_target(pending: &[PendingPermission], now: Instant) -> Option<us
 pub struct RoomLog {
     pub lines: VecDeque<LogLine>,
     pub pending: Vec<PendingPermission>,
+    /// Claude's multiple-choice questions waiting for an answer (centre pop-up).
+    pub questions: Vec<PendingQuestion>,
+    /// Claude's last answer in the shown session, until closed or the next prompt.
+    pub final_answer: Option<String>,
+}
+
+/// While on, permission requests are allowed without asking, except `always_asks`.
+/// The user's explicit choice; off at every start (PLAN.md M9).
+#[derive(Resource, Default)]
+pub struct AutoAccept(pub bool);
+
+/// Commands that still ask even with auto-accept on: hard to undo or outward-facing.
+const ALWAYS_ASK: [&str; 8] =
+    ["rm -rf", "rm -fr", "git push", "git reset --hard", "sudo ", "mkfs", "dd if=", "git clean -f"];
+
+pub fn always_asks(tool: &ToolCall) -> bool {
+    let Some(command) = tool.input.get("command").and_then(|v| v.as_str()) else { return false };
+    ALWAYS_ASK.iter().any(|pattern| command.contains(pattern))
+}
+
+pub struct QuestionOption {
+    pub label: String,
+    pub description: String,
+}
+
+pub struct Question {
+    pub text: String,
+    pub header: String,
+    pub options: Vec<QuestionOption>,
+    pub multi: bool,
+    pub chosen: Vec<bool>,
+    /// A typed answer instead of the options.
+    pub other: String,
+}
+
+impl Question {
+    /// The answer Claude Code expects: chosen labels joined with commas, or the typed text.
+    pub fn answer(&self) -> Option<String> {
+        let other = self.other.trim();
+        if !other.is_empty() {
+            return Some(other.to_owned());
+        }
+        let labels: Vec<&str> = self
+            .options
+            .iter()
+            .zip(&self.chosen)
+            .filter(|(_, chosen)| **chosen)
+            .map(|(option, _)| option.label.as_str())
+            .collect();
+        (!labels.is_empty()).then(|| labels.join(", "))
+    }
+}
+
+pub struct PendingQuestion {
+    pub session: String,
+    pub agent: String,
+    pub questions: Vec<Question>,
+    pub shown_at: Instant,
+    pub expires_at: Instant,
+    pub reply: ReplyHandle,
+}
+
+impl PendingQuestion {
+    pub fn accepts_input(&self, now: Instant) -> bool {
+        now >= self.shown_at + INPUT_GUARD
+    }
+
+    /// Question text ⇒ answer, once every question has one.
+    pub fn answers(&self) -> Option<serde_json::Map<String, serde_json::Value>> {
+        self.questions.iter().map(|q| Some((q.text.clone(), serde_json::Value::String(q.answer()?)))).collect()
+    }
+}
+
+/// The questions of an `AskUserQuestion` call.
+pub fn parse_questions(input: &serde_json::Value) -> Vec<Question> {
+    let text = |v: &serde_json::Value, key: &str| v.get(key).and_then(|s| s.as_str()).unwrap_or_default().to_owned();
+    let list = |v: &serde_json::Value, key: &str| v.get(key).and_then(|a| a.as_array()).cloned().unwrap_or_default();
+    list(input, "questions")
+        .iter()
+        .map(|q| {
+            let options: Vec<QuestionOption> = list(q, "options")
+                .iter()
+                .map(|o| QuestionOption { label: text(o, "label"), description: text(o, "description") })
+                .collect();
+            Question {
+                text: text(q, "question"),
+                header: text(q, "header"),
+                multi: q.get("multiSelect").and_then(|m| m.as_bool()).unwrap_or(false),
+                chosen: vec![false; options.len()],
+                options,
+                other: String::new(),
+            }
+        })
+        .collect()
 }
 
 impl RoomLog {
@@ -123,6 +217,29 @@ mod tests {
     use super::*;
     use room_proto::event::LaunchedAgent;
     use serde_json::json;
+
+    #[test]
+    fn auto_accept_still_asks_for_dangerous_commands() {
+        let bash = |command: &str| ToolCall { name: "Bash".into(), input: json!({ "command": command }) };
+        assert!(always_asks(&bash("rm -rf target")));
+        assert!(always_asks(&bash("git push origin main")));
+        assert!(!always_asks(&bash("cargo test")));
+        assert!(!always_asks(&ToolCall { name: "Edit".into(), input: json!({ "file_path": "a.rs" }) }));
+    }
+
+    #[test]
+    fn questions_parse_and_answer() {
+        let input = json!({ "questions": [
+            { "question": "Which?", "header": "Pick", "options": [{ "label": "A" }, { "label": "B" }], "multiSelect": true }
+        ] });
+        let mut questions = parse_questions(&input);
+        assert_eq!(questions[0].options.len(), 2);
+        assert_eq!(questions[0].answer(), None);
+        questions[0].chosen = vec![true, true];
+        assert_eq!(questions[0].answer().as_deref(), Some("A, B"));
+        questions[0].other = "neither".into();
+        assert_eq!(questions[0].answer().as_deref(), Some("neither"));
+    }
 
     #[test]
     fn agent_labels() {

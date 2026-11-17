@@ -11,7 +11,7 @@ use bevy_egui::{EguiContexts, egui};
 use room_proto::event::ToolCall;
 use room_proto::{Decision, PermissionReply};
 
-use crate::log::{LogLine, PendingPermission, RoomLog, keyboard_target};
+use crate::log::{AutoAccept, LogLine, PendingPermission, Question, RoomLog, keyboard_target};
 use crate::mini::{ToggleMini, ViewMode};
 use crate::model::{Model, Pose, SessionState, Status};
 use crate::scene::{self, SceneChange};
@@ -26,6 +26,7 @@ const MAX_FINISHED_ROWS: usize = 4;
 const PANEL: egui::Color32 = egui::Color32::from_rgb(0xFB, 0xF7, 0xF1);
 const ALLOW: egui::Color32 = egui::Color32::from_rgb(0x3E, 0x9B, 0x5F);
 const DENY: egui::Color32 = egui::Color32::from_rgb(0xC9, 0x4F, 0x4F);
+const AUTO: egui::Color32 = egui::Color32::from_rgb(0xE0, 0x8A, 0x1E);
 
 #[allow(clippy::too_many_arguments)]
 pub fn draw(
@@ -34,6 +35,7 @@ pub fn draw(
     mut model: ResMut<Model>,
     mut scene: MessageWriter<SceneChange>,
     mode: Res<ViewMode>,
+    mut auto: ResMut<AutoAccept>,
     mut toggle_mini: MessageWriter<ToggleMini>,
     window: Single<&Window, With<PrimaryWindow>>,
     mut camera: Single<&mut Camera, With<WorldCamera>>,
@@ -68,7 +70,10 @@ pub fn draw(
             }
         });
     }
-    let RoomLog { lines, pending } = &mut *log;
+    if !ctx.egui_wants_keyboard_input() && ctx.input(|input| input.key_pressed(egui::Key::A)) {
+        auto.0 = !auto.0;
+    }
+    let RoomLog { lines, pending, .. } = &mut *log;
     let mut picked = None;
 
     if mode.mini {
@@ -84,18 +89,24 @@ pub fn draw(
         egui::Area::new("leave-mini".into())
             .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-8.0, -8.0))
             .show(ctx, |ui| {
-                if ui.small_button("Full").on_hover_text("Full view (M)").clicked() {
-                    toggle_mini.write(ToggleMini);
-                }
+                ui.horizontal(|ui| {
+                    if auto.0 {
+                        ui.label(egui::RichText::new("AUTO").small().strong().color(AUTO));
+                    }
+                    if ui.small_button("Full").on_hover_text("Full view (M)").clicked() {
+                        toggle_mini.write(ToggleMini);
+                    }
+                });
             });
     } else if ctx.viewport_rect().width() >= WIDE_LAYOUT {
         egui::Panel::right("side").exact_size(SIDE_PANEL_WIDTH).show(&mut root, |ui| {
             ui.add_space(4.0);
+            picked = session_picker(ui, &model);
             ui.horizontal(|ui| {
-                picked = session_picker(ui, &model);
                 if ui.small_button("Mini").on_hover_text("Small widget view (M)").clicked() {
                     toggle_mini.write(ToggleMini);
                 }
+                auto_button(ui, &mut auto);
             });
             ui.separator();
             if let Some(session) = model.shown() {
@@ -121,6 +132,7 @@ pub fn draw(
                 if ui.small_button("Mini").on_hover_text("Small widget view (M)").clicked() {
                     toggle_mini.write(ToggleMini);
                 }
+                auto_button(ui, &mut auto);
                 ui.add(egui::Label::new(text).truncate());
             });
         });
@@ -141,14 +153,112 @@ pub fn draw(
         let reason = pending.reason.trim();
         let message = (decision == Decision::Deny)
             .then(|| if reason.is_empty() { DENY_MESSAGE.to_owned() } else { format!("The user denied this: {reason}") });
-        pending.reply.send(&PermissionReply { decision, message });
+        pending.reply.send(&PermissionReply { decision, message, answers: None });
         let verb = match decision {
             Decision::Allow => "Allowed",
             Decision::Deny => "Denied",
         };
         log.note(&pending.session, pending.agent, format!("{verb} {}", pending.tool.describe().1));
     }
+    question_popup(ctx, &mut log, now);
+    final_answer_popup(ctx, &mut log, mode.mini);
     Ok(())
+}
+
+/// Off: a plain button. On: amber, so it is impossible to miss (PLAN.md M9).
+fn auto_button(ui: &mut egui::Ui, auto: &mut AutoAccept) {
+    let button = if auto.0 {
+        egui::Button::new(egui::RichText::new("Auto-accept ON").small().strong().color(egui::Color32::WHITE)).fill(AUTO)
+    } else {
+        egui::Button::new(egui::RichText::new("Auto-accept").small())
+    };
+    let hint = "Allow permission requests without asking (A). Risky commands like rm -rf or git push still ask.";
+    if ui.add(button).on_hover_text(hint).clicked() {
+        auto.0 = !auto.0;
+    }
+}
+
+/// Claude's multiple-choice question, in the middle of the window.
+fn question_popup(ctx: &egui::Context, log: &mut RoomLog, now: Instant) {
+    let Some(card) = log.questions.first_mut() else { return };
+    let (mut send, mut terminal) = (false, false);
+    egui::Window::new(format!("{} asks", card.agent))
+        .id("question".into())
+        .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+        .collapsible(false)
+        .resizable(false)
+        .max_width(420.0)
+        .show(ctx, |ui| {
+            egui::ScrollArea::vertical().max_height(ctx.viewport_rect().height() * 0.6).show(ui, |ui| {
+                for (index, question) in card.questions.iter_mut().enumerate() {
+                    let Question { text, header, options, multi, chosen, other } = question;
+                    ui.label(egui::RichText::new(header.as_str()).small().weak());
+                    ui.label(egui::RichText::new(text.as_str()).strong());
+                    for (i, option) in options.iter().enumerate() {
+                        if ui.selectable_label(chosen[i], &option.label).clicked() {
+                            let pick = !chosen[i];
+                            if !*multi {
+                                chosen.iter_mut().for_each(|c| *c = false);
+                            }
+                            chosen[i] = pick;
+                        }
+                        if !option.description.is_empty() {
+                            ui.small(&option.description);
+                        }
+                    }
+                    ui.add(egui::TextEdit::singleline(other).hint_text("Or type an answer").id_salt(("other", index)));
+                    ui.separator();
+                }
+            });
+            ui.horizontal(|ui| {
+                let ready = card.answers().is_some() && card.accepts_input(now);
+                if ui.add_enabled(ready, colored_button("Send", ALLOW)).clicked() {
+                    send = true;
+                }
+                if ui.button("Answer in terminal").clicked() {
+                    terminal = true;
+                }
+                ui.small(format!("{} s", card.expires_at.saturating_duration_since(now).as_secs()));
+            });
+        });
+    if send || terminal {
+        let card = log.questions.remove(0);
+        let note = if send {
+            let answers = card.answers();
+            card.reply.send(&PermissionReply { decision: Decision::Allow, message: None, answers });
+            "Answered the question"
+        } else {
+            // Dropping the reply closes the hook; Claude Code asks in the terminal.
+            "Question: answer in the terminal"
+        };
+        log.note(&card.session, card.agent, note.to_owned());
+    }
+}
+
+/// Claude's answer at the end of a turn, until closed or the next prompt.
+fn final_answer_popup(ctx: &egui::Context, log: &mut RoomLog, mini: bool) {
+    if !log.questions.is_empty() {
+        return;
+    }
+    let Some(text) = log.final_answer.clone() else { return };
+    let mut close = false;
+    egui::Window::new("Claude")
+        .id("final-answer".into())
+        .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+        .collapsible(false)
+        .resizable(false)
+        .max_width(if mini { 280.0 } else { 460.0 })
+        .show(ctx, |ui| {
+            egui::ScrollArea::vertical()
+                .max_height(ctx.viewport_rect().height() * if mini { 0.55 } else { 0.5 })
+                .show(ui, |ui| ui.label(text));
+            if ui.button("Close").clicked() {
+                close = true;
+            }
+        });
+    if close {
+        log.final_answer = None;
+    }
 }
 
 /// The shown session's name; a drop-down to switch when several sessions are known.
@@ -156,14 +266,14 @@ fn session_picker(ui: &mut egui::Ui, model: &Model) -> Option<String> {
     let sessions = model.sessions();
     let title = session_title(model);
     if sessions.len() < 2 {
-        ui.label(egui::RichText::new(title).strong());
+        ui.add(egui::Label::new(egui::RichText::new(title).strong()).truncate());
         return None;
     }
     let shown = model.shown().map(|session| session.id.as_str());
     let mut picked = None;
     egui::ComboBox::from_id_salt("session")
         .selected_text(egui::RichText::new(title).strong())
-        .width(SIDE_PANEL_WIDTH - 24.0)
+        .width(ui.available_width())
         .show_ui(ui, |ui| {
             for session in sessions {
                 let state = if session.ended {
