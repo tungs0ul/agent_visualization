@@ -575,7 +575,9 @@ config file, and can remove both cleanly.
 
 - [x] Plan written (2026-11-17)
 - [x] M1 Hook spike (2026-11-17)
-- [ ] M2 Protocol and app skeleton
+- [ ] M2 Protocol and app skeleton: room-proto done, room-hook forward mode done.
+      Remaining: room-app (Bevy window + socket server + egui log), replay script,
+      switch plugin hooks from `--log` to forward mode.
 - [ ] M3 Static room and window behavior
 - [ ] M4 Life
 - [ ] M5 Permissions
@@ -607,3 +609,24 @@ anything surprising.
   3.4 "Seen in the interactive run"): background sub-agents, `agentId` link,
   SubagentHandback report path, silent manual deny. Wrote 20 redacted fixtures to
   `crates/room-proto/tests/fixtures/`. M1 done. Next: M2.
+- 2026-11-17, Claude Opus 5.5: M2 part 1.
+  - `crates/room-proto`: `HookEnvelope`, `PermissionReply` (+ `hook_output()` = exact
+    stdout JSON), `state_dir()` (honours `$AGENT_ROOM_DIR`), `event::RoomEvent::parse`
+    (typed events incl. `ReportReceived`, `Handback`, `ToolFinished.launched` with
+    `agentId`), `describe` (tool call ⇒ `Activity` + bubble label, char-safe truncate).
+    21 tests incl. all 20 fixtures.
+  - `room-hook` forward mode (no args): connects to `<state_dir>/room.sock`; app absent
+    ⇒ silent exit; non-permission events don't wait; `PermissionRequest` waits up to
+    `AGENT_ROOM_PERMISSION_TIMEOUT` (default 60 s) and prints the decision; timeout,
+    closed socket or bad reply ⇒ no stdout (terminal prompt). 7 integration tests
+    against a fake app socket. `--log` mode unchanged.
+  - The plugin's hooks.json still uses `--log`. Switch to forward mode (drop `args`)
+    once room-app can serve the socket, otherwise nothing listens.
+  **Next (finish M2):** create `crates/room-app` with Bevy 0.20 + bevy_egui 0.43:
+  read the Bevy 0.20 examples first (window settings, `WinitSettings` reactive mode,
+  waking the event loop from another thread). Socket server thread: create
+  `state_dir` 0700, remove stale socket, bind, chmod 0600, lock file; per connection
+  read one `HookEnvelope` line, send `(RoomEvent, Option<reply sender>)` over a
+  crossbeam channel, wake the app. Bevy: corner window (always on top, resizable),
+  egui log panel listing parsed events. Then `scripts/replay.sh` and the hooks.json
+  switch.
