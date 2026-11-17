@@ -36,6 +36,53 @@ It is a native Rust app (Bevy), not a web view. Everything stays on your machine
 
 3. Start the app: `agent-room`. Then use Claude Code as usual.
 
+## Install from a clone of this repository
+
+Use this before the repository is published, or to run your own changes.
+
+1. **Get the code and build both programs** (first build takes about 6 minutes):
+
+   ```sh
+   git clone <repository url> agent-room   # or use the folder you already have
+   cd agent-room
+   scripts/install-dev.sh                   # = cargo install --path crates/room-hook
+                                            #   + cargo install --path crates/room-app
+   ```
+
+   Check: `which agent-room room-hook` prints two paths in `~/.cargo/bin`. If not,
+   add `~/.cargo/bin` to your `PATH`.
+
+2. **Add the plugin to Claude Code.** Either permanently, inside Claude Code:
+
+   ```
+   /plugin marketplace add /full/path/to/agent-room
+   /plugin install agent-room@agent-room
+   ```
+
+   or for a single session, without installing anything:
+
+   ```sh
+   claude --plugin-dir /full/path/to/agent-room/plugin
+   ```
+
+   Restart Claude Code sessions that were already open; plugins load at session start.
+
+3. **Start the app:** run `agent-room` in a terminal (leave it running).
+
+4. **Use Claude Code** in another terminal. The room shows "Hello!" when the session
+   starts, and the log panel fills up as Claude works.
+
+After pulling new changes, run `scripts/install-dev.sh` again and restart `agent-room`.
+
+### Nothing shows up?
+
+- Is the app running? Only one can run at a time; a second one prints
+  `Agent Room is already running`.
+- Is the hook installed? `ls ~/.cargo/bin/room-hook`. The plugin is silent without it.
+- Is the plugin active? `/plugin` in Claude Code lists `agent-room` as enabled. Sessions
+  started before installing it don't have it.
+- Errors from the hook land in `~/.agent-room/hook-errors.log`.
+
 ## Using it
 
 - The window starts in the bottom-right corner, always on top. Move and resize it
