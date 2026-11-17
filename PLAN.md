@@ -364,13 +364,20 @@ drains the channel each frame. Permission replies go back via a `oneshot` stored
 - Typewriter text reveal (~40 chars/s), max ~2 lines, ellipsis.
 - Fade out after ~4 s unless it's the agent's latest action (latest stays, dimmed).
 
-### 4.4 Report-back animation (`SubagentStop`)
+### 4.4 Report-back animation (`SubagentHandback`, else `SubagentStop`)
 
-1. Sub-agent stands up, holds up a paper.
-2. Paper becomes a paper plane, flies along a quadratic bezier arc to the main desk,
-   with a particle trail in the agent's accent color.
-3. Pulse ring at main desk; main Claude bubble: "Got it from Explore".
-4. Sub-agent walks out the door.
+Decided with the user: the sub-agent **walks the report over and hands it to Claude**
+(no flying paper plane).
+
+1. Sub-agent says "Here's my report!", steps out sideways from behind its desk and
+   walks to a spot beside the front of Claude's desk, holding a paper sheet (white,
+   lines in its accent color) in its raised right hand.
+2. On arrival the sheet passes in a small arc into Claude's hand (0.45 s); a ring in
+   the agent's color pulses there. Claude's bubble: "Got it from Explore" (from the
+   `<agent-message>` prompt event).
+3. Once it stands still and has stopped (`SubagentStop`), it lingers 0.7 s and walks
+   out the door; its desk disappears when it gets there.
+4. An agent that stops without a hand-back still walks its last message over.
 
 ### 4.4b Office zones: agents go where the work is (M4b)
 
@@ -640,7 +647,7 @@ config file, and can remove both cleanly.
 - [x] M3 Static room and window behavior (2026-11-17). Not yet checked by a human:
       F/P/Esc keys, window.json restore, always-on-top over other apps' full-screen
       Spaces.
-- [ ] M4 Life
+- [x] M4 Life (2026-11-17)
 - [ ] M4b Office zones (agents walk to where the work is)
 - [ ] M5 Permissions
 - [ ] M6 Polish
@@ -770,3 +777,24 @@ anything surprising.
   `Viewport::clamp_to_size`. Added `AGENT_ROOM_SCREENSHOT_RESIZE=<w>x<h>` (resizes after
   the 2nd shot) and verified shrink 1000→400 and grow 420→1100 run with no errors.
   Added section 4.4b and milestone M4b "Office zones" at the user's request.
+- 2026-11-17, Claude Opus 5.5: M4 done.
+  - `anim.rs`: `Pose` per character (Idle, Thinking, Reading, Typing, Web, Delegating,
+    Reporting, Waiting) set from hook events in `scene::react()`; parts (`Part` +
+    `Rest` + `RigOf`) animate on top of their rest transform: breathing, blinking,
+    head tilt per pose, typing arms, raised arm, bouncing red "!" badge while waiting,
+    walk bob. Speech bubbles: typewriter, sized to the text, dim after 4 s. `Walk` in
+    two legs (around desks), `Done` lingers then walks out, `HandOver` sheet + `Pulse`.
+    `Animating` drives redraw pacing: ~30 fps only while something moves or a
+    character isn't idle, otherwise the app sleeps.
+  - `scene.rs`: desk and character are separate entities; sub-agents walk in from the
+    door to their seat; report hand-over per 4.4. Font Nunito embedded
+    (`include_bytes!`, `assets/fonts`, OFL in `assets/LICENSES.md`).
+  - **Bevy 0.20 gotcha:** 2D draw items are retained and their sort key (`mesh_z`) is
+    computed once, when first queued. Changing an entity's z later does NOT re-sort
+    it. So never change z after spawn (characters keep z 0 while walking), and keep
+    layers whole units apart (see the comment at the top of `scene.rs`).
+  - Screenshot mode got `AGENT_ROOM_SCREENSHOT_EVERY_MS` (catch animations).
+  - Verified with replays: walk-in, seated behind desk, typing/reading, permission
+    badge, walk-over hand-over with pulse, walk-out.
+  **Next:** user watches a live session. Then M4b (office zones) or M5 (permission
+  polish: Y/N keys, card above the agent, attention request).

@@ -23,9 +23,9 @@ const DOCK_MARGIN: f32 = 96.0;
 /// Geometry is written this long after the last move or resize.
 const SAVE_DELAY: Duration = Duration::from_secs(1);
 const STATE_FILE: &str = "window.json";
-/// Screenshot mode: one shot every interval, at most this many.
+/// Screenshot mode: one shot every interval (default), at most this many.
 const SHOT_INTERVAL: Duration = Duration::from_secs(2);
-const MAX_SHOTS: u32 = 30;
+const MAX_SHOTS: u32 = 80;
 
 /// The windowed geometry, kept in `~/.agent-room/window.json`.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -165,11 +165,13 @@ pub fn hotkeys(
 /// seconds. Bevy reads its own frame, so this works without macOS Screen Recording
 /// permission. Dev only: the app redraws continuously in this mode.
 ///
+/// `AGENT_ROOM_SCREENSHOT_EVERY_MS=<ms>` changes the interval (to catch animations).
 /// `AGENT_ROOM_SCREENSHOT_RESIZE=<w>x<h>` also resizes the window (logical px) after the
 /// second shot, to test resizing without a human dragging the corner.
 #[derive(Resource)]
 pub struct ScreenshotMode {
     dir: PathBuf,
+    every: Duration,
     next: Instant,
     taken: u32,
     resize_to: Option<Vec2>,
@@ -183,7 +185,11 @@ impl ScreenshotMode {
             let (w, h) = size.split_once('x')?;
             Some(Vec2::new(w.parse().ok()?, h.parse().ok()?))
         });
-        Some(Self { dir, next: Instant::now() + SHOT_INTERVAL, taken: 0, resize_to })
+        let every = std::env::var("AGENT_ROOM_SCREENSHOT_EVERY_MS")
+            .ok()
+            .and_then(|ms| ms.parse().ok())
+            .map_or(SHOT_INTERVAL, Duration::from_millis);
+        Some(Self { dir, every, next: Instant::now() + every, taken: 0, resize_to })
     }
 }
 
@@ -202,7 +208,8 @@ pub fn take_screenshots(
         window.resolution.set(size.x, size.y);
     }
     mode.taken += 1;
-    mode.next += SHOT_INTERVAL;
+    let every = mode.every;
+    mode.next += every;
     let path = mode.dir.join(format!("shot-{:03}.png", mode.taken));
     commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path));
 }

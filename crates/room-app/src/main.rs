@@ -1,9 +1,11 @@
 //! Agent Room: a small always-on-top window that shows what Claude Code and its
 //! sub-agents are doing, and lets the user answer permission prompts.
 //!
-//! M3: the room scene with a seat per sub-agent, plus the event log and permission
-//! cards (egui) beside or below it. Animation arrives in M4.
+//! The room scene with Claude and a seat per sub-agent (animated: poses, speech
+//! bubbles, walking, report planes), plus the event log and permission cards (egui)
+//! beside or below it.
 
+mod anim;
 mod log;
 mod scene;
 mod server;
@@ -21,13 +23,16 @@ use bevy_egui::{EguiGlobalSettings, EguiPlugin, EguiPrimaryContextPass, PrimaryE
 use bevy_prototype_lyon::prelude::ShapePlugin;
 use room_proto::event::{AgentRef, EventKind};
 
+use crate::anim::Animating;
 use crate::log::{PendingPermission, RoomLog, agent_label};
 use crate::scene::{HookEvent, Roster};
 use crate::server::{Incoming, Server};
 use crate::window::{NeedsCornerPlacement, SavedWindow, ScreenshotMode};
 
-/// Redraw rate while a countdown or a short scene change is on screen.
-const TICK: Duration = Duration::from_millis(250);
+/// Redraw rate while characters move (about 30 fps: smooth enough, half the power of 60).
+const FRAME: Duration = Duration::from_millis(33);
+/// Redraw rate while only a permission countdown changes.
+const COUNTDOWN_TICK: Duration = Duration::from_millis(250);
 
 fn main() -> AppExit {
     let server = match Server::start() {
@@ -54,7 +59,8 @@ fn main() -> AppExit {
         .insert_resource(NeedsCornerPlacement(saved.is_none()))
         .init_resource::<RoomLog>()
         .init_resource::<Roster>()
-        .add_systems(Startup, (scene::spawn_room, spawn_ui_camera, connect_waker))
+        .init_resource::<Animating>()
+        .add_systems(Startup, ((scene::load_font, scene::spawn_room).chain(), spawn_ui_camera, connect_waker))
         .add_systems(
             Update,
             (
@@ -63,7 +69,10 @@ fn main() -> AppExit {
                 window::remember_geometry,
                 receive_events,
                 scene::apply_events,
-                scene::clear_leavers,
+                scene::greet,
+                (anim::walk, anim::leave_when_done, anim::animate_parts, anim::update_bubbles),
+                (anim::hand_over, anim::pulse),
+                anim::detect_motion,
                 expire_permissions,
                 pace_updates,
                 window::take_screenshots,
@@ -154,25 +163,33 @@ fn expire_permissions(mut log: ResMut<RoomLog>) {
     }
 }
 
-/// Redraw a few times a second only while something on screen changes by itself.
+/// Redraw only while something on screen changes by itself; sleep otherwise.
 fn pace_updates(
     log: Res<RoomLog>,
-    roster: Res<Roster>,
+    animating: Res<Animating>,
     screenshots: Option<Res<ScreenshotMode>>,
-    mut ticking: Local<bool>,
+    mut current: Local<Option<Duration>>,
     mut settings: ResMut<WinitSettings>,
 ) {
     if screenshots.is_some() {
         return;
     }
-    let needs_ticks = !log.pending.is_empty() || roster.is_animating();
-    if needs_ticks == *ticking {
+    let wanted = if animating.0 {
+        Some(FRAME)
+    } else if !log.pending.is_empty() {
+        Some(COUNTDOWN_TICK)
+    } else {
+        None
+    };
+    if wanted == *current {
         return;
     }
-    *ticking = needs_ticks;
-    *settings = if needs_ticks {
-        WinitSettings { focused_mode: UpdateMode::reactive(TICK), unfocused_mode: UpdateMode::reactive_low_power(TICK) }
-    } else {
-        WinitSettings::desktop_app()
+    *current = wanted;
+    *settings = match wanted {
+        Some(every) => WinitSettings {
+            focused_mode: UpdateMode::reactive(every),
+            unfocused_mode: UpdateMode::reactive_low_power(every),
+        },
+        None => WinitSettings::desktop_app(),
     };
 }
