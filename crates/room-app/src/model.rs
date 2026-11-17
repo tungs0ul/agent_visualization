@@ -126,6 +126,10 @@ impl SessionState {
     }
 }
 
+/// The shown session counts as quiet once this many events in a row came from other
+/// sessions; then the room switches to the session that is working.
+const QUIET_EVENTS: u64 = 5;
+
 #[derive(Resource, Default)]
 pub struct Model {
     sessions: HashMap<String, SessionState>,
@@ -188,12 +192,16 @@ impl Model {
         session.ended = matches!(event.kind, EventKind::SessionEnded { .. });
         update_session(session, event, &mut changes);
 
-        // The room follows one session: the first one seen, until the user starts or
-        // types into another.
+        // The room follows the active session: it switches when the user starts or types
+        // into another one, or when the shown one has gone quiet (or ended) while another
+        // works. Otherwise a stray event from another session could hold the room.
         let user_activity = matches!(event.kind, EventKind::SessionStarted { .. } | EventKind::UserPrompt { .. });
+        let shown_quiet = self.shown.as_ref().and_then(|id| self.sessions.get(id)).is_none_or(|shown| {
+            shown.ended || self.events_seen.saturating_sub(shown.last_seen) >= QUIET_EVENTS
+        });
         match &self.shown {
             Some(shown) if *shown == event.session_id => changes,
-            Some(_) if !user_activity => Vec::new(),
+            Some(_) if !user_activity && !shown_quiet => Vec::new(),
             _ => {
                 self.shown = Some(event.session_id.clone());
                 // Redraw the newly shown session from scratch.
@@ -401,6 +409,19 @@ mod tests {
         assert_eq!(changes[0], Change::ShowSession);
         assert!(changes.iter().any(|c| matches!(c, Change::Joined { id, .. } if id == "a1")));
         assert_eq!(model.shown().unwrap().id, "s2");
+    }
+
+    #[test]
+    fn room_switches_to_the_working_session_when_the_shown_one_is_quiet() {
+        let mut model = Model::default();
+        model.apply(&event("other", None, json!({ "hook_event_name": "SessionStart" })));
+        for i in 0..QUIET_EVENTS {
+            let changes = model.apply(&sub_tool("busy", &format!("a{i}")));
+            if i + 1 < QUIET_EVENTS {
+                assert!(changes.is_empty());
+            }
+        }
+        assert_eq!(model.shown().unwrap().id, "busy");
     }
 
     #[test]

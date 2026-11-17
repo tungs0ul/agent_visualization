@@ -19,6 +19,7 @@ use std::time::{Duration, Instant};
 use bevy::camera::visibility::RenderLayers;
 use bevy::camera::CameraOutputMode;
 use bevy::prelude::*;
+use bevy::render::error_handler::{RenderErrorHandler, RenderErrorPolicy};
 use bevy::render::render_resource::BlendState;
 use bevy::winit::{EventLoopProxyWrapper, UpdateMode, WinitSettings, WinitUserEvent};
 use bevy_egui::{EguiGlobalSettings, EguiPlugin, EguiPrimaryContextPass, PrimaryEguiContext};
@@ -52,6 +53,10 @@ fn main() -> AppExit {
         // Sleep until input or a hook event arrives (PLAN.md 6).
         .insert_resource(WinitSettings::desktop_app())
         .insert_resource(ClearColor(scene::BACKDROP))
+        // When the window changes size (mini mode, resizing) one frame can still mix the
+        // old and new sizes; wgpu rejects it and Bevy would quit. Skip that frame instead;
+        // the next one is consistent again.
+        .insert_resource(RenderErrorHandler(|_, _, _| RenderErrorPolicy::Ignore))
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(window::initial_window(saved)),
             ..default()

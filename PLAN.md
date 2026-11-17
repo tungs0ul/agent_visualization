@@ -630,6 +630,27 @@ Claude Code session instead of typing in the terminal.
   (`claude -p --resume <session_id>`), which only suits sessions not open in a terminal.
 - Never send anything without the user pressing Send.
 
+### M9: Auto-accept mode and centre pop-ups (requested 2026-11-17)
+
+- A toggle (button + key) that, while on, **allows permission requests automatically**.
+  The user's explicit choice; off by default, never remembered across app starts, shown
+  clearly (an amber "Auto-accept ON" badge in the room and the mini view). Log every
+  auto-allowed request. Consider an exclude list (`rm -rf`, `git push`) that still asks.
+- Questions Claude asks with options (`AskUserQuestion`) appear as a **pop-up panel in
+  the middle** of the room to pick or type an answer. Research first whether a
+  `PermissionRequest`/`PreToolUse` hook for `AskUserQuestion` can return the answer
+  (e.g. `updatedInput`), or whether this needs the M8 channel.
+- When Claude finishes a turn (`Stop.last_assistant_message`), show the answer in a
+  centre pop-up (dismissable; compact in mini mode).
+
+### M10: Context and usage limits (requested 2026-11-17)
+
+Show the session's context use, the 5-hour limit and the weekly limit (side panel
+header; compact bar in mini mode). Hook payloads don't carry it. Candidates: the
+transcript's usage fields (context tokens); Claude Code's status-line command input
+(it receives model, context and rate-limit info; a plugin status line could forward
+it to the app socket); CLI output. Pick the supported, cheap one.
+
 ### M5: Permissions
 
 - Permission cards (scene + panel), Allow/Deny, Y/N, countdown, stacking, 300 ms input
@@ -724,6 +745,8 @@ config file, and can remove both cleanly.
 - [ ] M4e Waiting at the Approval desk with the card in the scene
 - [ ] M4f Camera controls: zoom, pan, pin an agent
 - [ ] M8 Chat with Claude from the app
+- [ ] M9 Auto-accept mode and centre pop-ups (questions, final answer)
+- [ ] M10 Context, 5-hour and weekly limits in the app
 - [x] M5 Permissions (2026-11-17; user still to try Y/N and a deny reason live)
 - [ ] M6 Polish
 - [x] M7 Distribution, code side (2026-11-17); publishing left to the user
@@ -1005,6 +1028,22 @@ Open items, in order:
    M4f (camera zoom/pan/pin agent), M4d (rooms per repo), M8 (chat via plugin channel).
 4. Publishing (user only): GitHub repo, replace `<owner>` in README and
    `packaging/homebrew/agent-room.rb`, tag a release.
+
+Later in the session (2026-11-17):
+- Fixed: the room stuck to the first session it saw, hiding the active session's events
+  (only permission cards showed). It now switches when the shown session has had no
+  events for `QUIET_EVENTS` (5) events from other sessions, or ended (test added).
+- Fixed: switching mini mode made one frame mix old/new window sizes; wgpu rejected it
+  and Bevy quit. A `RenderErrorHandler` now ignores such errors (logged, frame skipped).
+  `AGENT_ROOM_SCREENSHOT_TOGGLE_MINI=1` toggles mini after the 2nd shot and back after
+  the 4th; verified 2200→640→2200 px with the app still running.
+- New milestones M9 (auto-accept + centre pop-ups) and M10 (context and limits).
+- Not pushed: `git push` is blocked for agents by the auto-mode classifier; the user
+  runs `git push -u origin main`. Branch `main`; remote
+  `git@github.com:tungs0ul/agent_visualization.git`; the user's SSH key works.
+- If the app shows nothing: the plugin's shim needs an installed `room-hook`
+  (`scripts/install-dev.sh` or `AGENT_ROOM_HOOK=...`), and Claude sessions must be
+  started after the plugin is enabled.
 
 Known gaps: macOS attention bounce not done; roster click-to-highlight not done
 (part of M4f); `agent-room` release binary is 96 MB (Bevy default features; could trim).
