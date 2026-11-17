@@ -614,6 +614,27 @@ repository appears and the agent walks there.
   follow it; click again (or Esc) to unpin. The pinned agent gets a highlight ring.
 - Manual camera input pauses the automatic follow until reset.
 
+### M8 design update (2026-11-17, user asked: "can we start a new session in our app instead of opening a terminal?")
+
+Two parts; do **8a first**, it is simpler and fully supported:
+
+- **8a: Sessions started from the app (no terminal).** A "New session" button (folder
+  picker for the working directory, default: last used) starts Claude Code as a child
+  process: `claude -p --input-format stream-json --output-format stream-json --verbose
+  --plugin-dir <plugin>` (or rely on the installed plugin) in that directory. The app
+  writes user messages as stream-json lines to its stdin and reads its stdout:
+  assistant text and tool use for a chat transcript panel, `result` events for turn
+  end. Hook events still flow through the plugin, so the room, permissions (the
+  `PermissionRequest` hook fires in `-p` mode, seen in M1), questions and the final
+  answer pop-up work unchanged. Chat panel: transcript (markdown via egui_commonmark) +
+  input box (Enter sends, Shift+Enter newline) + Stop button (kill/interrupt the child).
+  Read the current headless docs first (`code.claude.com/docs/en/headless.md`,
+  stream-json input format, `--resume <session_id>` to continue a session later).
+  Process hygiene: children are killed when the app exits (AGENTS.md rule).
+- **8b: Talking to a session already open in a terminal.** Needs a plugin **channel**
+  (MCP server declared in plugin.json `channels`) that injects messages into that
+  session; see the original M8 notes below. Research availability first.
+
 ### M8: Chat with Claude from the app (later; requested 2026-11-17)
 
 A text input in the app (side panel and mini mode) to send messages to the running
