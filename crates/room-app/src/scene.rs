@@ -10,7 +10,7 @@ use bevy::prelude::*;
 use bevy_prototype_lyon::prelude::*;
 
 use crate::anim::{
-    self, Accent, Arrive, Bubble, BubbleRef, Done, Part, Phase, Rest, RigOf, Walk, say,
+    self, Accent, Animating, Arrive, Bubble, BubbleRef, Chip, Done, Part, Phase, Place, Rest, RigOf, Station, Walk, say,
 };
 use crate::model::{Change, Pose, Who};
 
@@ -18,28 +18,57 @@ use crate::model::{Change, Pose, Who};
 // body), bubbles +30, planes 60. Never change an entity's z after spawning it: Bevy 0.20
 // keeps the 2D sort key from when the entity was first drawn (see `anim::Walk::at`).
 
-/// The design-space size of the room. The camera always shows all of it.
-pub const ROOM_SIZE: Vec2 = Vec2::new(900.0, 640.0);
-const FLOOR_SIZE: Vec2 = Vec2::new(860.0, 600.0);
-const DOOR: Vec2 = Vec2::new(0.0, -300.0);
+/// The design-space size of the office. A wide window shows all of it; a small one
+/// follows the agents (`follow_action`).
+pub const ROOM_SIZE: Vec2 = Vec2::new(1400.0, 900.0);
+const FLOOR_SIZE: Vec2 = Vec2::new(1360.0, 860.0);
+const DOOR: Vec2 = Vec2::new(0.0, -430.0);
 /// Characters reach their seat through this point behind the desk.
 const BEHIND_DESK: Vec2 = Vec2::new(0.0, 85.0);
 /// Stepping out sideways from behind a desk clears it at this distance.
 const BESIDE_DESK: f32 = 88.0;
 
-const MAIN_SEAT: Vec2 = Vec2::new(0.0, 10.0);
+const MAIN_SEAT: Vec2 = Vec2::new(0.0, 60.0);
 const MAIN_SCALE: f32 = 1.4;
-/// Sub-agent seats, filled in this order: near the center first, left and right.
+/// Sub-agent seats around Claude, filled in this order: near the center first.
 const SEATS: [Vec2; 8] = [
-    Vec2::new(-300.0, 130.0),
-    Vec2::new(300.0, 130.0),
-    Vec2::new(-330.0, -20.0),
-    Vec2::new(330.0, -20.0),
-    Vec2::new(-290.0, -170.0),
-    Vec2::new(290.0, -170.0),
-    Vec2::new(-150.0, -215.0),
-    Vec2::new(150.0, -215.0),
+    Vec2::new(-250.0, 200.0),
+    Vec2::new(250.0, 200.0),
+    Vec2::new(-265.0, 55.0),
+    Vec2::new(265.0, 55.0),
+    Vec2::new(-250.0, -95.0),
+    Vec2::new(250.0, -95.0),
+    Vec2::new(-115.0, -190.0),
+    Vec2::new(115.0, -190.0),
 ];
+/// An agent stays this long in a place before it walks to the next one, so bursts of
+/// quick tool calls don't make it run back and forth.
+const MIN_DWELL: f32 = 2.0;
+/// Below this logical width the camera follows the agents instead of showing the
+/// whole office.
+const FOLLOW_BELOW_WIDTH: f32 = 640.0;
+/// The smallest part of the office the follow camera zooms in to.
+const MIN_VIEW: Vec2 = Vec2::new(560.0, 380.0);
+
+/// A zone of the office: where agents go for a kind of work (PLAN.md 4.4b).
+struct Zone {
+    place: Place,
+    center: Vec2,
+    size: Vec2,
+    tint: Color,
+}
+
+const ZONES: [Zone; 5] = [
+    Zone { place: Place::Library, center: Vec2::new(-500.0, 235.0), size: Vec2::new(300.0, 190.0), tint: rgb(0xEC, 0xEF, 0xE0) },
+    Zone { place: Place::Servers, center: Vec2::new(500.0, 235.0), size: Vec2::new(300.0, 190.0), tint: rgb(0xE5, 0xE9, 0xF0) },
+    Zone { place: Place::WebBay, center: Vec2::new(-500.0, -115.0), size: Vec2::new(300.0, 230.0), tint: rgb(0xE3, 0xEE, 0xF3) },
+    Zone { place: Place::Approval, center: Vec2::new(500.0, -115.0), size: Vec2::new(300.0, 230.0), tint: rgb(0xF5, 0xE6, 0xE1) },
+    // The lounge by the door: decoration and a place to pass on the way out.
+    Zone { place: Place::Door, center: Vec2::new(0.0, -340.0), size: Vec2::new(460.0, 140.0), tint: rgb(0xF2, 0xE8, 0xDB) },
+];
+/// Standing spots in a zone, relative to its center (props fill the top half).
+const SPOTS: [Vec2; 4] =
+    [Vec2::new(-75.0, -35.0), Vec2::new(75.0, -35.0), Vec2::new(-25.0, -75.0), Vec2::new(25.0, -75.0)];
 
 const fn rgb(r: u8, g: u8, b: u8) -> Color {
     Color::srgb(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0)
@@ -62,6 +91,15 @@ const LEAF: Color = rgb(0x7F, 0xB0, 0x7A);
 const LEAF_DARK: Color = rgb(0x5E, 0x93, 0x5C);
 const POT: Color = rgb(0xC9, 0x8B, 0x6B);
 const ALERT: Color = rgb(0xD9, 0x4D, 0x47);
+const ZONE_LABEL: Color = rgb(0x9A, 0x8C, 0x7C);
+const SHELF: Color = rgb(0xB0, 0x80, 0x58);
+const BOOKS: [Color; 5] = [rgb(0xD9, 0x6C, 0x4F), rgb(0x5B, 0x8D, 0xEF), rgb(0xE5, 0xC0, 0x4B), rgb(0x4C, 0xAF, 0x7A), rgb(0x9B, 0x6B, 0xDF)];
+const RACK: Color = rgb(0x3B, 0x42, 0x50);
+const LED_GREEN: Color = rgb(0x6B, 0xD3, 0x8A);
+const LED_BLUE: Color = rgb(0x6F, 0xB7, 0xFF);
+const GLOBE_SEA: Color = rgb(0x7D, 0xB7, 0xE8);
+const SOFA: Color = rgb(0xC9, 0x8B, 0x6B);
+const SOFA_CUSHION: Color = rgb(0xDB, 0xA0, 0x80);
 pub const TEXT: Color = rgb(0x4A, 0x42, 0x3A);
 pub const MAIN_ACCENT: Color = rgb(0xE0, 0x7A, 0x4F);
 const SUB_ACCENTS: [Color; 8] = [
@@ -157,20 +195,196 @@ pub fn spawn_room(mut commands: Commands, font: Res<UiFont>, mut roster: ResMut<
         rounded(Vec2::new(FLOOR_SIZE.x, wall_height), 28.0, WALL, None),
         Transform::from_xyz(0.0, wall_y, -90.0),
     ));
-    for x in [-170.0, 170.0] {
+    for x in [-150.0, 150.0] {
         commands.spawn((
             rounded(Vec2::new(150.0, 56.0), 8.0, WINDOW_GLASS, Some((WINDOW_FRAME, 6.0))),
             Transform::from_xyz(x, wall_y + 4.0, -80.0),
         ));
     }
     commands.spawn((rounded(Vec2::new(130.0, 12.0), 6.0, DOOR_COLOR, None), Transform::from_translation(DOOR.extend(-80.0))));
-    commands.spawn((ellipse(Vec2::new(210.0, 140.0), RUG, Some((RUG_EDGE, 3.0))), Transform::from_xyz(0.0, 0.0, -70.0)));
-    spawn_plant(&mut commands, Vec2::new(-FLOOR_SIZE.x / 2.0 + 50.0, wall_y - 70.0));
-    spawn_plant(&mut commands, Vec2::new(FLOOR_SIZE.x / 2.0 - 50.0, wall_y - 70.0));
+    commands.spawn((ellipse(Vec2::new(210.0, 140.0), RUG, Some((RUG_EDGE, 3.0))), MAIN_SEAT.extend(-70.0).into_transform()));
+    for zone in &ZONES {
+        spawn_zone(&mut commands, zone, &font);
+    }
 
     spawn_desk(&mut commands, MAIN_SEAT, MAIN_SCALE, MAIN_ACCENT, "Claude", &font);
     let main = spawn_character(&mut commands, MAIN_SEAT, MAIN_SCALE, MAIN_ACCENT, "main", &font);
     roster.main = Some(main);
+}
+
+/// A zone's rug, name and props. Props sit in the top half; agents stand in front.
+fn spawn_zone(commands: &mut Commands, zone: &Zone, font: &UiFont) {
+    let root = commands.spawn((zone.center.extend(-95.0).into_transform(), Visibility::default())).id();
+    let mut put = |shape: Shape, at: Vec2, z: f32| {
+        commands.spawn((shape, Transform::from_translation(at.extend(z)), ChildOf(root)));
+    };
+    put(rounded(zone.size, 22.0, zone.tint, None), Vec2::ZERO, 0.0);
+    let top = zone.size.y / 2.0;
+    match zone.place {
+        Place::Library => {
+            for x in [-95.0, 0.0, 95.0] {
+                put(rounded(Vec2::new(78.0, 74.0), 5.0, SHELF, None), Vec2::new(x, top - 62.0), 50.0);
+                for (row, y) in [18.0, -2.0, -22.0].into_iter().enumerate() {
+                    for (i, dx) in [-24.0, -12.0, 0.0, 12.0, 24.0].into_iter().enumerate() {
+                        let book = BOOKS[(i + row * 2 + (x as i32).unsigned_abs() as usize) % BOOKS.len()];
+                        put(rounded(Vec2::new(8.0, 15.0), 1.5, book, None), Vec2::new(x + dx, top - 62.0 + y), 51.0);
+                    }
+                }
+            }
+        }
+        Place::Servers => {
+            for x in [-95.0, 0.0, 95.0] {
+                put(rounded(Vec2::new(62.0, 88.0), 6.0, RACK, None), Vec2::new(x, top - 66.0), 50.0);
+                for (row, y) in [26.0, 8.0, -10.0, -28.0].into_iter().enumerate() {
+                    let led = if (row + (x as i32).unsigned_abs() as usize / 95).is_multiple_of(2) { LED_GREEN } else { LED_BLUE };
+                    put(circle(3.5, led), Vec2::new(x + 16.0, top - 66.0 + y), 51.0);
+                    put(rounded(Vec2::new(26.0, 4.0), 2.0, rgb(0x55, 0x5E, 0x6E), None), Vec2::new(x - 8.0, top - 66.0 + y), 51.0);
+                }
+            }
+        }
+        Place::WebBay => {
+            put(rounded(Vec2::new(190.0, 64.0), 8.0, WINDOW_GLASS, Some((WINDOW_FRAME, 6.0))), Vec2::new(-30.0, top - 52.0), 50.0);
+            put(rounded(Vec2::new(6.0, 40.0), 3.0, DESK_EDGE, None), Vec2::new(105.0, top - 100.0), 50.0);
+            put(circle(28.0, GLOBE_SEA), Vec2::new(105.0, top - 70.0), 51.0);
+            put(ellipse(Vec2::new(12.0, 16.0), LEAF, None), Vec2::new(97.0, top - 64.0), 52.0);
+            put(ellipse(Vec2::new(9.0, 7.0), LEAF, None), Vec2::new(116.0, top - 80.0), 52.0);
+        }
+        Place::Approval => {
+            put(rounded(Vec2::new(140.0, 46.0), 10.0, DESK, Some((DESK_EDGE, 3.0))), Vec2::new(0.0, top - 62.0), 50.0);
+            put(circle(14.0, ALERT.with_alpha(0.25)), Vec2::new(45.0, top - 52.0), 51.0);
+            put(circle(8.0, ALERT), Vec2::new(45.0, top - 52.0), 52.0);
+            put(rounded(Vec2::new(36.0, 24.0), 3.0, Color::WHITE, Some((DESK_EDGE, 1.5))), Vec2::new(-30.0, top - 60.0), 51.0);
+        }
+        _ => {
+            // Lounge: sofa, coffee machine, plants.
+            put(rounded(Vec2::new(170.0, 44.0), 14.0, SOFA, None), Vec2::new(-80.0, 6.0), 50.0);
+            for dx in [-40.0, 40.0] {
+                put(rounded(Vec2::new(70.0, 24.0), 8.0, SOFA_CUSHION, None), Vec2::new(-80.0 + dx, 2.0), 51.0);
+            }
+            put(rounded(Vec2::new(42.0, 54.0), 6.0, RACK, None), Vec2::new(120.0, 10.0), 50.0);
+            put(circle(6.0, Color::WHITE), Vec2::new(120.0, 2.0), 51.0);
+        }
+    }
+    commands.spawn((
+        Text2d(zone.place.name().to_owned()),
+        TextFont::from_font_size(13.0).with_font(font.0.clone()),
+        TextColor(ZONE_LABEL),
+        Transform::from_xyz(-zone.size.x / 2.0 + 44.0, top - 14.0, 60.0),
+        ChildOf(root),
+    ));
+    if zone.place == Place::Door {
+        spawn_plant(commands, zone.center + Vec2::new(-200.0, 10.0));
+        spawn_plant(commands, zone.center + Vec2::new(200.0, 10.0));
+    }
+}
+
+/// Where an agent should be for what it is doing; `None` while it reports (that walk
+/// is driven by the model's `Deliver`).
+fn place_for(pose: Pose) -> Option<Place> {
+    match pose {
+        Pose::Reading => Some(Place::Library),
+        Pose::Terminal => Some(Place::Servers),
+        Pose::Web => Some(Place::WebBay),
+        Pose::Waiting => Some(Place::Approval),
+        Pose::Reporting => None,
+        Pose::Idle | Pose::Thinking | Pose::Typing | Pose::Delegating => Some(Place::Desk),
+    }
+}
+
+fn zone_spot(place: Place, slot: usize) -> Vec2 {
+    let zone = ZONES.iter().find(|zone| zone.place == place).map_or(Vec2::ZERO, |zone| zone.center);
+    zone + SPOTS[slot % SPOTS.len()]
+}
+
+/// A sub-agent's own seat.
+#[derive(Component)]
+pub struct Home {
+    seat: Vec2,
+    slot: usize,
+}
+
+type RoutableAgent<'a> = (Entity, &'a Transform, &'a Pose, &'a Home, &'a Station);
+
+/// Sends each sub-agent to the place that matches what it is doing, once it has spent
+/// `MIN_DWELL` where it is. Agents mid-walk finish first, then go to the latest place.
+pub fn route_agents(
+    mut commands: Commands,
+    time: Res<Time>,
+    agents: Query<RoutableAgent, (Without<Walk>, Without<Done>)>,
+) {
+    let now = time.elapsed_secs();
+    for (entity, transform, pose, home, station) in &agents {
+        let Some(want) = place_for(*pose) else { continue };
+        if station.place == want || station.place == Place::Claude || now - station.since < MIN_DWELL {
+            continue;
+        }
+        let here = transform.translation.truncate();
+        let walk = match want {
+            Place::Desk => Walk::new(here, home.seat + BEHIND_DESK, home.seat, Arrive::Sit),
+            place => {
+                let via = if station.place == Place::Desk { step_out(home.seat) } else { here };
+                Walk::new(here, via, zone_spot(place, home.slot), Arrive::Stand(place))
+            }
+        };
+        commands.entity(entity).insert(walk);
+    }
+}
+
+/// Beside the desk, toward the middle of the office: where an agent steps out to.
+fn step_out(seat: Vec2) -> Vec2 {
+    let side = if seat.x < 0.0 { -1.0 } else { 1.0 };
+    seat + Vec2::new(-side * BESIDE_DESK, 0.0)
+}
+
+/// Wide window: show the whole office. Small window: zoom to where the agents are,
+/// gliding there smoothly.
+pub fn follow_action(
+    time: Res<Time>,
+    camera: Single<(&Camera, &mut Transform, &mut Projection), With<WorldCamera>>,
+    agents: Query<&Transform, (With<Agent>, Without<WorldCamera>)>,
+    mut animating: ResMut<Animating>,
+) {
+    let (camera, mut transform, mut projection) = camera.into_inner();
+    let Some(viewport) = camera.logical_viewport_size() else { return };
+    let Projection::Orthographic(ortho) = &mut *projection else { return };
+    let ScalingMode::AutoMin { min_width, min_height } = &mut ortho.scaling_mode else { return };
+
+    let (target_center, target_size) = if viewport.x >= FOLLOW_BELOW_WIDTH {
+        (Vec2::ZERO, ROOM_SIZE)
+    } else {
+        let mut min = Vec2::splat(f32::MAX);
+        let mut max = Vec2::splat(f32::MIN);
+        for agent in &agents {
+            min = min.min(agent.translation.truncate());
+            max = max.max(agent.translation.truncate());
+        }
+        // Room for names below and speech bubbles above.
+        min -= Vec2::new(160.0, 110.0);
+        max += Vec2::new(160.0, 190.0);
+        let size = (max - min).max(MIN_VIEW).min(ROOM_SIZE);
+        let half_room = (ROOM_SIZE - size) / 2.0;
+        (((min + max) / 2.0).clamp(-half_room, half_room), size)
+    };
+
+    let blend = 1.0 - (-4.0 * time.delta_secs()).exp();
+    let center = transform.translation.truncate().lerp(target_center, blend);
+    let size = Vec2::new(*min_width, *min_height).lerp(target_size, blend);
+    transform.translation.x = center.x;
+    transform.translation.y = center.y;
+    (*min_width, *min_height) = (size.x, size.y);
+    if center.distance(target_center) > 0.5 || size.distance(target_size) > 0.5 {
+        animating.0 = true;
+    }
+}
+
+trait IntoTransform {
+    fn into_transform(self) -> Transform;
+}
+
+impl IntoTransform for Vec3 {
+    fn into_transform(self) -> Transform {
+        Transform::from_translation(self)
+    }
 }
 
 /// Shows model changes: arrivals, poses, speech, hand-overs, departures.
@@ -261,13 +475,14 @@ fn deliver(transform: &Transform, slot: usize) -> Walk {
     let here = transform.translation.truncate();
     let seat = SEATS[slot];
     let side = if seat.x < 0.0 { -1.0 } else { 1.0 };
-    let beside_desk = seat + Vec2::new(-side * BESIDE_DESK, 0.0);
+    // From its desk it steps out sideways first; from anywhere else it walks straight.
+    let via = if here.distance(seat) < 20.0 { step_out(seat) } else { here };
     // Beside the front of Claude's desk, low enough that the speech bubbles of
     // Claude and the visitor don't collide; visitors from one side stand in a column.
     let row = (slot / 2) as f32;
     let spot = MAIN_SEAT + Vec2::new(side * 150.0, -40.0 - row * 40.0);
     let claudes_hand = MAIN_SEAT + Vec2::new(side * 38.0, 0.0);
-    Walk::new(here, beside_desk, spot, Arrive::HandOver { to: claudes_hand })
+    Walk::new(here, via, spot, Arrive::HandOver { to: claudes_hand })
 }
 
 /// Gives a new sub-agent a desk and walks it in from the door.
@@ -277,7 +492,7 @@ fn seat_agent(commands: &mut Commands, roster: &mut Roster, id: &str, agent_type
     let accent = accent_for(agent_type);
     let character = spawn_character(commands, DOOR, 1.0, accent, id, font);
     let desk = spawn_desk(commands, seat, 1.0, accent, agent_type, font);
-    commands.entity(character).insert(Walk::new(DOOR, seat + BEHIND_DESK, seat, Arrive::Sit));
+    commands.entity(character).insert((Walk::new(DOOR, seat + BEHIND_DESK, seat, Arrive::Sit), Home { seat, slot }));
     roster.seated.insert(id.to_owned(), Seat { slot, character, desk });
     Some(character)
 }
@@ -354,6 +569,17 @@ fn spawn_character(commands: &mut Commands, at: Vec2, s: f32, accent: Color, key
         TextColor(Color::WHITE),
         Transform::from_xyz(0.0, 0.0, 1.0),
         ChildOf(badge),
+    ));
+    // "→ Library" under the feet while walking (see `anim::update_chips`).
+    commands.spawn((
+        Chip,
+        RigOf(root),
+        Text2d::default(),
+        TextFont::from_font_size(12.0).with_font(font.0.clone()),
+        TextColor(accent),
+        Visibility::Hidden,
+        Transform::from_xyz(0.0, -28.0 * s, 9.5),
+        ChildOf(root),
     ));
     let bubble = anim::spawn_bubble(commands, root, 92.0 * s, font);
     commands.entity(root).insert(BubbleRef(bubble));

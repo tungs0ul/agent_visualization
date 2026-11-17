@@ -567,6 +567,69 @@ Done when: live Claude session events appear in the app's log panel.
 - Narrow-window camera that follows activity.
 - Check with replays at 420×320 and full screen (screenshot mode).
 
+### M4c: Mini mode (requested 2026-11-17)
+
+For watching while working in the terminal or editor: a widget-sized view that hides
+as little as possible, like a macOS widget / Control Center panel.
+
+- Toggle with a key (M) and a small button; remembered in `window.json`.
+- Small borderless window (~300×190 logical) in the top-right corner, always on top.
+- Background: frosted translucent material like macOS widgets (NSVisualEffectView
+  behind a transparent Bevy window: `Window { transparent: true, decorations: false,
+  composite_alpha_mode: PostMultiplied }` + `ClearColor(Color::NONE)`, then add the
+  effect view via `objc2-app-kit` on the window's NSView). Fallback if the blur can't
+  be done: a rounded semi-opaque panel.
+- Only Claude and the agents (no floor, zones or desks), drawn smaller; speech bubbles
+  shortened; no side panel or ticker. Pending permissions still show as a compact card
+  with Allow/Deny (Y/N).
+- Draggable by its background (no title bar).
+
+### M4d: Rooms per repository (requested 2026-11-17)
+
+When an agent works in another repository than the session's, a room for that
+repository appears and the agent walks there.
+
+- Detect the repo per tool call: from file paths in `tool_input` (`file_path`,
+  `notebook_path`, `path`) and Bash commands with `cd <dir>`/absolute paths; walk up to
+  the nearest `.git` and read the branch from `.git/HEAD` (in the app, cached; no git
+  process per event). The session's own repo is the main room.
+- Each repo room: its own floor area with a sign "repo-name · branch", desks, and the
+  same zones as needed (library, servers…), so an agent "fetching" or "editing" there
+  uses that room's props. Rooms appear when first used and fade after a while unused.
+- The roster list shows each agent's room. The office camera fits all rooms in use.
+- Decide the layout: rooms side by side with a corridor, or separate "floors"/tabs.
+
+### M4e: Waiting at the Approval desk, with the card there (requested 2026-11-17)
+
+- A sub-agent that needs permission walks to the Approval desk (already) and **stays
+  there** until answered; Claude asking shows the same card at his desk.
+- The permission card is drawn in the scene next to the waiting agent and is clickable
+  (Allow / Deny / reason), in addition to the side-panel card. Both answer the same
+  request; whichever is used first wins.
+
+### M4f: Camera controls (requested 2026-11-17)
+
+- Zoom with scroll / pinch, pan by dragging, double-click to reset to the automatic view.
+- **Pin an agent:** click an agent in the scene or its roster row to make the camera
+  follow it; click again (or Esc) to unpin. The pinned agent gets a highlight ring.
+- Manual camera input pauses the automatic follow until reset.
+
+### M8: Chat with Claude from the app (later; requested 2026-11-17)
+
+A text input in the app (side panel and mini mode) to send messages to the running
+Claude Code session instead of typing in the terminal.
+
+- Hooks can't inject input. The supported way is a plugin **channel**: the plugin
+  declares an MCP server bound to a channel (`channels` in plugin.json, see the plugin
+  manifest reference "Channels" and the channels reference "package as a plugin"); the
+  MCP server pushes messages into the session. The app would talk to that MCP server
+  over the same `~/.agent-room` socket dir.
+- Check first: channel availability/flags in the installed Claude Code version, how a
+  message is shown in the session, and how to target one session when several run.
+- Alternative if channels don't fit: start/resume sessions headless
+  (`claude -p --resume <session_id>`), which only suits sessions not open in a terminal.
+- Never send anything without the user pressing Send.
+
 ### M5: Permissions
 
 - Permission cards (scene + panel), Allow/Deny, Y/N, countdown, stacking, 300 ms input
@@ -655,7 +718,12 @@ config file, and can remove both cleanly.
       F/P/Esc keys, window.json restore, always-on-top over other apps' full-screen
       Spaces.
 - [x] M4 Life (2026-11-17)
-- [ ] M4b Office zones (agents walk to where the work is)
+- [x] M4b Office zones (2026-11-17)
+- [ ] M4c Mini mode (widget-sized, frosted background)
+- [ ] M4d Rooms per repository
+- [ ] M4e Waiting at the Approval desk with the card in the scene
+- [ ] M4f Camera controls: zoom, pan, pin an agent
+- [ ] M8 Chat with Claude from the app
 - [x] M5 Permissions (2026-11-17; user still to try Y/N and a deny reason live)
 - [ ] M6 Polish
 - [x] M7 Distribution, code side (2026-11-17); publishing left to the user
@@ -718,7 +786,7 @@ anything surprising.
       anyway; treating it as fatal silently dropped most events.
     - `log.rs`: `RoomLog` (capped lines, pending permissions, current session) and
       `summary()` per event. Lines are mirrored to `debug!`; run with
-      `RUST_LOG=room_app=debug` to see them in a terminal.
+      `RUST_LOG=agent_room=debug` to see them in a terminal.
     - `ui.rs`: egui 0.36 panels need a root `Ui` (`egui::Ui::new(ctx, id, UiBuilder::new()
       .layer_id(LayerId::background()).max_rect(ctx.viewport_rect()))`), then
       `egui::Panel::top(..).show(&mut root, ..)` / `egui::CentralPanel::default().show(&mut root, ..)`.
@@ -866,3 +934,28 @@ anything surprising.
   **Left for the user (outward-facing, not done by agents):** create the GitHub repo and
   push, replace `<owner>` in README and the formula, tag a release, optionally publish
   the tap. Then test the real install path on a clean machine/user.
+- 2026-11-17, Claude Opus 5.5: README gained "Install from a clone" + troubleshooting.
+  Step 5 started: **M4b office zones done.**
+  - Office 1400×900: team area (Claude's desk at (0,60), 8 seats), zones Library
+    (top-left, shelves), Servers (top-right, racks), Window bay (left, window + globe),
+    Approval (right, desk + red lamp), lounge by the door. `scene::ZONES`, `SPOTS`.
+  - `Pose::Terminal` added (Bash/MCP), separate from `Typing` (edits).
+  - `route_agents`: sub-agents (with `Home` = seat) go to `place_for(pose)` once they
+    have been `MIN_DWELL` (2 s) where they are; `Station` records place + arrival time;
+    mid-walk changes wait for arrival, then the latest pose wins. Reporting is left to
+    the model's `Deliver`. Claude stays at his desk (deliveries need him there).
+  - Walks draw a dotted path (consumed as the agent walks) and a "to Library" chip
+    under the feet. (Nunito has no "→" glyph; check glyphs before using symbols.)
+  - `follow_action`: windows narrower than 640 logical px zoom smoothly onto the agents;
+    wider ones show the whole office.
+  - The binary is `agent-room`, so log targets are `agent_room` (use
+    `RUST_LOG=agent_room=debug`; model changes at `trace`).
+  - `replay.py` waits for the app's socket (a freshly built binary can take seconds to
+    start on macOS; earlier replays lost their first events). The server ignores empty
+    connections.
+  - A permission whose hook closes within the last second of the countdown is logged
+    as "answered in the terminal", not "cancelled".
+  - New requests recorded as milestones, not built: M4c mini mode, M4d rooms per repo,
+    M4e approval desk with in-scene card, M4f camera zoom/pan/pin, M8 chat.
+  **Next:** user picks the next milestone (suggested: M4c mini mode, since the app is
+  meant to sit in a corner while working).

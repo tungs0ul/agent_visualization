@@ -59,7 +59,7 @@ impl RoomLog {
     }
 
     pub fn note(&mut self, session: &str, agent: String, text: String) {
-        // Mirrors the on-screen log; `RUST_LOG=room_app=debug` shows it in the terminal.
+        // Mirrors the on-screen log; `RUST_LOG=agent_room=debug` shows it in the terminal.
         debug!("{agent}: {text}");
         self.lines.push_back(LogLine { session: session.to_owned(), agent, text });
         while self.lines.len() > MAX_LINES {

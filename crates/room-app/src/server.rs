@@ -136,6 +136,10 @@ fn handle(stream: UnixStream, sender: &Sender<Incoming>, waker: &Waker) {
         warn!("socket read failed: {err}");
         return;
     }
+    // A bare connect without data: someone checking that the app is up.
+    if line.trim().is_empty() {
+        return;
+    }
     let envelope: HookEnvelope = match serde_json::from_str(&line) {
         Ok(envelope) => envelope,
         Err(err) => return warn!("bad envelope: {err}"),

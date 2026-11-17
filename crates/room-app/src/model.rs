@@ -17,7 +17,10 @@ pub enum Pose {
     Idle,
     Thinking,
     Reading,
+    /// Editing files.
     Typing,
+    /// Running commands or MCP tools.
+    Terminal,
     Web,
     Delegating,
     Reporting,
@@ -31,7 +34,8 @@ impl Pose {
             Pose::Idle => "idle",
             Pose::Thinking => "thinking",
             Pose::Reading => "reading",
-            Pose::Typing => "working",
+            Pose::Typing => "writing",
+            Pose::Terminal => "running commands",
             Pose::Web => "on the web",
             Pose::Delegating => "delegating",
             Pose::Reporting => "reporting",
@@ -350,7 +354,8 @@ fn react(kind: &EventKind, current: Pose, session: &SessionState) -> (Option<Pos
 fn pose_for(activity: Activity) -> Pose {
     match activity {
         Activity::Reading => Pose::Reading,
-        Activity::Writing | Activity::Terminal => Pose::Typing,
+        Activity::Writing => Pose::Typing,
+        Activity::Terminal => Pose::Terminal,
         Activity::Web => Pose::Web,
         Activity::Delegating => Pose::Delegating,
         Activity::Reporting => Pose::Reporting,
@@ -487,6 +492,22 @@ mod tests {
         assert_eq!(changes[0], Change::ShowSession);
         assert!(changes.iter().any(|c| matches!(c, Change::Joined { id, .. } if id == "a1")));
         assert!(model.show("nope").is_empty());
+    }
+
+    #[test]
+    fn main_keeps_thinking_while_its_helpers_work() {
+        let mut model = Model::default();
+        model.apply(&event("s", None, json!({ "hook_event_name": "SessionStart" })));
+        model.apply(&event("s", None, json!({ "hook_event_name": "UserPromptSubmit", "prompt": "go" })));
+        model.apply(&event(
+            "s",
+            None,
+            json!({ "hook_event_name": "PostToolUse", "tool_name": "Agent", "tool_use_id": "t",
+                     "tool_response": { "agentId": "a1", "description": "Find it", "isAsync": true } }),
+        ));
+        model.apply(&event("s", Some(("a1", "Explore")), json!({ "hook_event_name": "SubagentStart" })));
+        model.apply(&sub_tool("s", "a1"));
+        assert_eq!(model.shown().unwrap().main_pose, Pose::Thinking);
     }
 
     #[test]

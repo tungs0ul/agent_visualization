@@ -73,9 +73,11 @@ fn main() -> AppExit {
                 receive_events,
                 scene::apply_changes,
                 scene::apply_pending,
-                (anim::walk, anim::leave_when_done, anim::animate_parts, anim::update_bubbles),
+                scene::route_agents,
+                (anim::walk, anim::leave_when_done, anim::animate_parts, anim::update_bubbles, anim::update_chips),
                 (anim::hand_over, anim::pulse),
                 anim::detect_motion,
+                scene::follow_action,
                 settle_permissions,
                 pace_updates,
                 window::take_screenshots,
@@ -129,6 +131,7 @@ fn receive_events(
     for Incoming { event, reply } in server.events.try_iter() {
         let internal_helper = model.is_internal_helper(&event);
         for change in model.apply(&event) {
+            trace!("{change:?}");
             scene.write(SceneChange(change));
         }
         let report_from = match &event.kind {
@@ -171,10 +174,13 @@ fn settle_permissions(mut log: ResMut<RoomLog>) {
     let mut index = 0;
     while index < log.pending.len() {
         let card = &log.pending[index];
+        // The hook gives up at the same moment the countdown ends, so a connection that
+        // closes in the last second is a timeout, not a cancel.
+        let timed_out = card.expires_at <= now + Duration::from_secs(1);
         let outcome = if card.expires_at <= now {
             "answered in the terminal"
         } else if card.reply.is_closed() {
-            "cancelled"
+            if timed_out { "answered in the terminal" } else { "cancelled" }
         } else {
             index += 1;
             continue;

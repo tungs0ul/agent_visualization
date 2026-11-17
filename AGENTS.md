@@ -2,6 +2,9 @@
 
 - Read `PLAN.md` first. It holds all decisions, architecture, milestones and current status.
 - Do not re-open decisions listed in PLAN.md section 2 unless the user asks.
+- New feature requests that arrive while a milestone is in progress go into PLAN.md as
+  milestones; don't build them mid-run. Only fix right away what is important or
+  changes the structure (the user's rule, 2026-11-17).
 - Bevy API changes between versions: check the examples for the exact Bevy version in
   `Cargo.lock` before writing Bevy code.
 - Hooks ship in the plugin under `plugin/`; `plugin/libexec/room-hook` is a shell shim

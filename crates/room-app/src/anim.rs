@@ -15,6 +15,12 @@ use crate::scene::{TEXT, UiFont, rounded};
 
 /// Walking speed in room units per second.
 const WALK_SPEED: f32 = 340.0;
+/// Long walks across the office are capped at this, so agents never dawdle.
+const MAX_WALK_SECONDS: f32 = 2.2;
+/// Distance between the dots of a walk's path.
+const TRAIL_SPACING: f32 = 22.0;
+/// Path dots lie on the floor: above the zone rugs, below every character and desk.
+const TRAIL_Z: f32 = -5.0;
 const BUBBLE_FONT: f32 = 13.0;
 const BUBBLE_MAX_CHARS: usize = 42;
 /// Typewriter speed of speech bubbles.
@@ -59,10 +65,45 @@ pub struct Rest(pub Transform);
 #[derive(Clone, Copy)]
 pub enum Arrive {
     Sit,
+    /// Stand at a spot in a zone of the office.
+    Stand(Place),
     /// Hand the report to Claude, whose hand is at `to`.
     HandOver { to: Vec2 },
     /// Leave the room: despawn the character and its desk.
     Despawn { desk: Entity },
+}
+
+/// Where in the office an agent can be (PLAN.md 4.4b).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Place {
+    Desk,
+    Library,
+    Servers,
+    WebBay,
+    Approval,
+    Claude,
+    Door,
+}
+
+impl Place {
+    pub fn name(self) -> &'static str {
+        match self {
+            Place::Desk => "Desk",
+            Place::Library => "Library",
+            Place::Servers => "Servers",
+            Place::WebBay => "Window",
+            Place::Approval => "Approval",
+            Place::Claude => "Claude",
+            Place::Door => "Door",
+        }
+    }
+}
+
+/// Where a sub-agent is now, and since when (seconds since the app started).
+#[derive(Component, Clone, Copy)]
+pub struct Station {
+    pub place: Place,
+    pub since: f32,
 }
 
 /// A walk in two straight legs through `via`, so characters go around their desk
@@ -75,17 +116,31 @@ pub struct Walk {
     elapsed: f32,
     duration: f32,
     then: Arrive,
+    /// Dots showing the way, with how far along the walk each one lies; each dot
+    /// disappears once the walker passes it.
+    trail: Vec<(Entity, f32)>,
+    trail_drawn: bool,
 }
 
 impl Walk {
     pub fn new(from: Vec2, via: Vec2, to: Vec2, then: Arrive) -> Self {
         let length = from.distance(via) + via.distance(to);
-        let duration = (length / WALK_SPEED).clamp(0.5, 1.6);
-        Self { from, via, to, elapsed: 0.0, duration, then }
+        let duration = (length / WALK_SPEED).clamp(0.5, MAX_WALK_SECONDS);
+        Self { from, via, to, elapsed: 0.0, duration, then, trail: Vec::new(), trail_drawn: false }
     }
 
     fn carries_report(&self) -> bool {
         matches!(self.then, Arrive::HandOver { .. })
+    }
+
+    /// Where this walk ends.
+    pub fn destination(&self) -> Place {
+        match self.then {
+            Arrive::Sit => Place::Desk,
+            Arrive::Stand(place) => place,
+            Arrive::HandOver { .. } => Place::Claude,
+            Arrive::Despawn { .. } => Place::Door,
+        }
     }
 
     /// Position at `eased` ∈ [0, 1] of the way.
@@ -257,7 +312,7 @@ pub fn animate_parts(
                 match pose {
                     Pose::Reading => next.translation.x += 1.8 * (t * 3.0).sin(),
                     Pose::Web => next.translation.y += 1.5,
-                    Pose::Typing => next.translation.y -= 1.2,
+                    Pose::Typing | Pose::Terminal => next.translation.y -= 1.2,
                     _ => {}
                 }
             }
@@ -270,7 +325,7 @@ pub fn animate_parts(
                     next.rotation = Quat::from_rotation_z(0.6);
                 } else if walking {
                     next.translation.y += 3.0 * (t * 10.0 + side).sin();
-                } else if *pose == Pose::Typing {
+                } else if matches!(pose, Pose::Typing | Pose::Terminal) {
                     next.translation.y += 2.5 * (t * 16.0 + side).sin();
                 } else if matches!(pose, Pose::Delegating | Pose::Reporting) && *part == Part::ArmRight {
                     next.translation.y += 14.0;
@@ -304,21 +359,36 @@ pub fn walk(
     mut walkers: Query<(Entity, &mut Transform, &mut Walk, &Accent)>,
 ) {
     for (entity, mut transform, mut walk, accent) in &mut walkers {
+        if !walk.trail_drawn {
+            walk.trail_drawn = true;
+            walk.trail = draw_trail(&mut commands, &walk, accent.0);
+        }
         walk.elapsed += time.delta_secs();
         let progress = (walk.elapsed / walk.duration).min(1.0);
         let eased = progress * progress * (3.0 - 2.0 * progress);
         let at = walk.at(eased);
         transform.translation.x = at.x;
         transform.translation.y = at.y;
+        walk.trail.retain(|&(dot, along)| {
+            let ahead = along > eased;
+            if !ahead {
+                commands.entity(dot).despawn();
+            }
+            ahead
+        });
         if progress < 1.0 {
             continue;
         }
+        for (dot, _) in walk.trail.drain(..) {
+            commands.entity(dot).despawn();
+        }
+        let arrived = Station { place: walk.destination(), since: time.elapsed_secs() };
         match walk.then {
-            Arrive::Sit => {
-                commands.entity(entity).remove::<Walk>();
+            Arrive::Sit | Arrive::Stand(_) => {
+                commands.entity(entity).remove::<Walk>().insert(arrived);
             }
             Arrive::HandOver { to } => {
-                commands.entity(entity).remove::<Walk>();
+                commands.entity(entity).remove::<Walk>().insert(arrived);
                 let from = transform.translation.truncate() + Vec2::new(0.0, 24.0);
                 commands.spawn((
                     paper(accent.0),
@@ -329,6 +399,48 @@ pub fn walk(
             Arrive::Despawn { desk } => {
                 commands.entity(entity).despawn();
                 commands.entity(desk).despawn();
+            }
+        }
+    }
+}
+
+/// Faint dots along the whole walk, in the walker's color.
+fn draw_trail(commands: &mut Commands, walk: &Walk, accent: Color) -> Vec<(Entity, f32)> {
+    let total = walk.from.distance(walk.via) + walk.via.distance(walk.to);
+    let dots = (total / TRAIL_SPACING) as usize;
+    let dot = ShapeBuilder::with(&shapes::Circle { radius: 2.6, center: Vec2::ZERO })
+        .fill(accent.with_alpha(0.45))
+        .build();
+    (1..dots)
+        .map(|i| {
+            let along = i as f32 / dots as f32;
+            let at = walk.at(along);
+            let entity = commands.spawn((dot.clone(), Transform::from_translation(at.extend(TRAIL_Z)))).id();
+            (entity, along)
+        })
+        .collect()
+}
+
+/// The small "to Library" line under a walking agent.
+#[derive(Component)]
+pub struct Chip;
+
+pub fn update_chips(
+    walkers: Query<Option<&Walk>>,
+    mut chips: Query<(&RigOf, &mut Text2d, &mut Visibility), With<Chip>>,
+) {
+    for (rig, mut text, mut visibility) in &mut chips {
+        let Ok(walk) = walkers.get(rig.0) else { continue };
+        match walk {
+            Some(walk) => {
+                let label = format!("to {}", walk.destination().name());
+                if text.0 != label {
+                    text.0 = label;
+                }
+                visibility.set_if_neq(Visibility::Inherited);
+            }
+            None => {
+                visibility.set_if_neq(Visibility::Hidden);
             }
         }
     }

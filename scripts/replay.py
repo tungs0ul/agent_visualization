@@ -11,6 +11,8 @@ because room-hook waits for an answer.
 
 import argparse
 import json
+import os
+import socket
 import subprocess
 import sys
 import time
@@ -31,6 +33,9 @@ def main() -> int:
 
     if not args.hook.exists():
         print(f"{args.hook} not found; run `cargo build -p room-hook`", file=sys.stderr)
+        return 1
+    if not wait_for_app():
+        print("Agent Room isn't listening (no socket after 15 s); start it first", file=sys.stderr)
         return 1
 
     waiting = []
@@ -62,6 +67,21 @@ def main() -> int:
         proc.wait()
         print(f"permission answer: {answer or '(none: terminal prompt)'}")
     return 0
+
+
+def wait_for_app(timeout_s: float = 15.0) -> bool:
+    """Waits until the app accepts connections, so no event is dropped at the start
+    (the hook silently drops events while the app isn't running)."""
+    state_dir = Path(os.environ.get("AGENT_ROOM_DIR") or Path.home() / ".agent-room")
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        try:
+            with socket.socket(socket.AF_UNIX) as probe:
+                probe.connect(str(state_dir / "room.sock"))
+            return True
+        except OSError:
+            time.sleep(0.1)
+    return False
 
 
 if __name__ == "__main__":
