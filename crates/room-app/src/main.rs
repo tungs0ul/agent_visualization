@@ -1,31 +1,33 @@
 //! Agent Room: a small always-on-top window that shows what Claude Code and its
 //! sub-agents are doing, and lets the user answer permission prompts.
 //!
-//! M2: event log and permission cards (egui). The room scene arrives in M3.
+//! M3: the room scene with a seat per sub-agent, plus the event log and permission
+//! cards (egui) beside or below it. Animation arrives in M4.
 
 mod log;
+mod scene;
 mod server;
 mod ui;
+mod window;
 
 use std::time::{Duration, Instant};
 
+use bevy::camera::visibility::RenderLayers;
+use bevy::camera::CameraOutputMode;
 use bevy::prelude::*;
-use bevy::window::{Monitor, PrimaryMonitor, PrimaryWindow, WindowLevel, WindowPosition, WindowResolution};
+use bevy::render::render_resource::BlendState;
 use bevy::winit::{EventLoopProxyWrapper, UpdateMode, WinitSettings, WinitUserEvent};
-use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
-use room_proto::event::EventKind;
+use bevy_egui::{EguiGlobalSettings, EguiPlugin, EguiPrimaryContextPass, PrimaryEguiContext};
+use bevy_prototype_lyon::prelude::ShapePlugin;
+use room_proto::event::{AgentRef, EventKind};
 
 use crate::log::{PendingPermission, RoomLog, agent_label};
+use crate::scene::{HookEvent, Roster};
 use crate::server::{Incoming, Server};
+use crate::window::{NeedsCornerPlacement, SavedWindow, ScreenshotMode};
 
-/// Logical size of the corner window at startup.
-const START_SIZE: Vec2 = Vec2::new(420.0, 320.0);
-/// Logical gap between the window and the screen's right edge.
-const CORNER_MARGIN: f32 = 16.0;
-/// Logical gap above the bottom edge, leaving room for the macOS Dock.
-const DOCK_MARGIN: f32 = 96.0;
-/// Redraw rate while a permission countdown is visible.
-const COUNTDOWN_TICK: Duration = Duration::from_millis(250);
+/// Redraw rate while a countdown or a short scene change is on screen.
+const TICK: Duration = Duration::from_millis(250);
 
 fn main() -> AppExit {
     let server = match Server::start() {
@@ -35,35 +37,64 @@ fn main() -> AppExit {
             return AppExit::error();
         }
     };
+    let saved = SavedWindow::load();
 
-    let mut resolution = WindowResolution::default();
-    resolution.set(START_SIZE.x, START_SIZE.y);
-
-    App::new()
+    let mut app = App::new();
+    app
         // Sleep until input or a hook event arrives (PLAN.md 6).
         .insert_resource(WinitSettings::desktop_app())
-        .insert_resource(ClearColor(Color::srgb(0.96, 0.94, 0.90)))
+        .insert_resource(ClearColor(scene::BACKDROP))
         .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "Agent Room".into(),
-                resolution,
-                resizable: true,
-                window_level: WindowLevel::AlwaysOnTop,
-                ..default()
-            }),
+            primary_window: Some(window::initial_window(saved)),
             ..default()
         }))
-        .add_plugins(EguiPlugin::default())
+        .add_plugins((EguiPlugin::default(), ShapePlugin))
+        .add_message::<HookEvent>()
         .insert_resource(server)
+        .insert_resource(NeedsCornerPlacement(saved.is_none()))
         .init_resource::<RoomLog>()
-        .add_systems(Startup, (spawn_camera, connect_waker))
-        .add_systems(Update, (place_in_corner, receive_events, expire_permissions, pace_updates).chain())
-        .add_systems(EguiPrimaryContextPass, ui::draw)
-        .run()
+        .init_resource::<Roster>()
+        .add_systems(Startup, (scene::spawn_room, spawn_ui_camera, connect_waker))
+        .add_systems(
+            Update,
+            (
+                window::place_in_corner,
+                window::hotkeys,
+                window::remember_geometry,
+                receive_events,
+                scene::apply_events,
+                scene::clear_leavers,
+                expire_permissions,
+                pace_updates,
+                window::take_screenshots,
+            )
+                .chain(),
+        )
+        .add_systems(EguiPrimaryContextPass, ui::draw);
+    if let Some(mode) = ScreenshotMode::from_env() {
+        app.insert_resource(mode).insert_resource(WinitSettings::continuous());
+    }
+    app.run()
 }
 
-fn spawn_camera(mut commands: Commands) {
-    commands.spawn(Camera2d);
+/// egui draws with its own camera on top, so the room camera can be limited to the
+/// area the panels leave free.
+fn spawn_ui_camera(mut commands: Commands, mut egui_settings: ResMut<EguiGlobalSettings>) {
+    egui_settings.auto_create_primary_context = false;
+    commands.spawn((
+        PrimaryEguiContext,
+        Camera2d,
+        RenderLayers::none(),
+        Camera {
+            order: 1,
+            output_mode: CameraOutputMode::Write {
+                blend_state: Some(BlendState::ALPHA_BLENDING),
+                clear_color: ClearColorConfig::None,
+            },
+            clear_color: ClearColorConfig::Custom(Color::NONE),
+            ..default()
+        },
+    ));
 }
 
 /// Lets the socket thread wake the sleeping event loop when a hook event arrives.
@@ -74,28 +105,28 @@ fn connect_waker(server: Res<Server>, proxy: Res<EventLoopProxyWrapper>) {
     }));
 }
 
-/// Moves the window to the bottom-right corner once the primary monitor is known.
-fn place_in_corner(
-    mut done: Local<bool>,
-    monitors: Query<&Monitor, With<PrimaryMonitor>>,
-    mut window: Single<&mut Window, With<PrimaryWindow>>,
+fn receive_events(
+    server: Res<Server>,
+    roster: Res<Roster>,
+    mut log: ResMut<RoomLog>,
+    mut hook_events: MessageWriter<HookEvent>,
 ) {
-    if *done {
-        return;
-    }
-    let Ok(monitor) = monitors.single() else { return };
-    let scale = monitor.scale_factor as f32;
-    let size = (START_SIZE * scale).as_ivec2();
-    let screen = IVec2::new(monitor.physical_width as i32, monitor.physical_height as i32);
-    let margin = (Vec2::new(CORNER_MARGIN, DOCK_MARGIN) * scale).as_ivec2();
-    window.position = WindowPosition::At(monitor.physical_position + screen - size - margin);
-    *done = true;
-}
-
-fn receive_events(server: Res<Server>, mut log: ResMut<RoomLog>) {
     let now = Instant::now();
     for Incoming { event, reply } in server.events.try_iter() {
-        log.push(&event);
+        match &event.kind {
+            // The roster knows what kind of agent sent the report.
+            EventKind::ReportReceived { from_agent } if roster.agent_type(from_agent).is_some() => {
+                let sender = AgentRef::Sub {
+                    id: from_agent.clone(),
+                    agent_type: roster.agent_type(from_agent).unwrap_or_default().to_owned(),
+                };
+                log.note(agent_label(&event.agent), format!("Got the report from {}", agent_label(&sender)));
+            }
+            // Claude Code's own internal helpers stop without ever starting (PLAN.md 3.4).
+            EventKind::SubagentStopped { .. }
+                if matches!(&event.agent, AgentRef::Sub { id, agent_type } if agent_type.is_empty() && roster.agent_type(id).is_none()) => {}
+            _ => log.push(&event),
+        }
         if let (Some(reply), EventKind::PermissionAsked { tool }) = (reply, &event.kind) {
             log.pending.push(PendingPermission {
                 agent: agent_label(&event.agent),
@@ -106,6 +137,7 @@ fn receive_events(server: Res<Server>, mut log: ResMut<RoomLog>) {
                 reply,
             });
         }
+        hook_events.write(HookEvent(event));
     }
 }
 
@@ -122,18 +154,24 @@ fn expire_permissions(mut log: ResMut<RoomLog>) {
     }
 }
 
-/// Redraw a few times a second only while a countdown is on screen.
-fn pace_updates(log: Res<RoomLog>, mut counting: Local<bool>, mut settings: ResMut<WinitSettings>) {
-    let needs_ticks = !log.pending.is_empty();
-    if needs_ticks == *counting {
+/// Redraw a few times a second only while something on screen changes by itself.
+fn pace_updates(
+    log: Res<RoomLog>,
+    roster: Res<Roster>,
+    screenshots: Option<Res<ScreenshotMode>>,
+    mut ticking: Local<bool>,
+    mut settings: ResMut<WinitSettings>,
+) {
+    if screenshots.is_some() {
         return;
     }
-    *counting = needs_ticks;
+    let needs_ticks = !log.pending.is_empty() || roster.is_animating();
+    if needs_ticks == *ticking {
+        return;
+    }
+    *ticking = needs_ticks;
     *settings = if needs_ticks {
-        WinitSettings {
-            focused_mode: UpdateMode::reactive(COUNTDOWN_TICK),
-            unfocused_mode: UpdateMode::reactive_low_power(COUNTDOWN_TICK),
-        }
+        WinitSettings { focused_mode: UpdateMode::reactive(TICK), unfocused_mode: UpdateMode::reactive_low_power(TICK) }
     } else {
         WinitSettings::desktop_app()
     };

@@ -531,12 +531,22 @@ config file, and can remove both cleanly.
     have CI put it into the release that the marketplace entry points at. Decide in M7.
   - Set `version` in `plugin.json`; bump it every release (users stay pinned otherwise).
   - `claude plugin validate --strict plugin` in CI.
-- **App**
-  - `.app` bundle (e.g. `cargo-bundle` or a hand-made `Info.plist`), packaged as `.dmg`.
-  - Code signing + notarization needs an Apple Developer account (99 USD/year).
-    Without it, users must right-click ⇒ Open the first time; fine for friends, not for
-    the public.
-  - Optional Homebrew cask.
+- **App: build from source, no `.app` bundle, no code signing** (decided 2026-11-17:
+  an Apple Developer account costs 99 USD/year, not worth it for now).
+  - `cargo install --git https://github.com/<owner>/<repo> room-app` puts `room-app` in
+    `~/.cargo/bin`. Binaries compiled on the user's own machine carry no quarantine
+    flag, so Gatekeeper doesn't block them and no notarization is needed.
+  - Homebrew: a tap with a **formula** (not a cask) that builds from source with
+    `depends_on "rust" => :build` and `cargo install`, e.g.
+    `brew install <owner>/tap/agent-room`. Same reason: built locally ⇒ no signing.
+  - Name the installed binary `agent-room` (`[[bin]] name = "agent-room"` in
+    room-app's Cargo.toml) so the command is memorable.
+  - Downsides to state in the README: needs Rust (or Homebrew pulls it in), first build
+    takes a few minutes (Bevy), no Dock icon or Spotlight entry. "Launch at login" can be
+    a `launchd` plist that `agent-room --install-login-item` writes (optional, later).
+  - The plugin keeps shipping its own prebuilt `room-hook` (tiny, std-only). Check in M7
+    that a marketplace install (git clone) doesn't set the quarantine attribute on it; if
+    it does, the plugin instead runs a `room-hook` installed next to `agent-room`.
 - **First run**
   - The app checks for recent hook traffic. If none, it shows a "Connect to Claude
     Code" screen with the two `/plugin` commands and a copy button.
@@ -578,7 +588,9 @@ config file, and can remove both cleanly.
 - [x] M2 Protocol and app skeleton (2026-11-17). Live round trip confirmed by the user:
       Allow in the app ⇒ command ran; Deny ⇒ Claude got "The user denied this in Agent
       Room."; no terminal prompt for either.
-- [ ] M3 Static room and window behavior
+- [x] M3 Static room and window behavior (2026-11-17). Not yet checked by a human:
+      F/P/Esc keys, window.json restore, always-on-top over other apps' full-screen
+      Spaces.
 - [ ] M4 Life
 - [ ] M5 Permissions
 - [ ] M6 Polish
@@ -672,3 +684,32 @@ anything surprising.
      agents never started).
   Small known gaps: "Got the report from helper a7f0" doesn't know the agent type yet
   (M3 agent tracking fixes it); no Y/N keys yet (M5).
+- 2026-11-17, Claude Opus 5.5: M3 done. User decided: no `.app` bundle or code signing;
+  ship via `cargo install` / Homebrew formula (M7 updated).
+  - `scene.rs`: room drawn with bevy_prototype_lyon 0.18 (`ShapeBuilder::with(&shape)
+    .fill(c).stroke((c, w)).build()`), design space 900×640 kept in view by
+    `ScalingMode::AutoMin`. Floor, wall with windows, door, rug, plants. Characters are
+    parent entities with child shapes (shadow, body, head, eyes, desk, laptop, name
+    `Text2d`): main Claude at the center ×1.4, sub-agents on 8 seats. `Roster` keys
+    seats by `agent_id`, follows one session (switches on a new `SessionStart` /
+    `UserPromptSubmit` from another session), seats any sub-agent on its first event
+    (so starting mid-session works), keeps `known` id ⇒ type for report labels, ignores
+    `SubagentStop` from never-seen agents, removes desks 1.5 s after `SubagentStop`.
+    Hook events reach scene systems as the `HookEvent` message.
+  - `window.rs`: `initial_window()` from `~/.agent-room/window.json`
+    (`{x, y, width, height, on_top}`, physical position / logical size), corner
+    placement only on first start, geometry saved 1 s after moving/resizing, keys
+    F (full screen), Esc (leave it), P (always on top). **Screenshot mode:**
+    `AGENT_ROOM_SCREENSHOT_DIR=<dir>` saves a PNG every 2 s via Bevy's own
+    `Screenshot::primary_window()` (no Screen Recording permission needed) and redraws
+    continuously; this is how agents check visuals.
+  - `ui.rs`: separate egui camera (`PrimaryEguiContext`, `RenderLayers::none()`,
+    order 1, alpha blend), room camera viewport clipped to the space the panels leave.
+    ≥ 700 logical px wide: right side panel (session, permission cards, log); narrower:
+    permission cards on top, one-line ticker at the bottom. Light theme; green Allow,
+    red Deny.
+  - Visual check: replays at 420×320 and 1000×620 in screenshot mode look right.
+  **Next:** user tries F/P/Esc, moves/resizes the window and restarts the app (should
+  reopen in the same place), and checks always-on-top over a full-screen app. Then M4
+  (animation: idle breathing/blink, typing/reading states from `describe()` activity,
+  speech bubbles, walk-in/out, paper-plane report, bundled font per 4.7).
