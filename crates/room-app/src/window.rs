@@ -164,25 +164,42 @@ pub fn hotkeys(
 /// `AGENT_ROOM_SCREENSHOT_DIR=<dir>` saves `shot-001.png`, `shot-002.png`, … every two
 /// seconds. Bevy reads its own frame, so this works without macOS Screen Recording
 /// permission. Dev only: the app redraws continuously in this mode.
+///
+/// `AGENT_ROOM_SCREENSHOT_RESIZE=<w>x<h>` also resizes the window (logical px) after the
+/// second shot, to test resizing without a human dragging the corner.
 #[derive(Resource)]
 pub struct ScreenshotMode {
     dir: PathBuf,
     next: Instant,
     taken: u32,
+    resize_to: Option<Vec2>,
 }
 
 impl ScreenshotMode {
     pub fn from_env() -> Option<Self> {
         let dir = PathBuf::from(std::env::var_os("AGENT_ROOM_SCREENSHOT_DIR")?);
         fs::create_dir_all(&dir).ok()?;
-        Some(Self { dir, next: Instant::now() + SHOT_INTERVAL, taken: 0 })
+        let resize_to = std::env::var("AGENT_ROOM_SCREENSHOT_RESIZE").ok().and_then(|size| {
+            let (w, h) = size.split_once('x')?;
+            Some(Vec2::new(w.parse().ok()?, h.parse().ok()?))
+        });
+        Some(Self { dir, next: Instant::now() + SHOT_INTERVAL, taken: 0, resize_to })
     }
 }
 
-pub fn take_screenshots(mut commands: Commands, mode: Option<ResMut<ScreenshotMode>>) {
+pub fn take_screenshots(
+    mut commands: Commands,
+    mode: Option<ResMut<ScreenshotMode>>,
+    mut window: Single<&mut Window, With<PrimaryWindow>>,
+) {
     let Some(mut mode) = mode else { return };
     if mode.taken >= MAX_SHOTS || Instant::now() < mode.next {
         return;
+    }
+    if mode.taken == 2
+        && let Some(size) = mode.resize_to.take()
+    {
+        window.resolution.set(size.x, size.y);
     }
     mode.taken += 1;
     mode.next += SHOT_INTERVAL;

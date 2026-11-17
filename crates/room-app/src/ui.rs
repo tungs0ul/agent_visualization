@@ -68,7 +68,8 @@ pub fn draw(
             ui.add(egui::Label::new(text).truncate());
         });
     }
-    fit_camera(&mut camera, root.available_rect_before_wrap(), window.scale_factor());
+    let window_size = UVec2::new(window.physical_width(), window.physical_height());
+    fit_camera(&mut camera, root.available_rect_before_wrap(), window.scale_factor(), window_size);
 
     // Highest index first, so removing one doesn't shift the others.
     answers.sort_by_key(|&(index, _)| std::cmp::Reverse(index));
@@ -139,15 +140,22 @@ fn event_log(ui: &mut egui::Ui, log: &RoomLog) {
 
 /// Limits the room camera to the area the panels leave free (egui points are logical
 /// pixels; viewports are physical).
-fn fit_camera(camera: &mut Camera, free: egui::Rect, scale: f32) {
-    let position = UVec2::new((free.min.x * scale).max(0.0) as u32, (free.min.y * scale).max(0.0) as u32);
-    let size = UVec2::new((free.width() * scale).max(1.0) as u32, (free.height() * scale).max(1.0) as u32);
-    let unchanged = camera
-        .viewport
-        .as_ref()
-        .is_some_and(|v| v.physical_position == position && v.physical_size == size);
+///
+/// egui lays out with last frame's window size, so right after the user shrinks the
+/// window the free area can stick out of it. A viewport outside the window makes wgpu
+/// reject the frame and Bevy quits, so clamp to the current size.
+fn fit_camera(camera: &mut Camera, free: egui::Rect, scale: f32, window_size: UVec2) {
+    let mut viewport = Viewport {
+        physical_position: UVec2::new((free.min.x * scale).max(0.0) as u32, (free.min.y * scale).max(0.0) as u32),
+        physical_size: UVec2::new((free.width() * scale).max(1.0) as u32, (free.height() * scale).max(1.0) as u32),
+        ..default()
+    };
+    viewport.clamp_to_size(window_size);
+    let unchanged = camera.viewport.as_ref().is_some_and(|v| {
+        v.physical_position == viewport.physical_position && v.physical_size == viewport.physical_size
+    });
     if !unchanged {
-        camera.viewport = Some(Viewport { physical_position: position, physical_size: size, ..default() });
+        camera.viewport = Some(viewport);
     }
 }
 

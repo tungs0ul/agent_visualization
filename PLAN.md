@@ -372,6 +372,45 @@ drains the channel each frame. Permission replies go back via a `oneshot` stored
 3. Pulse ring at main desk; main Claude bubble: "Got it from Explore".
 4. Sub-agent walks out the door.
 
+### 4.4b Office zones: agents go where the work is (M4b)
+
+Requested by the user after seeing an "AI agent office" demo (a pixel-art office where
+each agent walks to a room matching its task, with a status chip over its head and a
+roster list beside the map). We take the **idea only**: our own flat vector art, our own
+characters, no copied layout or names.
+
+- The single room becomes a small office floor plan (design space ~1400×900) with
+  zones, each a spot the activity from `describe()` maps to:
+
+  | Zone | Activity | Props |
+  |---|---|---|
+  | Lead desk (center) | main Claude's home | big desk, two monitors |
+  | Desks (one per sub-agent) | `Writing`, `Thinking`, home seat | desk, laptop |
+  | Library | `Reading` (Read, Grep, Glob, LSP) | bookshelves, reading chairs |
+  | Server corner | `Terminal` (Bash, MCP tools) | racks with blinking LEDs |
+  | Window bay | `Web` (WebFetch, WebSearch) | big window, globe |
+  | Approval desk | `WaitingPermission` | desk with a red lamp that pulses |
+  | Meeting table | `Delegating` (main briefs a new agent), `Reporting` | round table |
+  | Lounge | idle / done, before leaving | sofa, coffee machine |
+  | Door | spawn and leave | |
+
+- Each zone has a few standing spots; an agent takes a free spot, else waits nearby.
+- **Movement:** agents walk (ease in/out, ~250 px/s) along waypoints through doorways
+  (a small hand-placed graph, no general pathfinding). A walking agent shows where it's
+  heading: a faint dotted line to the target, and the chip says "→ Library".
+- **No flicker:** tool calls can last 3 ms. An agent stays in a zone at least ~2 s; newer
+  activities replace the queued one, so it only ever walks to the latest.
+- **Status chip** over each head (activity word + accent color), the speech bubble from
+  4.3 above it for the detail ("Reading PLAN.md").
+- Main Claude mostly stays at the lead desk; it walks to the approval desk while a
+  permission waits, and to the meeting table when it delegates.
+- **Roster list** in the side panel (wide layout): one row per agent with name, type,
+  status dot, current action, and where it's heading. Clicking a row highlights that
+  agent in the scene and filters the log (replaces the M6 "agent click ⇒ filter" item).
+- **Small window problem:** a whole floor plan is too small at 420×320. In the narrow
+  layout the camera zooms to the zones where something is happening (smoothly), and
+  zooms out to the whole office when idle. Decide in M4b after trying it.
+
 ### 4.5 Permission card
 
 - Appears as a card anchored above the requesting agent, plus in the side panel
@@ -504,6 +543,16 @@ Done when: live Claude session events appear in the app's log panel.
 - Report-back paper plane plus particles plus pulse.
 - Transcript tailer for richer bubble text.
 
+### M4b: Office zones (see 4.4b)
+
+- Office floor plan with zones and props; replaces the single room.
+- Agent movement along the waypoint graph, zone spots, minimum dwell time, "heading
+  to" chip and dotted line.
+- Activity ⇒ zone mapping, main Claude's trips to the approval desk / meeting table.
+- Roster list in the side panel; click to highlight and filter.
+- Narrow-window camera that follows activity.
+- Check with replays at 420×320 and full screen (screenshot mode).
+
 ### M5: Permissions
 
 - Permission cards (scene + panel), Allow/Deny, Y/N, countdown, stacking, 300 ms input
@@ -592,6 +641,7 @@ config file, and can remove both cleanly.
       F/P/Esc keys, window.json restore, always-on-top over other apps' full-screen
       Spaces.
 - [ ] M4 Life
+- [ ] M4b Office zones (agents walk to where the work is)
 - [ ] M5 Permissions
 - [ ] M6 Polish
 - [ ] M7 Distribution
@@ -713,3 +763,10 @@ anything surprising.
   reopen in the same place), and checks always-on-top over a full-screen app. Then M4
   (animation: idle breathing/blink, typing/reading states from `describe()` activity,
   speech bubbles, walk-in/out, paper-plane report, bundled font per 4.7).
+- 2026-11-17, Claude Opus 5.5: Fixed a crash when the user shrinks the window: egui lays
+  out with last frame's size, so the room camera's viewport stuck out of the smaller
+  window, wgpu rejected `set_scissor_rect` and Bevy quit (the "CommandQueue has
+  un-applied commands" warnings are just fallout). `fit_camera` now clamps with
+  `Viewport::clamp_to_size`. Added `AGENT_ROOM_SCREENSHOT_RESIZE=<w>x<h>` (resizes after
+  the 2nd shot) and verified shrink 1000→400 and grow 420→1100 run with no errors.
+  Added section 4.4b and milestone M4b "Office zones" at the user's request.
