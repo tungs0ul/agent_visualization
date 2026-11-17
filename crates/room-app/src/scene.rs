@@ -402,6 +402,7 @@ pub fn follow_action(
     agents: Query<&Transform, (With<Agent>, Without<WorldCamera>)>,
     control: Res<CameraControl>,
     mut animating: ResMut<Animating>,
+    mut zoom: ResMut<Zoom>,
 ) {
     let (camera, mut transform, mut projection) = camera.into_inner();
     let Some(viewport) = camera.logical_viewport_size() else { return };
@@ -435,8 +436,24 @@ pub fn follow_action(
     transform.translation.x = center.x;
     transform.translation.y = center.y;
     (*min_width, *min_height) = (size.x, size.y);
+    // `AutoMin` fits the whole size into the viewport, so the tighter axis decides.
+    let units_per_pixel = (size / viewport).max_element() * ortho.scale;
+    zoom.set_if_neq(Zoom { units_per_pixel });
     if center.distance(target_center) > 0.5 || size.distance(target_size) > 0.5 {
         animating.0 = true;
+    }
+}
+
+/// Room units per logical screen pixel in the frame being drawn (1 = normal size,
+/// 2 = everything looks half as big).
+#[derive(Resource, PartialEq)]
+pub struct Zoom {
+    pub units_per_pixel: f32,
+}
+
+impl Default for Zoom {
+    fn default() -> Self {
+        Self { units_per_pixel: 1.0 }
     }
 }
 

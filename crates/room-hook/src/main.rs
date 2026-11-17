@@ -61,7 +61,8 @@ fn state_dir() -> Result<PathBuf, String> {
 
 /// Sends the event to the app; for permission requests prints the user's answer.
 fn forward(raw: &str) -> Result<(), String> {
-    let hook: serde_json::Value = serde_json::from_str(raw).map_err(|e| format!("hook JSON: {e}"))?;
+    let mut hook: serde_json::Value = serde_json::from_str(raw).map_err(|e| format!("hook JSON: {e}"))?;
+    mark_headless(&mut hook);
     let envelope = HookEnvelope::new(hook);
 
     // App not running (no socket, or a stale one): nothing to do.
@@ -93,6 +94,53 @@ fn forward(raw: &str) -> Result<(), String> {
     let reply: PermissionReply = serde_json::from_str(reply.trim()).map_err(|e| format!("reply JSON: {e}"))?;
     let mut stdout = io::stdout().lock();
     writeln!(stdout, "{}", reply.hook_output(&envelope.hook)).map_err(|e| format!("stdout: {e}"))
+}
+
+/// Sessions started with `claude -p` by other tools (e.g. another plugin's Stop hook
+/// that writes a summary) must not take over the room or close Claude's answer
+/// (PLAN.md M8a status). Claude Code doesn't say so in the payload, so look at the
+/// `claude` process that runs this hook. Only for the events that can switch the room,
+/// since it runs `ps`. Sessions the app starts itself set `AGENT_ROOM_CHAT` and count as
+/// interactive.
+fn mark_headless(hook: &mut serde_json::Value) {
+    let event = hook.get("hook_event_name").and_then(serde_json::Value::as_str);
+    if !matches!(event, Some("SessionStart" | "UserPromptSubmit")) || std::env::var_os("AGENT_ROOM_CHAT").is_some() {
+        return;
+    }
+    if claude_is_headless()
+        && let Some(object) = hook.as_object_mut()
+    {
+        object.insert(room_proto::HEADLESS_FIELD.to_owned(), serde_json::Value::Bool(true));
+    }
+}
+
+/// Walks up from this process (through the plugin's shell shim, if any) to the first
+/// `claude` process and checks its arguments for `-p` / `--print`.
+fn claude_is_headless() -> bool {
+    let mut pid = std::os::unix::process::parent_id();
+    for _ in 0..4 {
+        let Ok(output) = std::process::Command::new("ps").args(["-o", "ppid=,args=", "-p", &pid.to_string()]).output()
+        else {
+            return false;
+        };
+        let line = String::from_utf8_lossy(&output.stdout);
+        let mut fields = line.split_whitespace();
+        let Some(parent) = fields.next().and_then(|p| p.parse::<u32>().ok()) else { return false };
+        let args: Vec<&str> = fields.collect();
+        if is_claude(&args) {
+            return args.iter().any(|arg| matches!(*arg, "-p" | "--print"));
+        }
+        if parent <= 1 {
+            return false;
+        }
+        pid = parent;
+    }
+    false
+}
+
+/// `claude …` or `node …/claude …`.
+fn is_claude(args: &[&str]) -> bool {
+    args.iter().take(2).any(|arg| Path::new(arg).file_name().is_some_and(|name| name == "claude"))
 }
 
 /// Wraps the raw hook JSON with a timestamp and appends it as a single line.
@@ -151,6 +199,15 @@ fn log_error(err: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recognises_claude_processes() {
+        assert!(is_claude(&["claude", "-p"]));
+        assert!(is_claude(&["/opt/homebrew/bin/claude"]));
+        assert!(is_claude(&["node", "/usr/local/bin/claude", "--print"]));
+        assert!(!is_claude(&["/bin/sh", "/x/plugin/libexec/room-hook"]));
+        assert!(!is_claude(&["zsh", "-c", "claude -p"]));
+    }
 
     #[test]
     fn one_line_strips_newlines_between_tokens() {

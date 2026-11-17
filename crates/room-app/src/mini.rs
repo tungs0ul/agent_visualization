@@ -26,12 +26,14 @@ pub struct ViewMode {
     applied: Option<bool>,
     /// The full window's place and size, to return to when leaving mini mode.
     full: Option<SavedWindow>,
+    /// Keep drawing until then after a switch (see `settle_redraw`).
+    settle_until: Option<std::time::Instant>,
 }
 
 impl ViewMode {
     /// Starts in the mode saved last time; `full` is that saved full-window geometry.
     pub fn from_saved(saved: Option<SavedWindow>) -> Self {
-        Self { mini: saved.is_some_and(|s| s.mini), applied: None, full: saved }
+        Self { mini: saved.is_some_and(|s| s.mini), applied: None, full: saved, settle_until: None }
     }
 }
 
@@ -121,6 +123,23 @@ pub fn apply_mode(
         saved.save();
     }
     mode.applied = Some(mode.mini);
+    mode.settle_until = Some(std::time::Instant::now() + SETTLE);
+}
+
+/// How long to keep redrawing after switching modes.
+const SETTLE: std::time::Duration = std::time::Duration::from_millis(600);
+
+/// While the window changes size, wgpu rejects a frame or two whose depth and colour
+/// textures still have different sizes (ignored by the app's `RenderErrorHandler`).
+/// When idle the app draws only on events, so the rejected frame could stay on screen,
+/// leaving the window blank. Keep drawing for a moment so a good frame follows.
+pub fn settle_redraw(mut mode: ResMut<ViewMode>, mut redraw: MessageWriter<bevy::window::RequestRedraw>) {
+    let Some(until) = mode.settle_until else { return };
+    if std::time::Instant::now() < until {
+        redraw.write(bevy::window::RequestRedraw);
+    } else {
+        mode.settle_until = None;
+    }
 }
 
 /// Desks of agents who arrive while in mini mode start hidden too.

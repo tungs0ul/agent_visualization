@@ -19,6 +19,10 @@ const DOUBLE_CLICK: f32 = 0.35;
 /// Pointer movement (logical px) below which a press-and-release counts as a click.
 const CLICK_SLOP: f32 = 4.0;
 
+/// A single click on the room (not a drag), in room coordinates.
+#[derive(Message)]
+pub struct RoomClick(pub Vec2);
+
 /// Manual camera state; `manual: None` means automatic framing.
 #[derive(Resource, Default)]
 pub struct CameraControl {
@@ -41,6 +45,7 @@ pub fn camera_input(
     window: Single<&Window, With<PrimaryWindow>>,
     camera: Single<(&Camera, &GlobalTransform, &Projection), With<WorldCamera>>,
     mut control: ResMut<CameraControl>,
+    mut clicks: MessageWriter<RoomClick>,
 ) {
     let (camera, camera_transform, projection) = camera.into_inner();
     if egui_input.wants_any_pointer_input() {
@@ -106,6 +111,13 @@ pub fn camera_input(
             return;
         }
         control.last_click = now;
+        // Cursor positions are window coordinates; the camera may start below a panel.
+        if let Some(cursor) = cursor {
+            let offset = camera.logical_viewport_rect().map_or(Vec2::ZERO, |rect| rect.min);
+            if let Ok(at) = camera.viewport_to_world_2d(camera_transform, cursor - offset) {
+                clicks.write(RoomClick(at));
+            }
+        }
     }
 
     if moved {

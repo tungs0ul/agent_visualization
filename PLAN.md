@@ -640,6 +640,41 @@ repository appears and the agent walks there.
   the final-answer pop-up hides that pop-up. Reproduce with the dev env var above plus
   `AGENT_ROOM_CLAUDE_ARGS="--model haiku"`, `AGENT_ROOM_PLUGIN_DIR=$PWD/plugin`,
   `AGENT_ROOM_HOOK=$PWD/target/debug/room-hook`, screenshot mode.
+- Fixed (user report: "the answer shows a very short time, sometimes not at all"):
+  other plugins' Stop hooks (e.g. ECC's session summary) run `claude -p`; with
+  agent-room enabled each one is a new session whose SessionStart/UserPromptSubmit
+  took the room over and cleared the final answer, or kept the room on the helper so
+  the next answer was skipped. `room-hook` now walks up to the `claude` process on
+  SessionStart/UserPromptSubmit and adds `"agent_room_headless": true` when it runs
+  with `-p`/`--print` (`room_proto::HEADLESS_FIELD`; sessions the app starts set
+  `AGENT_ROOM_CHAT=1` and count as interactive). `SessionState.headless` sessions never
+  take the room from an interactive one; the final answer remembers its session and
+  only a prompt in that session closes it. Verified with a real `claude -p` (flag set),
+  this interactive session (not set), and a replay (answer stays, helper summary
+  hidden).
+- Fixed (user report: error on pressing M): while the window resizes, wgpu rejects a
+  frame or two (depth vs colour texture size); idle, the app then stopped drawing with
+  the bad frame on screen. `mini::settle_redraw` keeps redrawing 600 ms after a switch.
+  The ERROR log lines on the switch itself remain (harmless). Needs a check on screen.
+- Fixed (user report: bubble text too small when zoomed out): `follow_action` stores
+  room units per screen pixel in `scene::Zoom`; `anim::keep_text_readable` scales
+  bubbles and walk chips by it (1×–4×), growing bubbles upward from the tail tip so
+  they never cover the head. Zooming in still enlarges them. Verified by screenshots
+  (whole office at 1100×650: bubbles at normal on-screen size).
+- Added (user request): "Last answer" button (side panel header, ticker, mini view)
+  reopens Claude's last final answer after Close or after the next prompt closed it.
+  `FinalAnswer.open` replaces clearing the answer. Verified by screenshot.
+- Added (user request): click Claude in the room (or "Chat") opens the chat for the
+  shown session. Without a session of its own, the window offers: "Continue this
+  session" when the shown session is closed (`claude -p --resume <id>`, same id,
+  history kept: verified with a real Haiku session), "Resume" for earlier sessions of
+  the folder (read from `~/.claude/projects/<slug>/*.jsonl`, first prompt as title;
+  other tools' `sdk-cli` helpers hidden unless listed in
+  `~/.agent-room/chat-sessions.txt`, where the app records its own chat sessions), and
+  "New session". A shown session that is live in a terminal only gets a note: sending
+  there needs the M8b channel (user's choice: research the channel, no fork).
+  `camera::RoomClick` carries single clicks in room coordinates.
+  Dev: `AGENT_ROOM_DEV_CHAT="<folder>|"` (empty message) only opens the window.
 - Requested, not started: **M11** show the app's own CPU, RAM and FPS (e.g. a small
   toggleable overlay; `sysinfo` for the process, Bevy `FrameTimeDiagnosticsPlugin`).
   Rendering is already capped: ~30 fps while animating (`FRAME` 33 ms), 0 when idle.
@@ -680,6 +715,24 @@ Claude Code session instead of typing in the terminal.
 - Alternative if channels don't fit: start/resume sessions headless
   (`claude -p --resume <session_id>`), which only suits sessions not open in a terminal.
 - Never send anything without the user pressing Send.
+
+### M12: Hide/show the side panel (requested 2026-11-17)
+
+A button (and key, e.g. L) to hide the side panel with the old messages and show it
+again, so the room gets the whole window. Remember the choice in `window.json`. The
+ticker/mini views are unaffected.
+
+### M13: Permission rules (requested 2026-11-17, not started)
+
+User: "read, edit is allow, doing anything in tmp is allow, git push need to ask".
+- Open question for the user: do these rules apply only while Auto-accept is ON, or
+  always? "Always" conflicts with AGENTS.md ("never answer allow without an explicit
+  user action"), so it would have to be an opt-in setting the user turns on.
+- Read/Glob/Grep normally don't ask at all; Edit/Write/NotebookEdit do.
+- "In tmp": only when every path in the tool call is under `/tmp`, `/private/tmp`,
+  `$TMPDIR`. Bash must be parsed carefully (`cd /tmp && rm -rf ~` must still ask);
+  allow only simple commands whose path arguments are all inside tmp.
+- `git push` already asks (`log::ALWAYS_ASK`).
 
 ### M9: Auto-accept mode and centre pop-ups (requested 2026-11-17)
 
@@ -798,6 +851,7 @@ config file, and can remove both cleanly.
 - [ ] M8 Chat with Claude from the app
 - [x] M9 Auto-accept mode and centre pop-ups (2026-11-17)
 - [ ] M10 Context, 5-hour and weekly limits in the app
+- [ ] M12 Hide/show the side panel
 - [x] M5 Permissions (2026-11-17; user still to try Y/N and a deny reason live)
 - [ ] M6 Polish
 - [x] M7 Distribution, code side (2026-11-17); publishing left to the user
@@ -1163,3 +1217,12 @@ Later in the session (2026-11-17):
 
 Known gaps: macOS attention bounce not done; roster click-to-highlight not done
 (part of M4f); `agent-room` release binary is 96 MB (Bevy default features; could trim).
+
+- 2026-11-17, Claude Opus 5.5 (later session): fixed the final answer closing or not
+  showing (headless `claude -p` helper sessions from other plugins took the room; see
+  "M8a status") and the blank window after pressing M (`mini::settle_redraw`). New
+  request recorded as **M12** (hide/show side panel), not built. Then: speech bubbles
+  stay readable at any zoom (`anim::keep_text_readable`); "Last answer" button.
+  Permission-rules request recorded as **M13** with an open question. 55 tests pass,
+  clippy clean. **Next:** user reinstalls (`scripts/install-dev.sh`, both binaries changed) and
+  checks both fixes on screen; then M12, M8a leftovers, M11.

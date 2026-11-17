@@ -197,6 +197,8 @@ pub struct Bubble {
     background: Entity,
     tail: Entity,
     label: Entity,
+    /// Height above the character's feet at normal size (see `keep_text_readable`).
+    base_y: f32,
 }
 
 /// The report passing from the sub-agent's hand into Claude's.
@@ -248,7 +250,7 @@ pub fn spawn_bubble(commands: &mut Commands, character: Entity, height: f32, fon
         .id();
     commands
         .entity(root)
-        .insert(Bubble { text: String::new(), revealed: 0.0, age: 0.0, background, tail, label });
+        .insert(Bubble { text: String::new(), revealed: 0.0, age: 0.0, background, tail, label, base_y: height });
     root
 }
 
@@ -546,6 +548,38 @@ pub fn update_bubbles(
         }
     }
 }
+
+/// Bubbles and walk chips live in the room, so zooming out would shrink their text
+/// until it can't be read. Scale them up by the camera's room units per screen pixel
+/// so they never look smaller than their normal size. Zooming in still enlarges them.
+/// `units_per_pixel` is computed by `scene::follow_action` for the frame being drawn.
+pub fn keep_text_readable(
+    zoom: Res<crate::scene::Zoom>,
+    mut bubbles: Query<(&Bubble, &mut Transform), Without<Chip>>,
+    mut chips: Query<&mut Transform, (With<Chip>, Without<Bubble>)>,
+) {
+    let scale = zoom.units_per_pixel.clamp(1.0, MAX_TEXT_SCALE);
+    for (bubble, mut transform) in &mut bubbles {
+        // Grow upwards from the tail's tip (8 + 15.5 below the centre), so the bubble
+        // never covers the head.
+        let y = bubble.base_y + BUBBLE_TAIL_TIP * (scale - 1.0);
+        if transform.scale.x != scale || transform.translation.y != y {
+            transform.scale = Vec3::splat(scale);
+            transform.translation.y = y;
+        }
+    }
+    for mut transform in &mut chips {
+        if transform.scale.x != scale {
+            transform.scale = Vec3::splat(scale);
+        }
+    }
+}
+
+/// Beyond this the bubbles would cover most of the room.
+const MAX_TEXT_SCALE: f32 = 4.0;
+
+/// Distance from a bubble's centre down to the tip of its tail.
+const BUBBLE_TAIL_TIP: f32 = 23.5;
 
 /// The paper moves in a small arc from one hand to the other; a ring pulses on arrival.
 pub fn hand_over(mut commands: Commands, time: Res<Time>, mut sheets: Query<(Entity, &mut Transform, &mut HandOver)>) {

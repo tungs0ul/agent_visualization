@@ -12,7 +12,7 @@ use room_proto::describe::truncate;
 use room_proto::event::ToolCall;
 use room_proto::{Decision, PermissionReply};
 
-use crate::log::{AutoAccept, LogLine, PendingPermission, Question, RoomLog, keyboard_target};
+use crate::log::{AutoAccept, FinalAnswer, LogLine, PendingPermission, Question, RoomLog, keyboard_target};
 use crate::chat::{Chats, Speaker};
 use crate::mini::{ToggleMini, ViewMode};
 use crate::server::Server;
@@ -83,7 +83,7 @@ pub fn draw(
     if !ctx.egui_wants_keyboard_input() && ctx.input(|input| input.key_pressed(egui::Key::A)) {
         auto.0 = !auto.0;
     }
-    let RoomLog { lines, pending, .. } = &mut *log;
+    let RoomLog { lines, pending, final_answer, .. } = &mut *log;
     let mut picked = None;
 
     if mode.mini {
@@ -103,6 +103,7 @@ pub fn draw(
                     if auto.0 {
                         ui.label(egui::RichText::new("AUTO").small().strong().color(AUTO));
                     }
+                    answer_button(ui, final_answer);
                     if ui.small_button("Full").on_hover_text("Full view (M)").clicked() {
                         toggle_mini.write(ToggleMini);
                     }
@@ -119,9 +120,14 @@ pub fn draw(
                     toggle_mini.write(ToggleMini);
                 }
                 auto_button(ui, &mut auto);
-                if ui.small_button("Chat").on_hover_text("Start and talk to a Claude session here").clicked() {
-                    chat.chats.open = !chat.chats.open;
+                if ui.small_button("Chat").on_hover_text("Talk to Claude here (or click Claude in the room)").clicked() {
+                    if chat.chats.open {
+                        chat.chats.open = false;
+                    } else {
+                        chat.chats.open_for(model.shown().and_then(|session| session.cwd.as_deref()));
+                    }
                 }
+                answer_button(ui, final_answer);
             });
             ui.separator();
             if let Some(session) = model.shown() {
@@ -148,6 +154,7 @@ pub fn draw(
                     toggle_mini.write(ToggleMini);
                 }
                 auto_button(ui, &mut auto);
+                answer_button(ui, final_answer);
                 ui.add(egui::Label::new(text).truncate());
             });
         });
@@ -199,7 +206,7 @@ pub fn draw(
         };
         log.note(&pending.session, pending.agent, format!("{verb} {}", pending.tool.describe().1));
     }
-    chat_window(ctx, &mut chat, &mut markdown);
+    chat_window(ctx, &mut chat, &mut markdown, &model);
     question_popup(ctx, &mut log, now);
     // The chat window already shows Claude's answers; don't cover it with the pop-up.
     if !chat.chats.open {
@@ -222,6 +229,15 @@ impl InRoom<'_, '_> {
         let character = self.characters.get(self.roster.character(who)?).ok()?;
         let camera_transform = self.camera.single().ok()?;
         camera.world_to_viewport(camera_transform, character.translation() + Vec3::new(0.0, 60.0, 0.0)).ok()
+    }
+}
+
+/// Opens Claude's last answer again after it was closed (by mistake, or by the next
+/// prompt). Shown only when there is a closed answer to open.
+fn answer_button(ui: &mut egui::Ui, answer: &mut Option<FinalAnswer>) {
+    let Some(answer) = answer.as_mut().filter(|answer| !answer.open) else { return };
+    if ui.small_button("Last answer").on_hover_text("Show Claude's last answer again").clicked() {
+        answer.open = true;
     }
 }
 
@@ -301,7 +317,9 @@ fn final_answer_popup(ctx: &egui::Context, log: &mut RoomLog, markdown: &mut Mar
     if !log.questions.is_empty() {
         return;
     }
-    let Some(text) = log.final_answer.clone() else { return };
+    let Some(text) = log.final_answer.as_ref().filter(|answer| answer.open).map(|answer| answer.text.clone()) else {
+        return;
+    };
     let mut close = false;
     let size = ctx.viewport_rect().size() * FINAL_ANSWER_SHARE;
     egui::Window::new("Claude")
@@ -336,8 +354,8 @@ fn final_answer_popup(ctx: &egui::Context, log: &mut RoomLog, markdown: &mut Mar
                 close = true;
             }
         });
-    if close {
-        log.final_answer = None;
+    if close && let Some(answer) = log.final_answer.as_mut() {
+        answer.open = false;
     }
 }
 
@@ -348,14 +366,18 @@ pub struct ChatParams<'w> {
     server: Res<'w, Server>,
 }
 
-fn chat_window(ctx: &egui::Context, chat: &mut ChatParams, markdown: &mut MarkdownCache) {
+fn chat_window(ctx: &egui::Context, chat: &mut ChatParams, markdown: &mut MarkdownCache, model: &Model) {
     let waker = chat.server.waker.clone();
     let chats = &mut *chat.chats;
     if !chats.open {
         return;
     }
+    if chats.session.is_none() {
+        chats.refresh_past();
+    }
     let mut open = true;
     let (mut start, mut stop, mut send) = (false, false, false);
+    let mut resume: Option<(String, Option<String>)> = None;
     egui::Window::new("Chat with Claude")
         .id("chat".into())
         .open(&mut open)
@@ -366,14 +388,7 @@ fn chat_window(ctx: &egui::Context, chat: &mut ChatParams, markdown: &mut Markdo
         .default_pos(ctx.viewport_rect().center() - egui::vec2(200.0, 200.0))
         .show(ctx, |ui| {
             let Some(session) = chats.session.as_mut() else {
-                ui.label("Start a Claude Code session in a folder:");
-                ui.add(egui::TextEdit::singleline(&mut chats.folder).desired_width(f32::INFINITY));
-                if ui.button("Start session").clicked() {
-                    start = true;
-                }
-                if let Some(error) = &chats.error {
-                    ui.colored_label(DENY, error);
-                }
+                session_chooser(ui, chats, model, &mut start, &mut resume);
                 return;
             };
             ui.horizontal(|ui| {
@@ -421,7 +436,12 @@ fn chat_window(ctx: &egui::Context, chat: &mut ChatParams, markdown: &mut Markdo
     if !open {
         chats.open = false;
     }
-    if start {
+    if let Some((id, cwd)) = resume {
+        if let Some(cwd) = cwd {
+            chats.folder = cwd;
+        }
+        chats.resume(&id, waker);
+    } else if start {
         chats.start(waker);
     }
     if stop {
@@ -431,6 +451,71 @@ fn chat_window(ctx: &egui::Context, chat: &mut ChatParams, markdown: &mut Markdo
     if send && !message.is_empty() && let Some(session) = chats.session.as_mut() {
         session.send(&message);
         chats.input.clear();
+    }
+}
+
+/// No session of the app's own yet: continue the session the room shows (if it is
+/// closed), resume an earlier one, or start a new one.
+fn session_chooser(
+    ui: &mut egui::Ui,
+    chats: &mut crate::chat::Chats,
+    model: &Model,
+    start: &mut bool,
+    resume: &mut Option<(String, Option<String>)>,
+) {
+    let shown = model.shown().filter(|session| !session.headless);
+    if let Some(session) = shown {
+        ui.label(egui::RichText::new(truncate(&session.name(), 60)).strong());
+        if session.ended {
+            if ui.button("Continue this session").on_hover_text("claude --resume: Claude keeps its history").clicked() {
+                *resume = Some((session.id.clone(), session.cwd.clone()));
+            }
+        } else {
+            // A live terminal session can't take input from here yet (PLAN.md M8b).
+            ui.label(
+                egui::RichText::new(
+                    "This session is open in a terminal. Type there for now; sending to it from \
+                     here needs a plugin channel (in progress).",
+                )
+                .weak(),
+            );
+        }
+        ui.separator();
+    }
+    ui.label("Folder:");
+    ui.add(egui::TextEdit::singleline(&mut chats.folder).desired_width(f32::INFINITY));
+    let live: Vec<&str> =
+        model.sessions().into_iter().filter(|s| !s.ended && !s.headless).map(|s| s.id.as_str()).collect();
+    let past: Vec<_> = chats.past.iter().filter(|p| !live.contains(&p.id.as_str())).collect();
+    if !past.is_empty() {
+        ui.label(egui::RichText::new("Earlier sessions here").small().weak());
+        egui::ScrollArea::vertical().id_salt("past").max_height(180.0).show(ui, |ui| {
+            for session in past {
+                ui.horizontal(|ui| {
+                    if ui.small_button("Resume").clicked() {
+                        *resume = Some((session.id.clone(), None));
+                    }
+                    let age = session.modified.elapsed().map_or(String::new(), |age| ago(age.as_secs()));
+                    ui.add(egui::Label::new(format!("{}  ·  {age}", session.title)).truncate());
+                });
+            }
+        });
+    }
+    if ui.button("New session").clicked() {
+        *start = true;
+    }
+    if let Some(error) = &chats.error {
+        ui.colored_label(DENY, error);
+    }
+}
+
+/// "5 min ago", "3 h ago", "2 d ago".
+fn ago(secs: u64) -> String {
+    match secs {
+        0..60 => "just now".to_owned(),
+        60..3600 => format!("{} min ago", secs / 60),
+        3600..86_400 => format!("{} h ago", secs / 3600),
+        _ => format!("{} d ago", secs / 86_400),
     }
 }
 

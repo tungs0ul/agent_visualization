@@ -105,6 +105,9 @@ pub struct SessionState {
     /// Sub-agents in the order they joined, finished ones included.
     pub agents: Vec<(String, AgentInfo)>,
     pub ended: bool,
+    /// Started with `claude -p` by another tool (e.g. a plugin writing a summary). Such
+    /// sessions never take the room from a session the user works in.
+    pub headless: bool,
     /// Tasks handed out with the `Agent` tool, by sub-agent id, until the agent shows up.
     briefs: HashMap<String, String>,
     /// Order of last activity across sessions (higher is more recent).
@@ -215,6 +218,8 @@ impl Model {
         self.events_seen += 1;
         session.last_seen = self.events_seen;
         session.ended = matches!(event.kind, EventKind::SessionEnded { .. });
+        session.headless |= event.headless;
+        let headless = session.headless;
         update_session(session, event, &mut changes);
 
         // The room follows the active session: it switches when the user starts or types
@@ -224,8 +229,10 @@ impl Model {
         let shown_quiet = self.shown.as_ref().and_then(|id| self.sessions.get(id)).is_none_or(|shown| {
             shown.ended || self.events_seen.saturating_sub(shown.last_seen) >= QUIET_EVENTS
         });
+        let shown_interactive = self.shown().is_some_and(|shown| !shown.headless && !shown.ended);
         match &self.shown {
             Some(shown) if *shown == event.session_id => changes,
+            Some(_) if headless && shown_interactive => Vec::new(),
             Some(_) if !user_activity && !shown_quiet => Vec::new(),
             _ => {
                 self.shown = Some(event.session_id.clone());
@@ -405,6 +412,8 @@ mod tests {
     use super::*;
     use serde_json::{Value, json};
 
+    const HEADLESS: &str = room_proto::HEADLESS_FIELD;
+
     fn event(session: &str, sub: Option<(&str, &str)>, fields: Value) -> RoomEvent {
         let mut hook = json!({ "session_id": session });
         hook.as_object_mut().unwrap().extend(fields.as_object().unwrap().clone());
@@ -438,6 +447,19 @@ mod tests {
         assert_eq!(changes[0], Change::ShowSession);
         assert!(changes.iter().any(|c| matches!(c, Change::Joined { id, .. } if id == "a1")));
         assert_eq!(model.shown().unwrap().id, "s2");
+    }
+
+    #[test]
+    fn headless_helper_sessions_never_take_the_room() {
+        let mut model = Model::default();
+        model.apply(&event("user", None, json!({ "hook_event_name": "UserPromptSubmit", "prompt": "hi" })));
+        let helper = |name: &str| json!({ "hook_event_name": name, "prompt": "summarise", HEADLESS: true });
+        assert!(model.apply(&event("helper", None, helper("SessionStart"))).is_empty());
+        assert!(model.apply(&event("helper", None, helper("UserPromptSubmit"))).is_empty());
+        for _ in 0..QUIET_EVENTS + 1 {
+            model.apply(&event("helper", None, json!({ "hook_event_name": "Stop" })));
+        }
+        assert_eq!(model.shown().unwrap().id, "user");
     }
 
     #[test]

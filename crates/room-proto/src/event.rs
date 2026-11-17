@@ -62,6 +62,8 @@ pub struct RoomEvent {
     pub transcript_path: Option<String>,
     pub agent: AgentRef,
     pub kind: EventKind,
+    /// Started with `claude -p` by another tool ([`crate::HEADLESS_FIELD`]).
+    pub headless: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -145,6 +147,7 @@ impl RoomEvent {
             transcript_path: opt_str(hook, "transcript_path"),
             agent,
             kind,
+            headless: hook.get(crate::HEADLESS_FIELD).and_then(Value::as_bool).unwrap_or(false),
         })
     }
 }

@@ -30,7 +30,7 @@ use bevy_prototype_lyon::prelude::ShapePlugin;
 use room_proto::event::{AgentRef, EventKind};
 
 use crate::anim::Animating;
-use crate::log::{AutoAccept, PendingPermission, PendingQuestion, RoomLog, agent_label, always_asks, parse_questions};
+use crate::log::{AutoAccept, FinalAnswer, PendingPermission, PendingQuestion, RoomLog, agent_label, always_asks, parse_questions};
 use room_proto::{Decision, PermissionReply};
 use crate::model::{Model, Who};
 use crate::scene::{Roster, SceneChange};
@@ -68,10 +68,12 @@ fn main() -> AppExit {
         .add_plugins((EguiPlugin::default(), ShapePlugin))
         .add_message::<SceneChange>()
         .add_message::<mini::ToggleMini>()
+        .add_message::<camera::RoomClick>()
         .insert_resource(mini::ViewMode::from_saved(saved))
         .insert_resource(server)
         .insert_resource(NeedsCornerPlacement(saved.is_none()))
         .init_resource::<RoomLog>()
+        .init_resource::<scene::Zoom>()
         .init_resource::<AutoAccept>()
         .init_resource::<repo::RepoCache>()
         .init_resource::<camera::CameraControl>()
@@ -84,7 +86,7 @@ fn main() -> AppExit {
         .add_systems(
             Update,
             (
-                (window::place_in_corner, window::hotkeys, mini::toggle, mini::drag, mini::apply_mode, window::remember_geometry)
+                (window::place_in_corner, window::hotkeys, mini::toggle, mini::drag, mini::apply_mode, mini::settle_redraw, window::remember_geometry)
                     .chain(),
                 (receive_events, chat::dev_chat, chat::read_chats),
                 scene::apply_changes,
@@ -95,7 +97,9 @@ fn main() -> AppExit {
                 (anim::hand_over, anim::pulse),
                 anim::detect_motion,
                 camera::camera_input,
+                chat::open_on_claude_click,
                 scene::follow_action,
+                anim::keep_text_readable,
                 settle_permissions,
                 pace_updates,
                 window::take_screenshots,
@@ -216,12 +220,18 @@ fn receive_events(
             _ => {}
         }
         // Claude's final answer pops up in the middle (PLAN.md M9).
-        let shown = model.shown().is_some_and(|session| session.id == event.session_id);
+        // Only a new prompt in the answer's own session closes it: prompts from other
+        // sessions (e.g. a plugin's `claude -p` summary) must not (PLAN.md M8a status).
+        let shown = model.shown().is_some_and(|session| session.id == event.session_id && !session.headless);
         match &event.kind {
             EventKind::TurnEnded { last_message: Some(text) } if shown && event.agent == AgentRef::Main => {
-                log.final_answer = Some(text.clone());
+                log.final_answer = Some(FinalAnswer { session: event.session_id.clone(), text: text.clone(), open: true });
             }
-            EventKind::UserPrompt { .. } if shown => log.final_answer = None,
+            EventKind::UserPrompt { .. } => {
+                if let Some(answer) = log.final_answer.as_mut().filter(|answer| answer.session == event.session_id) {
+                    answer.open = false;
+                }
+            }
             _ => {}
         }
     }

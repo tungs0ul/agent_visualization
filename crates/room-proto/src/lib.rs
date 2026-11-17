@@ -41,6 +41,10 @@ pub fn state_dir() -> Option<PathBuf> {
     std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".agent-room"))
 }
 
+/// Added by `room-hook` to `SessionStart` / `UserPromptSubmit` payloads of sessions
+/// started with `claude -p` by other tools (not by the app).
+pub const HEADLESS_FIELD: &str = "agent_room_headless";
+
 /// One hook event, sent by `room-hook` to the app.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HookEnvelope {

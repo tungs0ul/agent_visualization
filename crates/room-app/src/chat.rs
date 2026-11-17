@@ -32,16 +32,22 @@ pub struct ChatSession {
 }
 
 impl ChatSession {
-    /// Starts `claude -p` in `cwd`. `AGENT_ROOM_PLUGIN_DIR` adds `--plugin-dir` for
-    /// development; normally the installed plugin is used.
-    fn start(cwd: &str, waker: Waker) -> Result<Self, String> {
+    /// Starts `claude -p` in `cwd`; with `resume`, continues that session (same id, its
+    /// history included). `AGENT_ROOM_PLUGIN_DIR` adds `--plugin-dir` for development;
+    /// normally the installed plugin is used.
+    fn start(cwd: &str, resume: Option<&str>, waker: Waker) -> Result<Self, String> {
         let mut command = Command::new("claude");
         command
             .args(["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"])
             .current_dir(cwd)
+            // Tells room-hook this `-p` session is the user's, not another tool's helper.
+            .env("AGENT_ROOM_CHAT", "1")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
+        if let Some(id) = resume {
+            command.args(["--resume", id]);
+        }
         if let Some(plugin) = std::env::var_os("AGENT_ROOM_PLUGIN_DIR") {
             command.arg("--plugin-dir").arg(plugin);
         }
@@ -63,7 +69,19 @@ impl ChatSession {
                 }
             }
         });
-        Ok(Self { cwd: cwd.to_owned(), transcript: Vec::new(), busy: false, session_id: None, child, stdin, lines })
+        let mut transcript = Vec::new();
+        if resume.is_some() {
+            transcript.push((Speaker::Note, "Resumed: Claude remembers this session's conversation.".to_owned()));
+        }
+        Ok(Self {
+            cwd: cwd.to_owned(),
+            transcript,
+            busy: false,
+            session_id: resume.map(str::to_owned),
+            child,
+            stdin,
+            lines,
+        })
     }
 
     pub fn send(&mut self, text: &str) {
@@ -94,7 +112,13 @@ impl ChatSession {
                 }
                 Some("result") => {
                     self.busy = false;
-                    self.session_id = event["session_id"].as_str().map(str::to_owned);
+                    let id = event["session_id"].as_str().map(str::to_owned);
+                    if id.is_some() && id != self.session_id
+                        && let Some(id) = &id
+                    {
+                        remember_chat_session(id);
+                    }
+                    self.session_id = id;
                 }
                 _ => {}
             }
@@ -119,12 +143,52 @@ pub struct Chats {
     pub folder: String,
     pub input: String,
     pub error: Option<String>,
+    /// Earlier sessions in `past_folder`, newest first (read when the window opens or
+    /// the folder changes).
+    pub past: Vec<PastSession>,
+    past_folder: String,
+}
+
+/// A session Claude Code saved on disk, which `claude --resume <id>` continues.
+pub struct PastSession {
+    pub id: String,
+    /// The first thing the user typed, to recognise it.
+    pub title: String,
+    pub modified: std::time::SystemTime,
 }
 
 impl Chats {
+    /// Opens the window (clicking Claude, or the Chat button) in the folder of the
+    /// session the room shows.
+    pub fn open_for(&mut self, cwd: Option<&str>) {
+        self.open = true;
+        if self.session.is_none()
+            && let Some(cwd) = cwd
+        {
+            self.folder = cwd.to_owned();
+        }
+    }
+
+    /// Re-reads the folder's saved sessions when the folder changed.
+    pub fn refresh_past(&mut self) {
+        let folder = self.folder.trim();
+        if folder != self.past_folder {
+            self.past = past_sessions(folder, PAST_SESSIONS);
+            self.past_folder = folder.to_owned();
+        }
+    }
+
     pub fn start(&mut self, waker: Waker) {
+        self.launch(None, waker);
+    }
+
+    pub fn resume(&mut self, id: &str, waker: Waker) {
+        self.launch(Some(id), waker);
+    }
+
+    fn launch(&mut self, resume: Option<&str>, waker: Waker) {
         self.session = None;
-        match ChatSession::start(self.folder.trim(), waker) {
+        match ChatSession::start(self.folder.trim(), resume, waker) {
             Ok(session) => {
                 self.session = Some(session);
                 self.error = None;
@@ -133,6 +197,100 @@ impl Chats {
         }
     }
 }
+
+/// Ids of sessions started from the app, so they can be resumed later although
+/// Claude Code saves them as headless (`sdk-cli`) sessions, like other tools' helpers.
+fn chat_sessions_file() -> Option<std::path::PathBuf> {
+    room_proto::state_dir().map(|dir| dir.join("chat-sessions.txt"))
+}
+
+fn remember_chat_session(id: &str) {
+    let Some(path) = chat_sessions_file() else { return };
+    let known = std::fs::read_to_string(&path).unwrap_or_default();
+    if known.lines().any(|line| line == id) {
+        return;
+    }
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        let _ = writeln!(file, "{id}");
+    }
+}
+
+/// How many saved sessions the chat window offers to resume.
+const PAST_SESSIONS: usize = 8;
+
+/// Claude Code keeps each folder's transcripts in `~/.claude/projects/<folder with
+/// every non-alphanumeric character replaced by '-'>/<session id>.jsonl`.
+fn past_sessions(folder: &str, limit: usize) -> Vec<PastSession> {
+    let Some(home) = std::env::var_os("HOME") else { return Vec::new() };
+    let slug: String = folder.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
+    let dir = std::path::Path::new(&home).join(".claude").join("projects").join(slug);
+    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+    let mut files: Vec<_> = entries
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "jsonl"))
+        .filter_map(|entry| Some((entry.metadata().ok()?.modified().ok()?, entry.path())))
+        .collect();
+    files.sort_by_key(|(modified, _)| std::cmp::Reverse(*modified));
+    let chats = chat_sessions_file().and_then(|path| std::fs::read_to_string(path).ok()).unwrap_or_default();
+    files
+        .into_iter()
+        .filter_map(|(modified, path)| {
+            let id = path.file_stem()?.to_str()?.to_owned();
+            let (title, headless) = first_prompt(&path)?;
+            // Other tools' `claude -p` helpers (summaries etc.) aren't worth resuming.
+            if headless && !chats.lines().any(|line| line == id) {
+                return None;
+            }
+            Some(PastSession { id, title, modified })
+        })
+        .take(limit)
+        .collect()
+}
+
+/// The first prompt the user typed in a transcript, and whether the session ran
+/// headless (`claude -p`, entrypoint `sdk-cli`); `None` if there is no prompt (e.g. a
+/// session that was opened and closed without a message).
+fn first_prompt(path: &std::path::Path) -> Option<(String, bool)> {
+    let file = std::fs::File::open(path).ok()?;
+    BufReader::new(file).lines().map_while(Result::ok).take(400).find_map(|line| {
+        let entry: Value = serde_json::from_str(&line).ok()?;
+        if entry["type"] != "user" || entry["isMeta"] == true {
+            return None;
+        }
+        let headless = entry["entrypoint"] == "sdk-cli";
+        let content = &entry["message"]["content"];
+        let text = match content {
+            Value::String(text) => text.clone(),
+            Value::Array(blocks) => blocks.iter().find(|b| b["type"] == "text")?["text"].as_str()?.to_owned(),
+            _ => return None,
+        };
+        let text = text.trim();
+        // Slash commands, hook output and other wrappers start with a tag.
+        (!text.is_empty() && !text.starts_with('<')).then(|| (room_proto::describe::truncate(text, 70), headless))
+    })
+}
+
+/// A click on Claude (the main character) opens the chat for the session shown.
+pub fn open_on_claude_click(
+    mut clicks: MessageReader<crate::camera::RoomClick>,
+    roster: Res<crate::scene::Roster>,
+    characters: Query<&GlobalTransform>,
+    model: Res<crate::model::Model>,
+    mut chats: ResMut<Chats>,
+) {
+    let Some(click) = clicks.read().last() else { return };
+    let Some(claude) = roster.character(&crate::model::Who::Main).and_then(|e| characters.get(e).ok()) else {
+        return;
+    };
+    // The body and head sit above the character's origin.
+    let body = claude.translation().truncate() + Vec2::new(0.0, 25.0);
+    if click.0.distance(body) < CLICK_RADIUS {
+        chats.open_for(model.shown().and_then(|session| session.cwd.as_deref()));
+    }
+}
+
+/// How close (room units) to Claude a click must land.
+const CLICK_RADIUS: f32 = 60.0;
 
 pub fn read_chats(mut chats: ResMut<Chats>) {
     if let Some(session) = chats.session.as_mut() {
@@ -147,6 +305,7 @@ pub fn init_folder(mut chats: ResMut<Chats>) {
 
 /// Dev/test only: `AGENT_ROOM_DEV_CHAT="<folder>|<message>"` opens the chat, starts a
 /// session in the folder and sends the message, so the flow can be tested without a click.
+/// With an empty message it only opens the window (to check the session chooser).
 pub fn dev_chat(mut chats: ResMut<Chats>, server: Res<crate::server::Server>, mut done: Local<bool>) {
     if *done {
         return;
@@ -154,10 +313,35 @@ pub fn dev_chat(mut chats: ResMut<Chats>, server: Res<crate::server::Server>, mu
     *done = true;
     let Ok(spec) = std::env::var("AGENT_ROOM_DEV_CHAT") else { return };
     let Some((folder, message)) = spec.split_once('|') else { return };
+    if message.is_empty() {
+        chats.open_for(Some(folder));
+        return;
+    }
     chats.open = true;
     chats.folder = folder.to_owned();
     chats.start(server.waker.clone());
     if let Some(session) = chats.session.as_mut() {
         session.send(message);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn first_prompt_skips_wrappers_and_flags_headless() {
+        let dir = std::env::temp_dir().join(format!("room-chat-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("s.jsonl");
+        let lines = [
+            json!({ "type": "user", "isMeta": true, "message": { "content": "meta" } }),
+            json!({ "type": "user", "message": { "content": "<command-name>/clear</command-name>" } }),
+            json!({ "type": "assistant", "message": { "content": [] } }),
+            json!({ "type": "user", "entrypoint": "sdk-cli", "message": { "content": [{ "type": "text", "text": " fix it " }] } }),
+        ];
+        std::fs::write(&path, lines.iter().map(Value::to_string).collect::<Vec<_>>().join("\n")).unwrap();
+        assert_eq!(first_prompt(&path), Some(("fix it".to_owned(), true)));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

@@ -53,8 +53,16 @@ pub struct RoomLog {
     pub pending: Vec<PendingPermission>,
     /// Claude's multiple-choice questions waiting for an answer (centre pop-up).
     pub questions: Vec<PendingQuestion>,
-    /// Claude's last answer in the shown session, until closed or the next prompt.
-    pub final_answer: Option<String>,
+    /// Claude's last answer in the shown session. Shown until closed or the next prompt
+    /// in that same session; kept so the "Last answer" button can open it again.
+    pub final_answer: Option<FinalAnswer>,
+}
+
+pub struct FinalAnswer {
+    pub session: String,
+    pub text: String,
+    /// The pop-up is showing it.
+    pub open: bool,
 }
 
 /// While on, permission requests are allowed without asking, except `always_asks`.
@@ -271,6 +279,7 @@ mod tests {
             transcript_path: None,
             agent: AgentRef::Main,
             kind: EventKind::UserPrompt { text: "hi".into() },
+            headless: false,
         };
         for _ in 0..MAX_LINES + 10 {
             log.push(&event);
