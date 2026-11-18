@@ -380,22 +380,30 @@ fn claude_glow(seat: usize) -> LinearRgba {
     [MAIN_GLOW, LinearRgba::rgb(3.0, 0.5, 2.6), LinearRgba::rgb(0.8, 3.2, 0.9), LinearRgba::rgb(3.4, 1.8, 0.3)][seat % 4]
 }
 
-/// The teleporter's moving parts (named nodes in `teleporter.glb`).
+/// The teleporter's moving parts (named nodes in `teleporter.glb`) and its sparks.
 #[derive(Default)]
 pub struct TeleporterParts {
     rings: Vec<(Entity, f32)>,
     beam: Option<Entity>,
     orbiters: Option<Entity>,
+    sparks: Vec<Entity>,
 }
+
+/// Sparks spiralling in the beam while a robot beams in or out.
+const SPARKS: usize = 36;
 
 /// While a robot beams in or out, the teleporter's rings spin up, its orbiters
 /// circle and the beam shows; otherwise it rests (and costs no redraws).
+#[allow(clippy::too_many_arguments)]
 pub fn teleporter(
+    mut commands: Commands,
     mut view: ResMut<View3d>,
     time: Res<Time>,
     avatars: Query<&Avatar>,
     names: Query<(Entity, &Name)>,
     mut parts: Query<(&mut Transform, &mut Visibility)>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
     mut found: Local<TeleporterParts>,
 ) {
     if found.beam.is_none() {
@@ -414,18 +422,50 @@ pub fn teleporter(
             found.rings.clear();
             return;
         }
+        let mesh = meshes.add(Sphere::new(0.025).mesh().ico(1).unwrap_or_else(|_| Sphere::new(0.025).into()));
+        let glow = materials.add(StandardMaterial { base_color: Color::BLACK, emissive: LinearRgba::rgb(1.5, 5.0, 8.0), ..default() });
+        found.sparks = (0..SPARKS)
+            .map(|_| commands.spawn((Mesh3d(mesh.clone()), MeshMaterial3d(glow.clone()), Transform::default(), Visibility::Hidden)).id())
+            .collect();
     }
-    let active = avatars.iter().any(|avatar| matches!(avatar.presence, Presence::Arriving(t) | Presence::Leaving(t) if t >= 0.0));
-    if let Some(beam) = found.beam
-        && let Ok((_, mut visibility)) = parts.get_mut(beam)
-    {
-        visibility.set_if_neq(if active { Visibility::Inherited } else { Visibility::Hidden });
+    // How far the current beaming is (0 to 1), arriving or leaving; none: at rest.
+    let beaming = avatars
+        .iter()
+        .filter_map(|avatar| match avatar.presence {
+            Presence::Arriving(t) if t >= 0.0 => Some((t / BEAM_SECS, true)),
+            Presence::Leaving(t) => Some((t / BEAM_SECS, false)),
+            _ => None,
+        })
+        .next();
+    let shown = if beaming.is_some() { Visibility::Inherited } else { Visibility::Hidden };
+    for entity in found.beam.iter().chain(&found.sparks) {
+        if let Ok((_, mut visibility)) = parts.get_mut(*entity) {
+            visibility.set_if_neq(shown);
+        }
     }
-    if !active {
-        return;
-    }
+    let Some((progress, arriving)) = beaming else { return };
+    let progress = progress.clamp(0.0, 1.0);
     view.moving = true;
     let dt = time.delta_secs();
+    let t = time.elapsed_secs();
+    // The beam forms, holds and thins away again.
+    if let Some(beam) = found.beam
+        && let Ok((mut at, _)) = parts.get_mut(beam)
+    {
+        let width = (progress * std::f32::consts::PI).sin().max(0.05);
+        at.scale = Vec3::new(width, 1.0, width);
+    }
+    // Sparks gather into the robot as it forms, or rise out of it as it goes.
+    let gather = if arriving { 1.0 - progress } else { progress };
+    for (i, spark) in found.sparks.iter().enumerate() {
+        let Ok((mut at, _)) = parts.get_mut(*spark) else { continue };
+        let k = i as f32 / SPARKS as f32;
+        let climb = (k + t * if arriving { -0.5 } else { 0.5 }).rem_euclid(1.0);
+        let angle = k * 23.0 + t * 3.0;
+        let radius = 0.15 + 0.75 * gather * (0.6 + 0.4 * (k * 7.0).sin().abs());
+        at.translation = TELEPORTER + Vec3::new(radius * angle.cos(), TELEPORTER_DECK + 0.1 + climb * 2.4, radius * angle.sin());
+        at.scale = Vec3::splat(0.6 + 0.8 * (1.0 - climb));
+    }
     for &(ring, speed) in &found.rings {
         if let Ok((mut at, _)) = parts.get_mut(ring) {
             at.rotate_y(speed * 3.0 * dt);
@@ -577,12 +617,16 @@ fn prepare_avatar(
 }
 
 /// Station signs, and names with what each one is doing above the robots.
+#[allow(clippy::too_many_arguments)]
 pub fn labels(
     mut contexts: EguiContexts,
     mode: Res<crate::mini::ViewMode>,
     mut model: ResMut<Model>,
+    time: Res<Time>,
     camera: Query<(&Camera, &GlobalTransform), With<RoomCamera3d>>,
-    avatars: Query<(&Avatar, &GlobalTransform)>,
+    avatars: Query<(Entity, &Avatar, &GlobalTransform)>,
+    holos: Query<(&ActivityHolo, &GlobalTransform)>,
+    mut typed: Local<HashMap<Entity, (String, f32)>>,
     mut selected: ResMut<crate::hud::Selected>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
@@ -619,7 +663,9 @@ pub fn labels(
     // With several sessions, each Claude's label names its project.
     let several = model.live().len() > 1;
     let mut picked = None;
-    for (avatar, at) in &avatars {
+    let now = time.elapsed_secs();
+    typed.retain(|robot, _| holos.iter().any(|(holo, _)| holo.of == *robot));
+    for (robot, avatar, at) in &avatars {
         let Some(session) = model.session(&avatar.session) else { continue };
         let (name, doing) = match &avatar.who {
             Who::Main if several => (format!("Claude · {}", session.name()), &session.main_doing),
@@ -629,6 +675,42 @@ pub fn labels(
                 None => continue,
             },
         };
+        // While it works at its activity screen, what it does is typed out on the
+        // screen; the label above its head then only names it.
+        let screen_text = holos.iter().find(|(holo, _)| holo.of == robot).filter(|_| !mode.mini);
+        if let (Some((holo, holo_at)), Some(text)) = (screen_text, doing) {
+            let started = typed.entry(robot).or_insert_with(|| (text.clone(), now));
+            if started.0 != *text {
+                *started = (text.clone(), now);
+            }
+            let shown = (((now - started.1) * TYPE_SPEED) as usize).min(text.chars().count());
+            let cursor = if shown < text.chars().count() || ((now * 2.0) as u32).is_multiple_of(2) { "_" } else { " " };
+            let typed_text: String = text.chars().take(shown).collect::<String>() + cursor;
+            // (World up: a screen still growing in has scale 0, and no direction.)
+            let middle = holo_at.translation() + Vec3::Y * 0.3 * holo_at.scale().y;
+            let fresh = (holo.age / 0.35).min(1.0);
+            if let Ok(spot) = camera.world_to_viewport(camera_at, middle) {
+                let spot = spot + offset;
+                egui::Area::new(egui::Id::new(("holo-text", &avatar.session, &avatar.who)))
+                    .fixed_pos(egui::pos2(spot.x, spot.y))
+                    .pivot(egui::Align2::CENTER_CENTER)
+                    .interactable(false)
+                    .order(egui::Order::Background)
+                    .show(ctx, |ui| {
+                        egui::Frame::new()
+                            .fill(egui::Color32::from_rgba_unmultiplied(10, 60, 90, (90.0 * fresh) as u8))
+                            .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(120, 230, 255, (200.0 * fresh) as u8)))
+                            .corner_radius(4.0)
+                            .inner_margin(egui::Margin::symmetric(6, 3))
+                            .show(ui, |ui| {
+                                ui.set_max_width(170.0);
+                                let glow = egui::Color32::from_rgba_unmultiplied(170, 240, 255, (255.0 * fresh) as u8);
+                                ui.label(egui::RichText::new(typed_text).monospace().size(10.0).color(glow));
+                            });
+                    });
+            }
+        }
+        let doing = doing.as_ref().filter(|_| screen_text.is_none());
         let lift = if mode.mini { 1.35 } else { 1.05 };
         let head = at.translation() + Vec3::Y * lift * at.scale().y;
         let Ok(screen) = camera.world_to_viewport(camera_at, head) else { continue };
@@ -732,8 +814,8 @@ pub fn activity_holograms(
     for (entity, mut holo, mut at) in &mut holos {
         let robot = avatars.get(holo.of).ok();
         let pose = robot.map(|(_, avatar, _)| avatar.pose);
-        let walking = robot.is_some_and(|(_, avatar, _)| avatar.playing == Some(Act::Walk));
-        if pose != Some(holo.pose) || walking {
+        let busy_elsewhere = robot.is_some_and(|(_, avatar, _)| avatar.playing == Some(Act::Walk) || avatar.presence != Presence::Here);
+        if pose != Some(holo.pose) || busy_elsewhere {
             commands.entity(entity).despawn();
             continue;
         }
@@ -741,22 +823,69 @@ pub fn activity_holograms(
         shown.insert(holo.of, holo.pose);
         holo.age += time.delta_secs();
         let grow = (holo.age / 0.35).min(1.0);
-        let bob = 0.04 * (time.elapsed_secs() * 1.6 + (holo.of.to_bits() % 97) as f32).sin();
-        let side = robot_at.rotation * Vec3::new(0.62, 0.0, 0.15) * robot_at.scale.x;
-        at.translation = robot_at.translation + side + Vec3::Y * (0.95 * robot_at.scale.y + bob);
-        at.rotation = Quat::from_rotation_y(-0.35);
-        at.scale = Vec3::splat(grow * 0.9);
+        let bob = 0.02 * (time.elapsed_secs() * 1.6 + (holo.of.to_bits() % 97) as f32).sin();
+        // A screen floating in front of the robot at chest height, tilted up to the
+        // camera, below its face: the robot works at it, you read it.
+        let front = robot_at.rotation * Vec3::new(0.0, 0.0, HOLO_FRONT) * robot_at.scale.x;
+        at.translation = robot_at.translation + front + Vec3::Y * (HOLO_LIFT * robot_at.scale.y + bob);
+        at.rotation = robot_at.rotation * Quat::from_rotation_x(-0.3);
+        at.scale = Vec3::splat(grow * HOLO_SIZE);
     }
     for (robot, avatar, _) in &avatars {
-        if shown.contains_key(&robot) || avatar.playing == Some(Act::Walk) {
+        if shown.contains_key(&robot) || avatar.playing == Some(Act::Walk) || avatar.presence != Presence::Here {
             continue;
         }
         let Some(file) = holo_for(avatar.pose) else { continue };
-        commands.spawn((
-            ActivityHolo { of: robot, pose: avatar.pose, age: 0.0 },
-            WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(file))),
-            Transform::from_scale(Vec3::ZERO),
-        ));
+        commands
+            .spawn((
+                ActivityHolo { of: robot, pose: avatar.pose, age: 0.0 },
+                WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(file))),
+                Transform::from_scale(Vec3::ZERO),
+            ))
+            .observe(brighten_holo);
+    }
+}
+
+/// How fast an activity screen types its text (characters per second).
+const TYPE_SPEED: f32 = 40.0;
+
+/// Where the activity screen floats, in robot heights (`HOLO_LIFT` up to its bottom
+/// edge, `HOLO_FRONT` out in front), and its size.
+const HOLO_FRONT: f32 = 0.5;
+const HOLO_LIFT: f32 = 0.34;
+const HOLO_SIZE: f32 = 0.95;
+
+/// Brighter copies of the holograms' materials, made once per material.
+#[derive(Resource, Default)]
+pub(crate) struct BrightHolos(HashMap<AssetId<StandardMaterial>, Handle<StandardMaterial>>);
+
+/// The activity screens glow: their materials, made for the stations' dimmer
+/// panels, get twice the light and a little more body.
+fn brighten_holo(
+    ready: On<WorldInstanceReady>,
+    mut commands: Commands,
+    children: Query<&Children>,
+    meshes: Query<&MeshMaterial3d<StandardMaterial>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut bright: ResMut<BrightHolos>,
+) {
+    for child in children.iter_descendants(ready.entity) {
+        let Ok(material) = meshes.get(child) else { continue };
+        let id = material.0.id();
+        let handle = match bright.0.get(&id) {
+            Some(handle) => handle.clone(),
+            None => {
+                let Some(mut glow) = materials.get(&material.0).cloned() else { continue };
+                glow.emissive *= 2.2;
+                if glow.alpha_mode == AlphaMode::Blend {
+                    glow.base_color = glow.base_color.with_alpha((glow.base_color.alpha() * 1.5).min(0.6));
+                }
+                let handle = materials.add(glow);
+                bright.0.insert(id, handle.clone());
+                handle
+            }
+        };
+        commands.entity(child).insert(MeshMaterial3d(handle));
     }
 }
 

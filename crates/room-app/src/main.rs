@@ -81,6 +81,7 @@ fn main() -> AppExit {
         .add_plugins(EguiPlugin::default())
         .add_message::<mini::ToggleMini>()
         .init_resource::<view3d::View3d>()
+        .init_resource::<view3d::BrightHolos>()
         .init_resource::<hud::Trace>()
         .init_resource::<hud::Selected>()
         .insert_resource(mini::ViewMode::from_saved(saved))

@@ -14,7 +14,7 @@ of the pad. The walkable deck is a disc of radius 1.10 m at y = 0.22; the tiers 
 
 Unlike the stations, the parts the app animates stay separate glTF nodes:
 
-    Platform      static dais, ramp, grid deck, base machinery, overhead emitter
+    Platform      static dais, ramp, grid deck, base machinery
     Ring0/1/2     segmented rings, origin on the centre axis, spin about Y
     Beam          light column, radius 0.35 m, 3 m tall, own material to fade
     Orbiters      empty on the centre axis
@@ -43,7 +43,6 @@ DECK_R = 1.10          # walkable top radius
 DECK_Z = 0.22          # walkable top height
 BEAM_R = 0.35
 BEAM_TOP = DECK_Z + 3.0
-EMIT_Z = 3.04          # overhead emitter ring, where the column ends
 
 
 # ---------------------------------------------------------------- materials
@@ -293,18 +292,6 @@ def build_base_machinery():
             box((0, 1.19, 0.185), (0.05, 0.16, 0.05), "Trim", bevel=0.008)
 
 
-def build_emitter():
-    """Light overhead ring the column passes through."""
-    with at((0, 0, EMIT_Z)):
-        ring((0, 0, 0), 0.62, 0.80, 0.0, 0.085, "Trim", segs=40, bevel=0.014, bsegs=1)
-        ring((0, 0, 0), 0.605, 0.625, 0.015, 0.07, "Energy", segs=40)
-        ring((0, 0, 0), 0.80, 0.83, 0.03, 0.05, "Energy", segs=40)
-        for k in range(4):
-            a = 45 + 90 * k
-            box(radial(a, 0.76, 0.095), (0.1, 0.1, 0.03), "PanelDark", rot=(0, 0, -a))
-            box(radial(a, 0.57, 0.012), (0.07, 0.07, 0.03), "Energy", rot=(0, 0, -a))
-
-
 # ---------------------------------------------------------------- moving parts
 def build_rings():
     """Three segmented rings, each its own node with its origin on the centre axis."""
@@ -419,7 +406,6 @@ with group("Platform"):
     build_deck()
     build_exit()
     build_base_machinery()
-    build_emitter()
 build_rings()
 build_beam()
 build_orbiters()

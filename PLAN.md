@@ -1475,3 +1475,10 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   Measured A/B: no power regression; measurement noise about 4 points. **Next:**
   active power (HUD/labels only on change, audio thread), beam particles, the stray
   ring by the Research station, mini mode re-check.
+- 2026-11-18, Claude Opus 5.5: activity holograms now float in front of each working
+  robot, brighter (emissive x2.2), with what it does typed out on them (40 chars/s);
+  head labels then only name the robot. Teleporter: beam forms and thins (width
+  follows the beaming), 36 sparks spiral in or out; the overhead emitter ring was
+  removed from `teleporter.py` (it was the "stray ring" by the Research station: 3 m
+  up, the camera projected it there). Measured: dozing 0.3 %, active 18-26 % (noise).
+  **Next:** active power, mini mode re-check.
