@@ -90,9 +90,12 @@ After pulling new changes, run `scripts/install-dev.sh` again and restart `agent
 - The window starts in the bottom-right corner, always on top. Move and resize it
   freely; it remembers where it was.
 - **F** full screen, **Esc** leave full screen, **P** toggle always-on-top.
-- When it is at least 700 px wide, a side panel shows the session (pick another one when
-  several Claude sessions run), who is in the room and what they are doing, permission
-  cards, and the event log. When small, a one-line ticker shows the latest event.
+- The stations are the controls. Click the **main desk** (or its sign, or press **S**)
+  for settings: full screen, always on top, auto-accept, sound, stats, mini view.
+  Click the **bookshelf** (**L**) for the history log, and the **research console**
+  (**C**) to chat with Claude. Esc or a click on the floor closes it.
+- The top-right cards switch between sessions and show who is working; click a robot's
+  name for its details.
 - **Permissions:** a card shows the full command. Allow / Deny, or press Y / N for the
   oldest card. You can type a reason before denying; Claude gets it. If you don't answer
   within 60 seconds (`AGENT_ROOM_PERMISSION_TIMEOUT`), Claude Code asks in the terminal

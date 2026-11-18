@@ -6,6 +6,7 @@
 //! cards (egui) over and beside it.
 
 mod chat;
+mod console;
 mod director;
 mod log;
 mod mini;
@@ -122,6 +123,7 @@ fn main() -> AppExit {
         .init_resource::<RoomLog>()
         .init_resource::<stats::Stats>()
         .insert_resource(ui::PanelPrefs::load())
+        .insert_resource(console::OpenConsole::from_env())
         .init_resource::<AutoAccept>()
         .init_resource::<repo::RepoCache>()
         .init_resource::<ui::MarkdownCache>()

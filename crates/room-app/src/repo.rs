@@ -18,13 +18,6 @@ pub struct Repo {
 }
 
 impl Repo {
-    /// "name · branch" for labels.
-    pub fn label(&self) -> String {
-        match &self.branch {
-            Some(branch) => format!("{} · {branch}", self.name),
-            None => self.name.clone(),
-        }
-    }
 }
 
 #[derive(Resource, Default)]
@@ -129,7 +122,6 @@ mod tests {
         let tool = ToolCall { name: "Edit".into(), input: json!({ "file_path": root.join("src/main.rs") }) };
         let repo = cache.for_tool(&tool, None).unwrap();
         assert_eq!((repo.name.as_str(), repo.branch.as_deref()), ("shop", Some("feature/cart")));
-        assert_eq!(repo.label(), "shop · feature/cart");
         fs::remove_dir_all(root.parent().unwrap()).unwrap();
     }
 

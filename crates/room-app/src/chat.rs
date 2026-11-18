@@ -143,8 +143,6 @@ impl Drop for ChatSession {
 #[derive(Resource, Default)]
 pub struct Chats {
     pub session: Option<ChatSession>,
-    /// The chat window is open.
-    pub open: bool,
     pub folder: String,
     pub input: String,
     pub error: Option<String>,
@@ -167,10 +165,8 @@ pub struct PastSession {
 }
 
 impl Chats {
-    /// Opens the window (clicking Claude, or the Chat button) in the folder of the
-    /// session the room shows.
+    /// Points a new chat at the folder of the session the room shows.
     pub fn open_for(&mut self, cwd: Option<&str>) {
-        self.open = true;
         if self.session.is_none()
             && let Some(cwd) = cwd
         {
@@ -306,7 +302,12 @@ fn first_prompt(path: &std::path::Path) -> Option<(String, bool)> {
     })
 }
 
-pub fn read_chats(mut chats: ResMut<Chats>, server: Res<crate::server::Server>, mut usage: ResMut<crate::usage::Usage>) {
+pub fn read_chats(
+    mut chats: ResMut<Chats>,
+    server: Res<crate::server::Server>,
+    mut usage: ResMut<crate::usage::Usage>,
+    open: Res<crate::console::OpenConsole>,
+) {
     if let Some(session) = chats.session.as_mut() {
         session.read();
         if let Some(limits) = session.limits.take() {
@@ -320,7 +321,7 @@ pub fn read_chats(mut chats: ResMut<Chats>, server: Res<crate::server::Server>, 
         chats.channels.push(channel);
     }
     // Only while the window is open, so the closed app costs nothing per frame.
-    if chats.open {
+    if open.is(crate::console::Console::Chat) {
         chats.channels.retain(|channel| !channel.is_closed());
     }
 }
@@ -333,18 +334,23 @@ pub fn init_folder(mut chats: ResMut<Chats>) {
 /// Dev/test only: `AGENT_ROOM_DEV_CHAT="<folder>|<message>"` opens the chat, starts a
 /// session in the folder and sends the message, so the flow can be tested without a click.
 /// With an empty message it only opens the window (to check the session chooser).
-pub fn dev_chat(mut chats: ResMut<Chats>, server: Res<crate::server::Server>, mut done: Local<bool>) {
+pub fn dev_chat(
+    mut chats: ResMut<Chats>,
+    server: Res<crate::server::Server>,
+    mut open: ResMut<crate::console::OpenConsole>,
+    mut done: Local<bool>,
+) {
     if *done {
         return;
     }
     *done = true;
     let Ok(spec) = std::env::var("AGENT_ROOM_DEV_CHAT") else { return };
     let Some((folder, message)) = spec.split_once('|') else { return };
+    open.0 = Some(crate::console::Console::Chat);
     if message.is_empty() {
         chats.open_for(Some(folder));
         return;
     }
-    chats.open = true;
     chats.folder = folder.to_owned();
     chats.start(server.waker.clone());
     if let Some(session) = chats.session.as_mut() {

@@ -1,5 +1,5 @@
-//! egui overlay: permission cards and the event log, beside the room when the window
-//! is wide, or a one-line ticker under it when the window is small (PLAN.md 4.6).
+//! egui overlay: permission cards on top, the station consoles (settings, history,
+//! chat; PLAN.md M19) and the pop-ups. The room has the whole window.
 
 use std::collections::VecDeque;
 use std::time::Instant;
@@ -14,19 +14,14 @@ use room_proto::{Decision, PermissionReply};
 
 use crate::log::{AutoAccept, FinalAnswer, LogLine, PendingPermission, Question, RoomLog, keyboard_target};
 use crate::chat::{Chats, Speaker};
+use crate::console::{self, Console, OpenConsole};
 use crate::mini::{ToggleMini, ViewMode};
 use crate::server::Server;
-use crate::model::{Model, Pose, SessionState, Status, Who};
+use crate::model::{Model, Who};
 use bevy::ecs::system::SystemParam;
-use crate::director;
 use crate::view3d::{Avatar, RoomCamera3d};
 
 const DENY_MESSAGE: &str = "The user denied this in Agent Room.";
-/// From this logical width on, the log gets its own side panel.
-const WIDE_LAYOUT: f32 = 700.0;
-const SIDE_PANEL_WIDTH: f32 = 320.0;
-/// Finished sub-agents kept in the roster list.
-const MAX_FINISHED_ROWS: usize = 4;
 const ALLOW: egui::Color32 = egui::Color32::from_rgb(0x3E, 0x9B, 0x5F);
 const DENY: egui::Color32 = egui::Color32::from_rgb(0xC9, 0x4F, 0x4F);
 /// Share of the window the final answer covers.
@@ -37,11 +32,12 @@ const AUTO: egui::Color32 = egui::Color32::from_rgb(0xE0, 0x8A, 0x1E);
 pub fn draw(
     mut contexts: EguiContexts,
     mut log: ResMut<RoomLog>,
-    mut model: ResMut<Model>,
+    model: Res<Model>,
     mode: Res<ViewMode>,
     mut auto: ResMut<AutoAccept>,
     mut toggle_mini: MessageWriter<ToggleMini>,
-    window: Single<&Window, With<PrimaryWindow>>,
+    mut window: Single<&mut Window, With<PrimaryWindow>>,
+    mut open: ResMut<OpenConsole>,
     mut camera: Single<&mut Camera, With<RoomCamera3d>>,
     in_room: InRoom,
     mut chat: ChatParams,
@@ -80,9 +76,6 @@ pub fn draw(
     if !ctx.egui_wants_keyboard_input() && ctx.input(|input| input.key_pressed(egui::Key::A)) {
         auto.0 = !auto.0;
     }
-    if !ctx.egui_wants_keyboard_input() && ctx.input(|input| input.key_pressed(egui::Key::L)) {
-        panel.toggle();
-    }
     if !ctx.egui_wants_keyboard_input() && ctx.input(|input| input.key_pressed(egui::Key::I)) {
         stats.toggle();
     }
@@ -97,18 +90,19 @@ pub fn draw(
             });
     }
     let RoomLog { lines, pending, final_answer, .. } = &mut *log;
-    let mut picked = None;
 
+    // Permission cards for every session, on top (the oldest of the shown session also
+    // floats next to whoever asks, below).
+    if !pending.is_empty() {
+        let share = if mode.mini { 0.8 } else { 0.6 };
+        egui::Panel::top("permissions").show(&mut root, |ui| {
+            egui::ScrollArea::vertical()
+                .max_height(ctx.viewport_rect().height() * share)
+                .show(ui, |ui| permission_cards(ui, pending, now, &mut answers));
+        });
+    }
     if mode.mini {
-        // Only the room and, when needed, the permission cards. A small button returns
-        // to the full view (or press M).
-        if !pending.is_empty() {
-            egui::Panel::top("permissions").show(&mut root, |ui| {
-                egui::ScrollArea::vertical()
-                    .max_height(ctx.viewport_rect().height() * 0.8)
-                    .show(ui, |ui| permission_cards(ui, pending, now, &mut answers));
-            });
-        }
+        // Only the room and the cards. A small button returns to the full view (or M).
         egui::Area::new("leave-mini".into())
             .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-8.0, -8.0))
             .show(ctx, |ui| {
@@ -122,90 +116,42 @@ pub fn draw(
                     }
                 });
             });
-    } else if ctx.viewport_rect().width() >= WIDE_LAYOUT && panel.hidden {
-        // The log is hidden (PLAN.md M12): the room gets the whole window. Permission
-        // cards still need a place.
-        if !pending.is_empty() {
-            egui::Panel::top("permissions").show(&mut root, |ui| {
-                egui::ScrollArea::vertical()
-                    .max_height(ctx.viewport_rect().height() * 0.6)
-                    .show(ui, |ui| permission_cards(ui, pending, now, &mut answers));
-            });
-        }
-        egui::Area::new("show-panel".into())
-            .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-8.0, 8.0))
-            .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    answer_button(ui, final_answer);
-                    if ui.small_button("Show log").on_hover_text("Show the side panel (L)").clicked() {
-                        panel.toggle();
-                    }
-                });
-            });
-    } else if ctx.viewport_rect().width() >= WIDE_LAYOUT {
-        egui::Panel::right("side").exact_size(SIDE_PANEL_WIDTH).show(&mut root, |ui| {
-            // Nothing in here may grow the panel: widgets wrap or truncate to this width.
-            ui.set_max_width(SIDE_PANEL_WIDTH - 16.0);
-            ui.add_space(4.0);
-            picked = session_picker(ui, &model);
-            // Wraps instead of widening the panel when all buttons show.
-            ui.horizontal_wrapped(|ui| {
-                if ui.small_button("Mini").on_hover_text("Small widget view (M)").clicked() {
-                    toggle_mini.write(ToggleMini);
-                }
-                auto_button(ui, &mut auto);
-                if ui.small_button("Chat").on_hover_text("Talk to Claude here (or click Claude in the room)").clicked() {
-                    if chat.chats.open {
-                        chat.chats.open = false;
-                    } else {
-                        chat.chats.open_for(model.shown().and_then(|session| session.cwd.as_deref()));
-                    }
-                }
-                answer_button(ui, final_answer);
-                if ui.small_button("Hide").on_hover_text("Hide this panel (L)").clicked() {
-                    panel.toggle();
-                }
-                if ui.small_button("Stats").on_hover_text("This app's CPU, memory and frame rate (I)").clicked() {
-                    stats.toggle();
-                }
-                let sound = if panel.sound { "Sound on" } else { "Sound off" };
-                if ui.small_button(sound).on_hover_text("Notification sounds (off plays nothing at all)").clicked() {
-                    panel.sound = !panel.sound;
-                    panel.save();
-                }
-            });
-            ui.separator();
-            if let Some(session) = model.shown() {
-                roster(ui, session);
-                ui.separator();
-            }
-            permission_cards(ui, pending, now, &mut answers);
-            event_log(ui, lines, model.shown().map(|session| session.id.as_str()));
-        });
     } else {
-        if !pending.is_empty() {
-            egui::Panel::top("permissions").show(&mut root, |ui| {
-                egui::ScrollArea::vertical()
-                    .max_height(ctx.viewport_rect().height() * 0.6)
-                    .show(ui, |ui| permission_cards(ui, pending, now, &mut answers));
-            });
-        }
-        egui::Panel::bottom("ticker").show(&mut root, |ui| {
-            let shown = model.shown().map(|session| session.id.as_str());
-            let latest = lines.iter().rev().find(|line| shown.is_none_or(|s| line.session == s));
-            let text = latest.map_or_else(|| session_title(&model), |line| format!("{}: {}", line.agent, line.text));
-            ui.horizontal(|ui| {
-                if ui.small_button("Mini").on_hover_text("Small widget view (M)").clicked() {
-                    toggle_mini.write(ToggleMini);
+        // The stations are the controls (PLAN.md M19): S, L and C open their consoles.
+        if !ctx.egui_wants_keyboard_input() {
+            for console in Console::ALL {
+                if ctx.input(|input| input.key_pressed(console.key())) {
+                    open.toggle(console);
                 }
-                auto_button(ui, &mut auto);
-                answer_button(ui, final_answer);
-                ui.add(egui::Label::new(text).truncate());
-            });
-        });
-    }
-    if let Some(id) = picked {
-        model.show(&id);
+            }
+        }
+        if ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+            open.0 = None;
+        }
+        if auto.0 {
+            egui::Area::new("auto-badge".into())
+                .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-8.0, -8.0))
+                .interactable(false)
+                .show(ctx, |ui| ui.label(egui::RichText::new("Auto-accept ON").small().strong().color(AUTO)));
+        }
+        if let Some(console) = open.0
+            && let Some(spot) = in_room.station_spot(&camera, console.station())
+        {
+            let spot = egui::pos2(spot.x, spot.y);
+            let still_open = match console {
+                Console::Settings => console::hologram(ctx, console, spot, |ui| {
+                    settings(ui, &mut window, &mut auto, &mut panel, &mut stats, &mut toggle_mini);
+                }),
+                Console::History => console::hologram(ctx, console, spot, |ui| {
+                    answer_button(ui, final_answer);
+                    event_log(ui, lines, model.shown().map(|session| session.id.as_str()));
+                }),
+                Console::Chat => console::hologram(ctx, console, spot, |ui| chat_console(ui, &mut chat, &mut markdown, &model)),
+            };
+            if !still_open {
+                open.0 = None;
+            }
+        }
     }
     let window_size = UVec2::new(window.physical_width(), window.physical_height());
     fit_camera(&mut camera, root.available_rect_before_wrap(), window.scale_factor(), window_size);
@@ -249,10 +195,9 @@ pub fn draw(
         };
         log.note(&pending.session, pending.agent, format!("{verb} {}", pending.tool.describe().1));
     }
-    chat_window(ctx, &mut chat, &mut markdown, &model);
     question_popup(ctx, &mut log, now);
-    // The chat window already shows Claude's answers; don't cover it with the pop-up.
-    if !chat.chats.open {
+    // The chat already shows Claude's answers; don't cover it with the pop-up.
+    if !open.is(Console::Chat) {
         final_answer_popup(ctx, &mut log, &mut markdown, mode.mini);
     }
     Ok(())
@@ -276,6 +221,15 @@ impl InRoom<'_, '_> {
     }
 }
 
+impl InRoom<'_, '_> {
+    /// Logical window position over a station, where its console stands.
+    fn station_spot(&self, camera: &Camera, location: crate::world3d::Location) -> Option<Vec2> {
+        let camera_transform = self.camera.single().ok()?;
+        let offset = camera.logical_viewport_rect().map_or(Vec2::ZERO, |rect| rect.min);
+        Some(camera.world_to_viewport(camera_transform, location.center() + Vec3::Y * 2.2).ok()? + offset)
+    }
+}
+
 /// Opens Claude's last answer again after it was closed (by mistake, or by the next
 /// prompt). Shown only when there is a closed answer to open.
 fn answer_button(ui: &mut egui::Ui, answer: &mut Option<FinalAnswer>) {
@@ -285,16 +239,55 @@ fn answer_button(ui: &mut egui::Ui, answer: &mut Option<FinalAnswer>) {
     }
 }
 
-/// Off: a plain button. On: amber, so it is impossible to miss (PLAN.md M9).
-fn auto_button(ui: &mut egui::Ui, auto: &mut AutoAccept) {
-    let button = if auto.0 {
-        egui::Button::new(egui::RichText::new("Auto-accept ON").small().strong().color(egui::Color32::WHITE)).fill(AUTO)
-    } else {
-        egui::Button::new(egui::RichText::new("Auto-accept").small())
+/// The main desk's console: the app's own switches.
+fn settings(
+    ui: &mut egui::Ui,
+    window: &mut Window,
+    auto: &mut AutoAccept,
+    prefs: &mut PanelPrefs,
+    stats: &mut crate::stats::Stats,
+    toggle_mini: &mut MessageWriter<ToggleMini>,
+) {
+    let row = |ui: &mut egui::Ui, name: &str, key: &str, on: bool, hint: &str| -> bool {
+        let mut clicked = false;
+        ui.horizontal(|ui| {
+            ui.label(name).on_hover_text(hint);
+            ui.label(egui::RichText::new(key).small().weak());
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let (text, fill) = if on { ("On", console::HOLO.gamma_multiply(0.6)) } else { ("Off", egui::Color32::TRANSPARENT) };
+                clicked = ui.add(egui::Button::new(text).fill(fill).min_size(egui::vec2(48.0, 0.0))).on_hover_text(hint).clicked();
+            });
+        });
+        clicked
     };
-    let hint = "Allow permission requests without asking (A). Risky commands like rm -rf or git push still ask.";
-    if ui.add(button).on_hover_text(hint).clicked() {
+    let full = window.mode != bevy::window::WindowMode::Windowed;
+    if row(ui, "Full screen", "F", full, "Fill the screen; Esc leaves it") {
+        window.mode = if full {
+            bevy::window::WindowMode::Windowed
+        } else {
+            bevy::window::WindowMode::BorderlessFullscreen(bevy::window::MonitorSelection::Current)
+        };
+    }
+    let on_top = window.window_level == bevy::window::WindowLevel::AlwaysOnTop;
+    if row(ui, "Always on top", "P", on_top, "Keep the window above other apps") {
+        window.window_level = if on_top { bevy::window::WindowLevel::Normal } else { bevy::window::WindowLevel::AlwaysOnTop };
+        if let Some(saved) = crate::window::SavedWindow::of(window) {
+            saved.save();
+        }
+    }
+    if row(ui, "Auto-accept", "A", auto.0, "Allow permission requests without asking. Risky commands like rm -rf or git push still ask.") {
         auto.0 = !auto.0;
+    }
+    if row(ui, "Sound", "", prefs.sound, "Notification sounds; off plays nothing at all") {
+        prefs.sound = !prefs.sound;
+        prefs.save();
+    }
+    if row(ui, "Stats", "I", stats.shown, "This app's CPU, memory and frame rate") {
+        stats.toggle();
+    }
+    ui.add_space(4.0);
+    if ui.button("Mini widget view (M)").clicked() {
+        toggle_mini.write(ToggleMini);
     }
 }
 
@@ -415,27 +408,17 @@ pub struct ChatParams<'w> {
     server: Res<'w, Server>,
 }
 
-fn chat_window(ctx: &egui::Context, chat: &mut ChatParams, markdown: &mut MarkdownCache, model: &Model) {
+fn chat_console(ui: &mut egui::Ui, chat: &mut ChatParams, markdown: &mut MarkdownCache, model: &Model) {
     let waker = chat.server.waker.clone();
     let chats = &mut *chat.chats;
-    if !chats.open {
-        return;
-    }
     if chats.session.is_none() {
         chats.refresh_past();
     }
-    let mut open = true;
     let (mut start, mut stop, mut send) = (false, false, false);
     let mut resume: Option<(String, Option<String>)> = None;
-    egui::Window::new("Chat with Claude")
-        .id("chat".into())
-        .open(&mut open)
-        .default_size(ctx.viewport_rect().size() * egui::vec2(0.45, 0.7))
-        // A new window has no height on its first frame; without a minimum the
-        // transcript's height below goes negative and the window collapses.
-        .min_size(egui::vec2(360.0, 320.0))
-        .default_pos(ctx.viewport_rect().center() - egui::vec2(200.0, 200.0))
-        .show(ctx, |ui| {
+    // A closure, so an early return still runs the actions below.
+    let mut body = |ui: &mut egui::Ui| {
+        {
             let Some(session) = chats.session.as_mut() else {
                 session_chooser(ui, chats, model, &mut start, &mut resume);
                 return;
@@ -481,10 +464,9 @@ fn chat_window(ctx: &egui::Context, chat: &mut ChatParams, markdown: &mut Markdo
             if enter || ui.button("Send").clicked() {
                 send = true;
             }
-        });
-    if !open {
-        chats.open = false;
-    }
+        }
+    };
+    body(ui);
     if let Some((id, cwd)) = resume {
         if let Some(cwd) = cwd {
             chats.folder = cwd;
@@ -596,9 +578,6 @@ fn ago(secs: u64) -> String {
 /// UI choices remembered across starts, in `~/.agent-room/ui.json`.
 #[derive(Resource, serde::Serialize, serde::Deserialize)]
 pub struct PanelPrefs {
-    /// The side panel with the log is hidden (PLAN.md M12).
-    #[serde(default)]
-    pub hidden: bool,
     /// Notification sounds (on by default, the user's choice; off plays nothing).
     #[serde(default = "yes")]
     pub sound: bool,
@@ -610,7 +589,7 @@ fn yes() -> bool {
 
 impl Default for PanelPrefs {
     fn default() -> Self {
-        Self { hidden: false, sound: true }
+        Self { sound: true }
     }
 }
 
@@ -626,11 +605,6 @@ impl PanelPrefs {
             .unwrap_or_default()
     }
 
-    fn toggle(&mut self) {
-        self.hidden = !self.hidden;
-        self.save();
-    }
-
     fn save(&self) {
         if let (Some(path), Ok(text)) = (Self::path(), serde_json::to_string(self)) {
             let _ = std::fs::write(path, text);
@@ -641,101 +615,6 @@ impl PanelPrefs {
 /// Cache for rendered markdown (images, code highlighting state).
 #[derive(Resource, Default)]
 pub struct MarkdownCache(egui_commonmark::CommonMarkCache);
-
-/// The shown session's name; a drop-down to switch when several sessions are known.
-fn session_picker(ui: &mut egui::Ui, model: &Model) -> Option<String> {
-    let sessions = model.sessions();
-    let title = session_title(model);
-    if sessions.len() < 2 {
-        ui.add(egui::Label::new(egui::RichText::new(title).strong()).truncate());
-        return None;
-    }
-    let shown = model.shown().map(|session| session.id.as_str());
-    let mut picked = None;
-    egui::ComboBox::from_id_salt("session")
-        .selected_text(egui::RichText::new(title).strong())
-        .width(ui.available_width())
-        // A long path must not widen the panel (it leaves its old edge drawn as a line).
-        .truncate()
-        .show_ui(ui, |ui| {
-            for session in sessions {
-                let state = if session.ended {
-                    "ended"
-                } else if session.is_busy() {
-                    "working"
-                } else {
-                    "idle"
-                };
-                let label = format!("{}  ·  {state}", truncate(&session.name(), 32));
-                if ui.selectable_label(shown == Some(session.id.as_str()), label).clicked() {
-                    picked = Some(session.id.clone());
-                }
-            }
-        });
-    picked
-}
-
-/// Who is in the room: Claude, then each sub-agent with what it is doing.
-fn roster(ui: &mut egui::Ui, session: &SessionState) {
-    // "in api · main" when an agent works outside the session's own repository.
-    let away = |repo: &Option<crate::repo::Repo>| -> Option<String> {
-        let repo = repo.as_ref()?;
-        let home = session.home_repo.as_ref().map(|home| &home.root);
-        (Some(&repo.root) != home).then(|| format!("in {}", repo.label()))
-    };
-    let main_state = match away(&session.main_repo) {
-        Some(place) => format!("{} · {place}", session.main_pose.word()),
-        None => session.main_pose.word().to_owned(),
-    };
-    agent_row(ui, director::MAIN_ACCENT, "Claude", &main_state, session.main_doing.as_deref(), false);
-    // Working agents first, then the most recent finished ones.
-    let working = session.agents.iter().filter(|(_, info)| info.status != Status::Done);
-    let finished = session.agents.iter().rev().filter(|(_, info)| info.status == Status::Done).take(MAX_FINISHED_ROWS);
-    for (id, info) in working.chain(finished) {
-        let done = info.status == Status::Done;
-        let name = format!("{} {}", info.agent_type, id.chars().take(4).collect::<String>());
-        let word = if done { "done" } else { info.pose.word() };
-        let state = match away(&info.repo) {
-            Some(place) => format!("{word} · {place}"),
-            None => word.to_owned(),
-        };
-        let detail = if done { info.report.as_deref() } else { info.doing.as_deref().or(info.task.as_deref()) };
-        agent_row(ui, director::accent_for(&info.agent_type), &name, &state, detail, done);
-    }
-}
-
-fn agent_row(ui: &mut egui::Ui, accent: Color, name: &str, state: &str, detail: Option<&str>, faded: bool) {
-    let accent = egui_color(accent);
-    let strong = if faded { ui.visuals().weak_text_color() } else { ui.visuals().strong_text_color() };
-    ui.horizontal(|ui| {
-        let (dot, _) = ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
-        ui.painter().circle_filled(dot.center(), 5.0, accent);
-        ui.label(egui::RichText::new(name).color(strong).strong());
-        let state_color = if state == Pose::Waiting.word() { DENY } else { ui.visuals().weak_text_color() };
-        ui.label(egui::RichText::new(state).color(state_color).small());
-    });
-    if let Some(detail) = detail {
-        ui.horizontal(|ui| {
-            ui.add_space(22.0);
-            ui.add(egui::Label::new(egui::RichText::new(detail).small().weak()).truncate());
-        });
-    }
-}
-
-fn egui_color(color: Color) -> egui::Color32 {
-    let srgba = color.to_srgba();
-    egui::Color32::from_rgb((srgba.red * 255.0) as u8, (srgba.green * 255.0) as u8, (srgba.blue * 255.0) as u8)
-}
-
-fn session_title(model: &Model) -> String {
-    if let Some(repo) = model.shown().and_then(|session| session.home_repo.as_ref()) {
-        return repo.label();
-    }
-    match model.shown() {
-        Some(session) => session.cwd.clone().unwrap_or_else(|| session.id.clone()),
-        None => "Waiting for Claude Code…".to_owned(),
-    }
-}
 
 fn permission_cards(
     ui: &mut egui::Ui,

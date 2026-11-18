@@ -918,6 +918,28 @@ any game, film theme when they provide the 3d model for the agent and background
 - When Claude finishes a turn (`Stop.last_assistant_message`), show the answer in a
   centre pop-up (dismissable; compact in mini mode).
 
+### M19: Station consoles instead of the side panel (requested 2026-11-18, done 2026-11-18)
+
+User: "Instead of the logs panel on the side to control everything ... click on main
+desk we can have a hologram like to change the settings (auto accept, mute,
+fullscreen mini ...), click on bookshelf we can read the history logs, click on
+research we can chat with claude ... the performance must stay."
+
+- `console.rs`: `Console { Settings, History, Chat }`, each bound to a station
+  (main desk, bookshelf, research); `OpenConsole(Option<Console>)` is the only "open"
+  state (the chat's own `open` flag is gone).
+- Opens by clicking the station (a click that didn't drag, within reach of its
+  projected spot), its sign (which now says "⚙ Settings" etc.), or S / L / C. Esc, x,
+  or a click on the floor closes it.
+- The console is a cyan hologram standing over its station, kept inside the window.
+- Removed: the side panel, its Hide/Show (L, `ui.json` `hidden`), the narrow-window
+  ticker, the roster and session picker in the panel (the HUD cards already have
+  them). Permission cards still show on top and next to whoever asks.
+- `AGENT_ROOM_CONSOLE=settings|history|chat` opens one for screenshot tests.
+- Measured (release, unfocused, `scripts/measure.sh`): idle 8.7 %, dozing 0.0 %,
+  active 22.7 %, against 11.3-11.6 / 0.1 / 25.5-27.7 before. Within run-to-run
+  noise (3-5 points) or slightly better: no regression.
+
 ### M10: Context and usage limits (requested 2026-11-17)
 
 Show the session's context use, the 5-hour limit and the weekly limit (side panel
@@ -1071,6 +1093,7 @@ config file, and can remove both cleanly.
       a terminal session through the plugin channel, 2026-11-17; needs the user's try)
 - [x] M9 Auto-accept mode and centre pop-ups (2026-11-17)
 - [x] M10 Context, 5-hour and weekly limits in the app (2026-11-18; terminal sessions need the status line opt-in)
+- [x] M19 Station consoles instead of the side panel (2026-11-18)
 - [ ] M18 Use the app instead of the terminal (research done 2026-11-18, not started)
 - [x] M12 Hide/show the side panel (2026-11-17; needs a look on screen)
 - [x] M11 Own CPU/RAM/FPS overlay (2026-11-17; needs a look on screen)
@@ -1569,3 +1592,6 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   `room-hook --status`, the server's `LimitsReport` line, the chat's `rate_limit_event`,
   the top-right card. Checked by screenshot with a fake status line input. Researched
   M18 (chat as a terminal replacement); not started, waiting for the user's go.
+- 2026-11-18, Claude Opus 5.5: M19 done (station consoles; side panel removed).
+  Checked by screenshot with each console open; clicks on stations and signs still
+  need the user's hands. Power unchanged or slightly lower.

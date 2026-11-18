@@ -639,6 +639,7 @@ pub fn labels(
     camera: Query<(&Camera, &GlobalTransform), With<RoomCamera3d>>,
     avatars: Query<(&Avatar, &GlobalTransform)>,
     mut selected: ResMut<crate::hud::Selected>,
+    mut open: ResMut<crate::console::OpenConsole>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
     let Ok((camera, camera_at)) = camera.single() else { return Ok(()) };
@@ -654,13 +655,15 @@ pub fn labels(
             (120.0 + 135.0 * glow.green / peak) as u8,
             (120.0 + 135.0 * glow.blue / peak) as u8,
         );
+        // The stations with a console (PLAN.md M19) say so, and their sign opens it.
+        let console = crate::console::Console::at(location);
         egui::Area::new(egui::Id::new(("place3d", location.title())))
             .fixed_pos(egui::pos2(screen.x, screen.y))
             .pivot(egui::Align2::CENTER_BOTTOM)
-            .interactable(false)
+            .interactable(console.is_some())
             .order(egui::Order::Background)
             .show(ctx, |ui| {
-                egui::Frame::new()
+                let sign = egui::Frame::new()
                     .fill(egui::Color32::from_rgba_unmultiplied(12, 14, 32, 210))
                     .stroke(egui::Stroke::new(1.0, color.gamma_multiply(0.7)))
                     .corner_radius(6.0)
@@ -668,7 +671,18 @@ pub fn labels(
                     .show(ui, |ui| {
                         ui.label(egui::RichText::new(location.title()).strong().color(color));
                         ui.label(egui::RichText::new(location.subtitle()).small().color(egui::Color32::from_gray(190)));
+                        if let Some(console) = console {
+                            ui.label(egui::RichText::new(console.hint()).small().color(crate::console::HOLO));
+                        }
                     });
+                if let Some(console) = console
+                    && ui
+                        .interact(sign.response.rect, ui.id().with("open"), egui::Sense::click())
+                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                        .clicked()
+                {
+                    open.toggle(console);
+                }
             });
     }
     // Claude's plan, on a glass board over the main desk while it has work left.
@@ -1283,7 +1297,7 @@ pub fn camera_input(
     mode: Res<crate::mini::ViewMode>,
     egui_input: Res<bevy_egui::input::EguiWantsInput>,
     window: Single<&Window, With<bevy::window::PrimaryWindow>>,
-    camera: Query<&Camera, With<RoomCamera3d>>,
+    camera: Query<(&Camera, &GlobalTransform), With<RoomCamera3d>>,
     buttons: Res<ButtonInput<MouseButton>>,
     motion: Res<bevy::input::mouse::AccumulatedMouseMotion>,
     scroll: Res<bevy::input::mouse::AccumulatedMouseScroll>,
@@ -1292,8 +1306,10 @@ pub fn camera_input(
     keys: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
     mut hand: ResMut<CameraView>,
+    mut open: ResMut<crate::console::OpenConsole>,
     mut dragging: Local<Option<MouseButton>>,
     mut last_click: Local<f32>,
+    mut pressed_at: Local<Option<Vec2>>,
 ) {
     let pinched: f32 = pinch.read().map(|gesture| gesture.0).sum();
     let twisted: f32 = twist.read().map(|gesture| gesture.0).sum();
@@ -1302,7 +1318,7 @@ pub fn camera_input(
         return;
     }
     let over = window.cursor_position().is_some_and(|cursor| {
-        camera.single().ok().and_then(|camera| camera.logical_viewport_rect()).is_some_and(|rect| rect.contains(cursor))
+        camera.single().ok().and_then(|(camera, _)| camera.logical_viewport_rect()).is_some_and(|rect| rect.contains(cursor))
     }) && !egui_input.wants_any_pointer_input();
     let option = keys.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]);
     if buttons.just_pressed(MouseButton::Left) && over {
@@ -1312,6 +1328,23 @@ pub fn camera_input(
         }
         *last_click = now;
         *dragging = Some(if option { MouseButton::Right } else { MouseButton::Left });
+        *pressed_at = window.cursor_position();
+    }
+    // A click that didn't drag: on a station with a console opens it (PLAN.md M19),
+    // anywhere else closes the open one.
+    if buttons.just_released(MouseButton::Left)
+        && let Some(pressed) = pressed_at.take()
+        && let Some(cursor) = window.cursor_position()
+        && cursor.distance(pressed) < 5.0
+        && let Ok((camera, camera_at)) = camera.single()
+    {
+        let offset = camera.logical_viewport_rect().map_or(Vec2::ZERO, |rect| rect.min);
+        let spots = crate::console::Console::ALL.into_iter().filter_map(|console| {
+            let spot = camera.world_to_viewport(camera_at, console.station().center() + Vec3::Y * 0.8).ok()?;
+            Some((console.station(), spot + offset))
+        });
+        let reach = 90.0 / hand.zoom;
+        open.0 = crate::console::station_at(cursor, spots, reach).and_then(crate::console::Console::at);
     }
     if buttons.just_pressed(MouseButton::Right) && over {
         *dragging = Some(MouseButton::Right);
