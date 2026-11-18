@@ -143,6 +143,13 @@ pub fn console_at(click: Vec2, spots: impl IntoIterator<Item = (Console, Vec2)>,
         .map(|(console, _)| console)
 }
 
+/// The console a click opens when it lands on a station's model at `height` (metres
+/// above the floor). Clicks on the station's platform or the glowing ring it stands on
+/// don't count: those are easy to hit by mistake while aiming at the floor.
+pub fn station_click(location: Location, height: f32) -> Option<Console> {
+    (height > location.platform_top()).then(|| Console::at(location)).flatten()
+}
+
 pub const HOLO: egui::Color32 = egui::Color32::from_rgb(90, 210, 255);
 
 /// Draws a console as a hologram standing over its station (`spot`, logical pixels),
@@ -206,6 +213,12 @@ mod tests {
         let spots = [(Console::Settings, Vec2::new(100.0, 100.0)), (Console::History, Vec2::new(160.0, 100.0))];
         assert_eq!(console_at(Vec2::new(140.0, 100.0), spots, 50.0), Some(Console::History));
         assert_eq!(console_at(Vec2::new(400.0, 400.0), spots, 50.0), None);
+        // The main desk's tiered platform (up to 0.35 m) and a station's floor ring
+        // don't open anything; the desk or shelf itself does.
+        assert_eq!(station_click(Location::MainDesk, 0.30), None);
+        assert_eq!(station_click(Location::MainDesk, 0.9), Some(Console::Settings));
+        assert_eq!(station_click(Location::Bookshelf, 0.03), None);
+        assert_eq!(station_click(Location::Bookshelf, 1.2), Some(Console::History));
         let mut open = OpenConsole::default();
         open.toggle(Console::Chat);
         assert!(open.is(Console::Chat));

@@ -39,6 +39,16 @@ impl Location {
         }
     }
 
+    /// The top of the platform or floor ring built into the station's model
+    /// (`tools/blender/stations.py`: the main desk's three tiers rise to 0.35 m, the
+    /// other stations' `floor_disc`s to 0.05 m), plus a little margin.
+    pub fn platform_top(self) -> f32 {
+        match self {
+            Self::MainDesk => 0.38,
+            _ => 0.08,
+        }
+    }
+
     pub fn title(self) -> &'static str {
         match self {
             Self::MainDesk => "Main desk",
@@ -197,6 +207,11 @@ pub fn daylight(
     }
 }
 
+/// The root of a workstation's model. A click opens its console only when it lands on
+/// the model itself, not on the docking ring in the floor around it (PLAN.md M19).
+#[derive(Component, Clone, Copy)]
+pub struct StationBody(pub Location);
+
 /// What building the world needs.
 pub struct Kit<'a, 'w, 's> {
     pub commands: &'a mut Commands<'w, 's>,
@@ -247,7 +262,8 @@ pub fn build(kit: &mut Kit) {
     kit.model("models/environment/floor.glb", Vec3::ZERO);
     kit.model("models/environment/shell.glb", Vec3::ZERO);
     for location in Location::ALL {
-        kit.model(location.model(), location.center());
+        let station = kit.model(location.model(), location.center());
+        kit.commands.entity(station).insert(StationBody(location));
     }
     kit.model("models/stations/teleporter.glb", TELEPORTER);
     // Routes from the main desk to every workstation.

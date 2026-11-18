@@ -1011,7 +1011,9 @@ research we can chat with claude ... the performance must stay."
   (main desk, bookshelf, research); `OpenConsole(Option<Console>)` is the only "open"
   state (the chat's own `open` flag is gone).
 - Opens by clicking the station (a click that didn't drag, within reach of its
-  projected spot), its sign (which now says "⚙ Settings" etc.), or S / L / C. Esc, x,
+  projected spot; since 2026-11-18 a mesh ray cast on the station's model instead, and
+  hits on its platform or floor ring don't count, because the user kept opening
+  consoles by mistake there: `Location::platform_top`, `view3d::StationPick`), its sign (which now says "⚙ Settings" etc.), or S / L / C. Esc, x,
   or a click on the floor closes it.
 - The console is a cyan hologram standing over its station, kept inside the window.
 - Removed: the side panel, its Hide/Show (L, `ui.json` `hidden`), the narrow-window
@@ -1694,3 +1696,11 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   **Next:** look at those on screen, reinstall the plugin (0.3.0) for PostCompact and
   PostModelSwitch. Test plan files the live probes wrote to `~/.claude/plans` were
   deleted.
+- 2026-11-18, Claude Opus 5.5: station clicks are exact now. The user opened consoles
+  by mistake when clicking the floor ring or platform under a station, because a click
+  anywhere within 90 px of a point above the station counted. Workstations now use
+  Bevy's `MeshRayCast` against the station's own model (`world3d::StationBody` on the
+  model root) and ignore hits below `Location::platform_top` (main desk tiers 0.38 m,
+  other floor discs 0.08 m). The teleporter and wall screen keep the old reach.
+  Clippy clean, tests pass; **not yet clicked on screen** (a script can't click the
+  user's window): the user tries it after a rebuild.

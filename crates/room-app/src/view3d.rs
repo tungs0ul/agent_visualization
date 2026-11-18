@@ -1320,6 +1320,39 @@ const ZOOM_RANGE: (f32, f32) = (0.3, 1.25);
 /// tilt (up and down), a two-finger twist to turn, scroll or pinch to zoom, double-click to reset. Only
 /// over the HQ itself, never when the pointer is on a panel (its scrolling must not
 /// move the room).
+/// Which workstation model a click ray hits, triangle-exact, and how high up. Runs
+/// only on a click (nothing per frame).
+#[derive(bevy::ecs::system::SystemParam)]
+pub struct StationPick<'w, 's> {
+    ray_cast: bevy::picking::mesh_picking::ray_cast::MeshRayCast<'w, 's>,
+    bodies: Query<'w, 's, &'static crate::world3d::StationBody>,
+    parents: Query<'w, 's, &'static ChildOf>,
+}
+
+impl StationPick<'_, '_> {
+    /// The station a mesh entity belongs to, if any.
+    fn station_of(&self, entity: Entity) -> Option<crate::world3d::Location> {
+        std::iter::once(entity)
+            .chain(self.parents.iter_ancestors(entity))
+            .find_map(|ancestor| self.bodies.get(ancestor).ok().map(|body| body.0))
+    }
+
+    /// The console of the station whose model the ray hits first, unless that hit is on
+    /// the station's platform or floor ring.
+    fn console(&mut self, ray: Ray3d) -> Option<crate::console::Console> {
+        use bevy::picking::mesh_picking::ray_cast::{MeshRayCastSettings, RayCastVisibility};
+        let (bodies, parents) = (&self.bodies, &self.parents);
+        let on_station = |entity: Entity| {
+            std::iter::once(entity).chain(parents.iter_ancestors(entity)).any(|ancestor| bodies.contains(ancestor))
+        };
+        let settings = MeshRayCastSettings::default()
+            .with_filter(&on_station)
+            .with_visibility(RayCastVisibility::VisibleInView);
+        let (entity, hit) = self.ray_cast.cast_ray(ray, &settings).first().map(|(entity, hit)| (*entity, hit.point))?;
+        crate::console::station_click(self.station_of(entity)?, hit.y)
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn camera_input(
     mode: Res<crate::mini::ViewMode>,
@@ -1327,8 +1360,8 @@ pub fn camera_input(
     window: Single<&Window, With<bevy::window::PrimaryWindow>>,
     camera: Query<(&Camera, &GlobalTransform), With<RoomCamera3d>>,
     buttons: Res<ButtonInput<MouseButton>>,
-    motion: Res<bevy::input::mouse::AccumulatedMouseMotion>,
-    scroll: Res<bevy::input::mouse::AccumulatedMouseScroll>,
+    (motion, scroll): (Res<bevy::input::mouse::AccumulatedMouseMotion>, Res<bevy::input::mouse::AccumulatedMouseScroll>),
+    mut stations: StationPick,
     mut pinch: MessageReader<bevy::input::gestures::PinchGesture>,
     mut twist: MessageReader<bevy::input::gestures::RotationGesture>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -1366,11 +1399,18 @@ pub fn camera_input(
         && cursor.distance(pressed) < 5.0
         && let Ok((camera, camera_at)) = camera.single()
     {
+        use crate::console::{Console, console_at};
         let offset = camera.logical_viewport_rect().map_or(Vec2::ZERO, |rect| rect.min);
-        let spots = crate::console::Console::ALL.into_iter().filter_map(|console| {
-            Some((console, camera.world_to_viewport(camera_at, console.anchor()).ok()? + offset))
-        });
-        open.0 = crate::console::console_at(cursor, spots, 90.0 / hand.zoom);
+        // Workstations: only a click on the model itself, not the platform or ring under it.
+        let on_station = camera.viewport_to_world(camera_at, cursor - offset).ok().and_then(|ray| stations.console(ray));
+        // The teleporter and the wall screen keep the reach around their spot.
+        let elsewhere = || {
+            let spots = Console::ALL.into_iter().filter(|console| console.station().is_none()).filter_map(|console| {
+                Some((console, camera.world_to_viewport(camera_at, console.anchor()).ok()? + offset))
+            });
+            console_at(cursor, spots, 90.0 / hand.zoom)
+        };
+        open.0 = on_station.or_else(elsewhere);
     }
     if buttons.just_pressed(MouseButton::Right) && over {
         *dragging = Some(MouseButton::Right);
