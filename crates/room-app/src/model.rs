@@ -210,6 +210,54 @@ impl Model {
         self.sessions.get(id)
     }
 
+    /// The user removed the session from the room (its roster row's ✕). Only the
+    /// app forgets it: Claude keeps running, and its next event brings it back.
+    pub fn forget(&mut self, id: &str) {
+        if self.sessions.remove(id).is_some() && self.shown.as_deref() == Some(id) {
+            self.shown = None;
+            self.show_latest_live();
+        }
+    }
+
+    /// Records the `claude` process of a session the app started itself (room-hook
+    /// doesn't tag those), so [`Model::end_dead`] sees when its tab is closed.
+    pub fn set_pid(&mut self, id: &str, pid: u32) {
+        if let Some(session) = self.sessions.get_mut(id) {
+            session.claude_pid = Some(pid);
+        }
+    }
+
+    /// Ends live sessions whose `claude` process is gone: a closed terminal window or
+    /// a killed process never sends `SessionEnd`. Returns the ids it ended.
+    pub fn end_dead(&mut self, alive: impl Fn(u32) -> bool) -> Vec<String> {
+        let dead: Vec<String> = self
+            .sessions
+            .values()
+            .filter(|session| !session.ended && session.claude_pid.is_some_and(|pid| !alive(pid)))
+            .map(|session| session.id.clone())
+            .collect();
+        for id in &dead {
+            let Some(session) = self.sessions.get_mut(id) else { continue };
+            session.ended = true;
+            session.main_pose = Pose::Idle;
+            for (_, info) in &mut session.agents {
+                info.status = Status::Done;
+            }
+        }
+        if self.shown().is_none_or(|shown| shown.ended) {
+            self.show_latest_live();
+        }
+        dead
+    }
+
+    /// Shows the most recently active live session the user works in, if any.
+    fn show_latest_live(&mut self) {
+        let next = self.sessions().into_iter().find(|session| !session.ended && !session.headless).map(|session| session.id.clone());
+        if next.is_some() {
+            self.shown = next;
+        }
+    }
+
     pub fn shown(&self) -> Option<&SessionState> {
         self.shown.as_ref().and_then(|id| self.sessions.get(id))
     }
@@ -697,5 +745,70 @@ mod tests {
         );
         assert!(model.apply(&report).contains(&Change::Say { who: Who::Main, line: "Got it from Explore".into() }));
         assert_eq!(model.agent_type("s", "a1"), Some("Explore"));
+    }
+
+    fn started(session: &str, pid: Option<u32>) -> RoomEvent {
+        let mut fields = json!({ "hook_event_name": "SessionStart" });
+        if let Some(pid) = pid {
+            fields[room_proto::CLAUDE_PID_FIELD] = json!(pid);
+        }
+        event(session, None, fields)
+    }
+
+    #[test]
+    fn a_session_whose_claude_is_gone_ends() {
+        let mut model = Model::default();
+        model.apply(&started("gone", Some(10)));
+        model.apply(&event("gone", Some(("a1", "Explore")), json!({ "hook_event_name": "UserPromptSubmit", "prompt": "x" })));
+        model.apply(&started("here", Some(20)));
+        model.apply(&started("no-pid", None));
+        assert_eq!(model.live().len(), 3);
+
+        assert_eq!(model.end_dead(|pid| pid != 10), vec!["gone".to_owned()]);
+        let live: Vec<&str> = model.live().iter().map(|session| session.id.as_str()).collect();
+        assert_eq!(live, vec!["here", "no-pid"]);
+        assert!(model.session("gone").unwrap().agents.iter().all(|(_, info)| info.status == Status::Done));
+        // Nothing more to end; a session without a known process is left alone.
+        assert!(model.end_dead(|pid| pid != 10).is_empty());
+    }
+
+    #[test]
+    fn the_shown_session_ending_shows_another() {
+        let mut model = Model::default();
+        model.apply(&started("old", Some(10)));
+        model.apply(&started("new", Some(20)));
+        model.apply(&event("old", None, json!({ "hook_event_name": "UserPromptSubmit", "prompt": "x" })));
+        assert_eq!(model.shown().unwrap().id, "old");
+        model.end_dead(|pid| pid != 10);
+        assert_eq!(model.shown().unwrap().id, "new");
+    }
+
+    #[test]
+    fn a_chat_session_gets_the_pid_the_app_knows() {
+        let mut model = Model::default();
+        model.apply(&started("chat", None));
+        model.set_pid("chat", 30);
+        model.set_pid("unknown", 31);
+        assert_eq!(model.session("chat").unwrap().claude_pid, Some(30));
+        // Resumed in a new tab: the new process counts.
+        model.set_pid("chat", 32);
+        assert_eq!(model.session("chat").unwrap().claude_pid, Some(32));
+        assert!(model.session("unknown").is_none());
+    }
+
+    #[test]
+    fn a_forgotten_session_leaves_until_it_speaks_again() {
+        let mut model = Model::default();
+        model.apply(&started("stale", None));
+        model.apply(&started("work", None));
+        assert_eq!(model.shown().unwrap().id, "work");
+        model.forget("work");
+        assert_eq!(model.shown().unwrap().id, "stale");
+        model.forget("stale");
+        assert!(model.shown().is_none());
+        assert!(model.live().is_empty());
+
+        model.apply(&event("work", None, json!({ "hook_event_name": "UserPromptSubmit", "prompt": "x" })));
+        assert_eq!(model.shown().unwrap().id, "work");
     }
 }

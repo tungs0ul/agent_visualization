@@ -1,6 +1,6 @@
 //! The chat's composer (PLAN.md M24): `@` file mentions suggested from the session's
 //! folder, and files dropped on the window (images attached to the message, other
-//! files mentioned by path). The folder's file list is read once per folder, in a
+//! files mentioned by path, images pasted with Cmd+V or Ctrl+V attached). The folder's file list is read once per folder, in a
 //! thread, the first time the user types `@`.
 
 use std::path::Path;
@@ -114,6 +114,56 @@ pub fn mention_query(input: &str) -> Option<(usize, &str)> {
     word.strip_prefix('@').map(|query| (start, query))
 }
 
+/// The `/command` being typed: the input is `/` and a name, with no space yet.
+pub fn command_query(input: &str) -> Option<&str> {
+    let query = input.strip_prefix('/')?;
+    (!query.contains(char::is_whitespace)).then_some(query)
+}
+
+/// Slash commands and skills matching what follows the `/`: names (or the part after a
+/// plugin's `plugin:` prefix) starting with it first, then names containing it;
+/// shorter names first.
+pub fn suggest_commands<'a>(commands: &'a [String], query: &str) -> Vec<&'a str> {
+    let query = query.to_lowercase();
+    let mut scored: Vec<(u8, usize, &str)> = commands
+        .iter()
+        .filter_map(|name| {
+            let lower = name.to_lowercase();
+            let short = lower.rsplit(':').next().unwrap_or(&lower);
+            let score = if lower.starts_with(&query) || short.starts_with(&query) {
+                0
+            } else if lower.contains(&query) {
+                1
+            } else {
+                return None;
+            };
+            Some((score, name.len(), name.as_str()))
+        })
+        .collect();
+    scored.sort();
+    scored.into_iter().take(SUGGESTIONS).map(|(_, _, name)| name).collect()
+}
+
+/// The slash commands Claude Code last listed (its `init` event's `slash_commands`),
+/// kept in `~/.agent-room/commands.json` so `/` has suggestions before a new chat's
+/// session has started.
+fn commands_path() -> Option<std::path::PathBuf> {
+    room_proto::state_dir().map(|dir| dir.join("commands.json"))
+}
+
+pub fn load_commands() -> Vec<String> {
+    commands_path()
+        .and_then(|path| std::fs::read(path).ok())
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default()
+}
+
+pub fn save_commands(commands: &[String]) {
+    if let (Some(path), Ok(json)) = (commands_path(), serde_json::to_vec(commands)) {
+        let _ = std::fs::write(path, json);
+    }
+}
+
 /// Replaces the `@word` at `start` with the chosen path and a space.
 pub fn complete(input: &mut String, start: usize, path: &str) {
     input.truncate(start);
@@ -163,6 +213,69 @@ pub fn attach(path: &Path) -> Result<Attachment, String> {
     Ok(Attachment { name, media_type, data: base64::engine::general_purpose::STANDARD.encode(bytes) })
 }
 
+/// What Cmd+V or Ctrl+V found on the clipboard besides text (egui pastes the text).
+pub enum Pasted {
+    Images(Vec<Attachment>),
+    Error(String),
+    Nothing,
+}
+
+/// Images on the clipboard: files copied in Finder, or picture data (a screenshot
+/// taken to the clipboard, an image copied in a browser), sent as PNG.
+pub fn paste() -> Pasted {
+    let Ok(mut clipboard) = arboard::Clipboard::new() else { return Pasted::Nothing };
+    if let Ok(files) = clipboard.get().file_list() {
+        let images: Vec<_> = files.iter().filter(|path| image_type(path).is_some()).map(|path| attach(path)).collect();
+        if !images.is_empty() {
+            return match images.into_iter().collect::<Result<Vec<_>, _>>() {
+                Ok(images) => Pasted::Images(images),
+                Err(error) => Pasted::Error(error),
+            };
+        }
+    }
+    match clipboard.get_image() {
+        Ok(image) => match png_from_rgba(image.width, image.height, image.bytes.into_owned()) {
+            Ok(data) => Pasted::Images(vec![Attachment { name: "pasted.png".to_owned(), media_type: "image/png", data }]),
+            Err(error) => Pasted::Error(error),
+        },
+        Err(_) => Pasted::Nothing,
+    }
+}
+
+/// Base64 PNG of RGBA pixels, halved in size until it fits the API's image limit.
+fn png_from_rgba(mut width: usize, mut height: usize, mut rgba: Vec<u8>) -> Result<String, String> {
+    loop {
+        let mut bytes = Vec::new();
+        let mut encoder = png::Encoder::new(&mut bytes, width as u32, height as u32);
+        encoder.set_color(png::ColorType::Rgba);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder
+            .write_header()
+            .and_then(|mut writer| writer.write_image_data(&rgba))
+            .map_err(|e| format!("pasted image: {e}"))?;
+        // Base64 grows the data by a third; the limit is on the encoded size.
+        if (bytes.len() as u64).div_ceil(3) * 4 <= MAX_IMAGE_BYTES || width < 2 || height < 2 {
+            return Ok(base64::engine::general_purpose::STANDARD.encode(bytes));
+        }
+        (rgba, width, height) = halve(&rgba, width, height);
+    }
+}
+
+/// Every 2x2 block of pixels averaged into one.
+fn halve(rgba: &[u8], width: usize, height: usize) -> (Vec<u8>, usize, usize) {
+    let (w, h) = (width / 2, height / 2);
+    let mut out = Vec::with_capacity(w * h * 4);
+    for y in 0..h {
+        for x in 0..w {
+            for channel in 0..4 {
+                let at = |dx: usize, dy: usize| u32::from(rgba[((2 * y + dy) * width + 2 * x + dx) * 4 + channel]);
+                out.push(((at(0, 0) + at(1, 0) + at(0, 1) + at(1, 1)) / 4) as u8);
+            }
+        }
+    }
+    (out, w, h)
+}
+
 /// A dropped file that isn't an image goes into the message as `@path`.
 pub fn mention_path(path: &Path) -> String {
     let text = path.display().to_string();
@@ -183,6 +296,25 @@ mod tests {
         let mut input = "look at @ma".to_owned();
         complete(&mut input, 8, "src/main.rs");
         assert_eq!(input, "look at @src/main.rs ");
+    }
+
+    #[test]
+    fn halving_averages_blocks() {
+        let rgba = [0, 0, 0, 255, 200, 100, 40, 255, 0, 0, 0, 255, 200, 100, 40, 255];
+        assert_eq!(halve(&rgba, 2, 2), (vec![100, 50, 20, 255], 1, 1));
+    }
+
+    #[test]
+    fn slash_suggests_commands_and_skills() {
+        assert_eq!(command_query("/cav"), Some("cav"));
+        assert_eq!(command_query("/"), Some(""));
+        assert_eq!(command_query("/caveman lite"), None);
+        assert_eq!(command_query("see /tmp"), None);
+        let commands: Vec<String> =
+            ["compact", "caveman:caveman", "caveman:caveman-commit", "ecc:code-review", "review"].map(str::to_owned).to_vec();
+        assert_eq!(suggest_commands(&commands, "cav"), ["caveman:caveman", "caveman:caveman-commit"]);
+        assert_eq!(suggest_commands(&commands, "review"), ["review", "ecc:code-review"]);
+        assert_eq!(suggest_commands(&commands, "zzz"), Vec::<&str>::new());
     }
 
     #[test]

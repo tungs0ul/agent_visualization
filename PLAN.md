@@ -1209,7 +1209,7 @@ config file, and can remove both cleanly.
 - [x] M18 Use the app instead of the terminal (2026-11-18, in M20)
 - [x] M20 More consoles, chat upgrade, notifications, worktrees (2026-11-18)
 - [x] M12 Hide/show the side panel (2026-11-17; needs a look on screen)
-- [x] M11 Own CPU/RAM/FPS overlay (2026-11-17; needs a look on screen)
+- [x] M11 Own CPU/RAM/FPS overlay (2026-11-17; removed 2026-11-18: it stayed on "Measuring…" and the user chose removal)
 - [x] M13 Permission rules as part of Auto-accept (2026-11-17)
 - [x] M14 Themes: light, dark, spaceship (2026-11-17)
 - [x] M15 3D station view, first version (2026-11-17; see M15 "Next")
@@ -1733,6 +1733,36 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   other floor discs 0.08 m). The teleporter and wall screen keep the old reach.
   Clippy clean, tests pass; **not yet clicked on screen** (a script can't click the
   user's window): the user tries it after a rebuild.
+- 2026-11-18, Claude Opus 5.5: the stats overlay (M11, Settings "Stats", I key) is gone,
+  with `stats.rs` and the `sysinfo` dependency: it always said "Measuring…" (likely
+  because the dozing render loop never presented the updated frame), and the user
+  chose removal over a fix. `scripts/measure.sh` still measures the app's cost. The
+  chat now takes slash commands and skills like the terminal: `/` at the start of the
+  input suggests names from Claude Code's `init` event (`slash_commands`, about 530
+  here), cached in `~/.agent-room/commands.json` for chats whose session hasn't
+  started; Tab, Enter or a click completes, and a name typed in full sends on Enter.
+  Checked live: `/caveman:caveman-help` sent as stream-json text ran the skill under
+  `claude -p`. Not yet seen on screen.
+- 2026-11-18, Claude Opus 5.5: `/` showed no commands in a resumed chat, because
+  `init` (with `slash_commands`) only comes with the first turn. Each chat now sends an
+  `initialize` control request at start; its answer lists `commands` right away (checked
+  live). Cmd+V or Ctrl+V in the chat input now attaches clipboard images (Finder-copied
+  image files, or picture data encoded as PNG and halved until under the 3.75 MB
+  limit) via `arboard` + `png`; egui still pastes the text. Not yet tried on screen.
+  Up/Down now move the highlighted `/` or `@` suggestion; Tab or Enter takes it.
+- 2026-11-18, Claude Opus 5.5: Ended sessions stayed in the HQ (a "tung" robot and
+  roster row long after it ended). `SessionEnd` is registered and handled; it just never
+  arrives when the `claude` process is killed: a closed terminal window, or a chat tab
+  (`ChatSession` drops with SIGKILL, and its default folder is `$HOME`, hence "tung").
+  Now `end_dead_sessions` (main.rs) checks every 5 s, on frames drawn anyway, whether
+  each live session's `claude_pid` still exists (`kill(pid, 0)`, ESRCH = gone) and ends
+  it (`Model::end_dead`); chat tabs report their child's pid (`Model::set_pid`), since
+  room-hook doesn't tag `AGENT_ROOM_CHAT` sessions. Sessions with no known pid (app
+  started mid-session, no prompt since) stay until removed by hand: each roster row has
+  a ✖ and Claude's details window a "Remove" button (`Model::forget`); both only forget
+  the session in the app, and its next event brings it back. While dozing the check
+  waits for the next wake-up. Seen on screen: a dead-pid session pruned, ✖ and Remove
+  drawn; the clicks themselves are covered by unit tests only.
 - 2026-11-18, Claude Opus 5.5: M25 pause, resume and stop for every session, through
   hold files read by `room-hook` on `PreToolUse` (see M25). Checked live with Haiku
   sessions, a fake app socket and the dev hook: pause held the tool until the file went

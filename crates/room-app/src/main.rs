@@ -18,7 +18,6 @@ mod model;
 mod notify;
 mod repo;
 mod server;
-mod stats;
 mod hud;
 mod view3d;
 mod wins;
@@ -127,7 +126,6 @@ fn main() -> AppExit {
         .insert_resource(server)
         .insert_resource(NeedsCornerPlacement(saved.is_none()))
         .init_resource::<RoomLog>()
-        .init_resource::<stats::Stats>()
         .insert_resource(ui::PanelPrefs::load())
         .insert_resource(console::OpenConsole::from_env())
         .init_resource::<activity::Activity>()
@@ -143,10 +141,9 @@ fn main() -> AppExit {
             (
                 (window::place_in_corner, window::hotkeys, mini::toggle, mini::drag, mini::apply_mode, mini::settle_redraw, window::remember_geometry)
                     .chain(),
-                (receive_events, chat::dev_chat, chat::read_chats),
+                (receive_events, chat::dev_chat, chat::read_chats, end_dead_sessions),
                 settle_permissions,
                 hud::title,
-                stats::measure,
                 (view3d::sync, view3d::teleporter, view3d::deliver, view3d::links, view3d::context_tank, view3d::celebrate, world3d::daylight, view3d::activity_holograms, view3d::light_trails, hud::trace, view3d::camera_input, view3d::frame).chain(),
                 pace_updates,
                 log_frame_rate.run_if(|| std::env::var_os("AGENT_ROOM_FPS_LOG").is_some()),
@@ -393,6 +390,46 @@ fn settle_permissions(mut log: ResMut<RoomLog>) {
     }
 }
 
+/// How often to look for sessions whose `claude` process has gone.
+const DEAD_CHECK_EVERY: Duration = Duration::from_secs(5);
+
+/// Ends sessions whose `claude` process is gone (a closed terminal window or chat tab
+/// never sends `SessionEnd`), so their robot and roster row leave. Runs only on frames
+/// that are drawn anyway, at most every few seconds: one `kill(pid, 0)` per session.
+fn end_dead_sessions(mut model: ResMut<Model>, chats: Res<chat::Chats>, mut last: Local<Option<Instant>>) {
+    let now = Instant::now();
+    if last.is_some_and(|at| now - at < DEAD_CHECK_EVERY) {
+        return;
+    }
+    *last = Some(now);
+    for chat in &chats.sessions {
+        if let Some(id) = &chat.session_id {
+            model.set_pid(id, chat.pid());
+        }
+    }
+    for id in model.end_dead(process_alive) {
+        debug!("session {id} ended: its claude process is gone");
+    }
+}
+
+/// Whether a process with this pid exists (signal 0 only checks; nothing is sent).
+/// A process of another user answers EPERM: it exists.
+fn process_alive(pid: u32) -> bool {
+    unsafe extern "C" {
+        fn kill(pid: i32, sig: i32) -> i32;
+    }
+    let Ok(pid) = i32::try_from(pid) else { return true };
+    if pid <= 0 {
+        return true;
+    }
+    // SAFETY: `kill` with signal 0 sends nothing; it only reports whether `pid` exists.
+    if unsafe { kill(pid, 0) } == 0 {
+        return true;
+    }
+    // ESRCH is 3 on macOS and Linux.
+    std::io::Error::last_os_error().raw_os_error() != Some(3)
+}
+
 /// `AGENT_ROOM_FPS_LOG=1`: prints frames drawn per second every 5 s, and why
 /// (for `scripts/measure.sh` and power work).
 fn log_frame_rate(
@@ -424,7 +461,6 @@ fn pace_updates(
     log: Res<RoomLog>,
     model: Res<Model>,
     view: Res<view3d::View3d>,
-    stats: Res<stats::Stats>,
     mut toasts: ResMut<notify::Toasts>,
     screenshots: Option<Res<ScreenshotMode>>,
     mut current: Local<Option<(Duration, Duration)>>,
@@ -448,11 +484,9 @@ fn pace_updates(
     } else {
         Pace::Dozing
     };
-    // Countdowns and the stats overlay need their own ticks even when all is still.
+    // Countdowns need their own ticks even when all is still.
     let tick = if !log.pending.is_empty() || !log.questions.is_empty() || !log.plans.is_empty() || toasts.tidy() {
         Some(COUNTDOWN_TICK)
-    } else if stats.shown {
-        Some(stats::REFRESH)
     } else {
         None
     };
@@ -472,4 +506,18 @@ fn pace_updates(
         },
         None => WinitSettings::desktop_app(),
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::process_alive;
+
+    #[test]
+    fn a_process_is_alive_until_it_exits() {
+        assert!(process_alive(std::process::id()));
+        let mut child = std::process::Command::new("true").spawn().unwrap();
+        let pid = child.id();
+        child.wait().unwrap();
+        assert!(!process_alive(pid));
+    }
 }

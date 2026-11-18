@@ -5123,15 +5123,16 @@ dependencies = [
 name = "room-app"
 version = "0.1.0"
 dependencies = [
+ "arboard",
  "base64",
  "bevy",
  "bevy_egui",
  "crossbeam-channel",
  "egui_commonmark",
+ "png",
  "room-proto",
  "serde",
  "serde_json",
- "sysinfo",
 ]
 
 [[package]]

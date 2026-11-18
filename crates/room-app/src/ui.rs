@@ -43,7 +43,6 @@ pub fn draw(
     mut chat: Desk,
     mut markdown: ResMut<MarkdownCache>,
     mut panel: ResMut<PanelPrefs>,
-    mut stats: ResMut<crate::stats::Stats>,
     mut styled: Local<bool>,
     mut was_open: Local<Option<Console>>,
 ) -> Result {
@@ -76,19 +75,6 @@ pub fn draw(
     }
     if !ctx.egui_wants_keyboard_input() && ctx.input(|input| input.key_pressed(egui::Key::A)) {
         auto.0 = !auto.0;
-    }
-    if !ctx.egui_wants_keyboard_input() && ctx.input(|input| input.key_pressed(egui::Key::I)) {
-        stats.toggle();
-    }
-    if stats.shown {
-        egui::Area::new("stats".into())
-            .anchor(egui::Align2::LEFT_BOTTOM, egui::vec2(8.0, -8.0))
-            .interactable(false)
-            .show(ctx, |ui| {
-                egui::Frame::popup(ui.style()).show(ui, |ui| {
-                    ui.label(egui::RichText::new(stats.line()).small().monospace());
-                });
-            });
     }
     dropped_files(ctx, &mut chat.chats, &mut open);
     let RoomLog { lines, pending, final_answer, .. } = &mut *log;
@@ -154,7 +140,7 @@ pub fn draw(
             let mut launched = false;
             let still_open = match console {
                 Console::Settings => console::hologram(ctx, console, spot, |ui| {
-                    settings(ui, &mut window, &mut auto, &mut panel, &mut stats, &mut toggle_mini);
+                    settings(ui, &mut window, &mut auto, &mut panel, &mut toggle_mini);
                 }),
                 Console::History => console::hologram(ctx, console, spot, |ui| {
                     answer_button(ui, final_answer);
@@ -309,7 +295,6 @@ fn settings(
     window: &mut Window,
     auto: &mut AutoAccept,
     prefs: &mut PanelPrefs,
-    stats: &mut crate::stats::Stats,
     toggle_mini: &mut MessageWriter<ToggleMini>,
 ) {
     let row = |ui: &mut egui::Ui, name: &str, key: &str, on: bool, hint: &str| -> bool {
@@ -349,9 +334,6 @@ fn settings(
     if row(ui, "Notifications", "", prefs.notify, "A macOS notification when Claude needs you and this window isn't in front") {
         prefs.notify = !prefs.notify;
         prefs.save();
-    }
-    if row(ui, "Stats", "I", stats.shown, "This app's CPU, memory and frame rate") {
-        stats.toggle();
     }
     ui.add_space(4.0);
     if ui.button("Mini widget view (M)").clicked() {
@@ -639,45 +621,115 @@ fn chat_console(ui: &mut egui::Ui, chat: &mut Desk, markdown: &mut MarkdownCache
                 }
             });
         }
-        // `@` suggests files from the session's folder; Tab or Enter takes the first.
+        // `/` at the start suggests slash commands and skills, as in the terminal;
+        // `@` suggests files from the session's folder. Tab or Enter takes the first.
         chats.files.poll();
-        let mention = crate::compose::mention_query(&chats.input).map(|(start, query)| (start, query.to_owned()));
-        let suggestions: Vec<String> = match &mention {
-            Some((_, query)) => {
+        let command = crate::compose::command_query(&chats.input).map(str::to_owned);
+        let mention = match command {
+            Some(_) => None,
+            None => crate::compose::mention_query(&chats.input).map(|(start, query)| (start, query.to_owned())),
+        };
+        let suggestions: Vec<String> = match (&command, &mention) {
+            (Some(query), _) => {
+                let known = chats.known_commands.get_or_insert_with(crate::compose::load_commands);
+                let list = if session.commands.is_empty() { &*known } else { &session.commands };
+                crate::compose::suggest_commands(list, query).into_iter().map(str::to_owned).collect()
+            }
+            (None, Some((_, query))) => {
                 chats.files.ensure(&session.cwd, waker.clone());
                 chats.files.suggest(query).into_iter().map(str::to_owned).collect()
             }
-            None => Vec::new(),
+            (None, None) => Vec::new(),
         };
         let input_id = egui::Id::new("chat-input");
         let mut picked: Option<String> = None;
-        if !suggestions.is_empty()
-            && ui.memory(|memory| memory.has_focus(input_id))
-            && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab) || i.consume_key(egui::Modifiers::NONE, egui::Key::Enter))
-        {
-            picked = suggestions.first().cloned();
+        // A command typed out in full sends on Enter instead of completing to itself.
+        let typed_in_full = command.is_some() && command.as_ref() == suggestions.first();
+        // Up and Down move the highlighted suggestion, as in the terminal; it starts at
+        // the first one again whenever the list changes.
+        let selected_id = egui::Id::new("chat-suggestion");
+        let list_key = suggestions.join("\n");
+        let mut selected = ui
+            .memory(|memory| memory.data.get_temp::<(String, usize)>(selected_id))
+            .filter(|(key, _)| *key == list_key)
+            .map_or(0, |(_, index)| index);
+        let focused = ui.memory(|memory| memory.has_focus(input_id));
+        if !suggestions.is_empty() && focused {
+            if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)) {
+                selected = (selected + 1) % suggestions.len();
+            }
+            if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp)) {
+                selected = (selected + suggestions.len() - 1) % suggestions.len();
+            }
+        }
+        selected = selected.min(suggestions.len().saturating_sub(1));
+        ui.memory_mut(|memory| memory.data.insert_temp(selected_id, (list_key, selected)));
+        // Tab always takes the highlighted one; Enter does too, unless the command is
+        // already typed in full and the first in the list, which sends it.
+        if !suggestions.is_empty() && focused {
+            let tab = ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab));
+            let enter = !(typed_in_full && selected == 0)
+                && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+            if tab || enter {
+                picked = suggestions.get(selected).cloned();
+            }
+        }
+        // Cmd+V or Ctrl+V with an image on the clipboard attaches it; egui only pastes text.
+        let pasting = ui.memory(|memory| memory.has_focus(input_id))
+            && ui.input(|i| {
+                i.events.iter().any(|event| {
+                    matches!(event, egui::Event::Key { key: egui::Key::V, pressed: true, modifiers, .. }
+                        if modifiers.command || modifiers.ctrl)
+                })
+            });
+        if pasting {
+            match crate::compose::paste() {
+                crate::compose::Pasted::Images(images) => chats.attachments.extend(images),
+                crate::compose::Pasted::Error(error) => session.transcript.push(crate::chat::Entry::Note(error)),
+                crate::compose::Pasted::Nothing => {}
+            }
         }
         let response = ui.add(
             egui::TextEdit::multiline(&mut chats.input)
                 .id(input_id)
-                .hint_text("Message Claude (Enter sends, Shift+Enter: new line, @ mentions a file, drop images on the window)")
+                .hint_text("Message Claude (Enter sends, Shift+Enter: new line, / runs a command or skill, @ mentions a file, paste or drop images)")
                 .desired_rows(2)
                 .desired_width(f32::INFINITY),
         );
+        if let Some(query) = &command {
+            if suggestions.is_empty() {
+                let hint = if chats.known_commands.as_ref().is_some_and(Vec::is_empty) && session.commands.is_empty() {
+                    "Commands show up once a session has started; send it as typed meanwhile"
+                } else if query.is_empty() {
+                    "Type a command or skill name"
+                } else {
+                    "No command matches; Enter sends it as typed"
+                };
+                ui.small(egui::RichText::new(hint).weak());
+            }
+            for (index, name) in suggestions.iter().enumerate() {
+                if ui.selectable_label(index == selected, egui::RichText::new(format!("/{name}")).small().monospace()).clicked() {
+                    picked = Some(name.clone());
+                }
+            }
+        }
         if let Some((_, query)) = &mention {
             if chats.files.is_loading() {
                 ui.small(egui::RichText::new("Reading the folder's files…").weak());
             } else if suggestions.is_empty() && !query.is_empty() {
                 ui.small(egui::RichText::new("No file matches").weak());
             }
-            for path in &suggestions {
-                if ui.selectable_label(false, egui::RichText::new(format!("@{path}")).small().monospace()).clicked() {
+            for (index, path) in suggestions.iter().enumerate() {
+                if ui.selectable_label(index == selected, egui::RichText::new(format!("@{path}")).small().monospace()).clicked() {
                     picked = Some(path.clone());
                 }
             }
         }
-        if let (Some(path), Some((start, _))) = (&picked, &mention) {
-            crate::compose::complete(&mut chats.input, *start, path);
+        if let Some(picked) = &picked {
+            match &mention {
+                Some((start, _)) => crate::compose::complete(&mut chats.input, *start, picked),
+                None => chats.input = format!("/{picked} "),
+            }
             // Back to typing, the cursor after the path.
             response.request_focus();
             if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), input_id) {

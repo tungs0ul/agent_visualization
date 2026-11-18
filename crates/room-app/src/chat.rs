@@ -60,6 +60,8 @@ pub struct ChatSession {
     pub mode: &'static str,
     /// The usage limits Claude Code last reported (PLAN.md M10), for `Usage`.
     pub limits: Option<room_proto::limits::Limits>,
+    /// The slash commands and skills this session offers (its `init` event), for `/`.
+    pub commands: Vec<String>,
     requests: u32,
     child: Child,
     stdin: ChildStdin,
@@ -111,7 +113,7 @@ impl ChatSession {
             transcript = history(&transcript_path(cwd, id));
             transcript.push(Entry::Note("Resumed: Claude remembers this session.".to_owned()));
         }
-        Ok(Self {
+        let mut session = Self {
             cwd: cwd.to_owned(),
             transcript,
             streaming: String::new(),
@@ -120,11 +122,16 @@ impl ChatSession {
             model: String::new(),
             mode: "default",
             limits: None,
+            commands: Vec::new(),
             requests: 0,
             child,
             stdin,
             lines,
-        })
+        };
+        // Ask for the slash commands now: the `init` event that also lists them only
+        // comes with the first turn, and `/` should work before that.
+        session.control(json!({ "subtype": "initialize" }));
+        Ok(session)
     }
 
     fn write(&mut self, message: &Value) -> bool {
@@ -155,6 +162,14 @@ impl ChatSession {
         self.busy = true;
     }
 
+    /// Keeps a fresh command list and caches it on disk for chats not yet started.
+    fn take_commands(&mut self, commands: Vec<String>) {
+        if !commands.is_empty() && commands != self.commands {
+            crate::compose::save_commands(&commands);
+            self.commands = commands;
+        }
+    }
+
     /// A control request (the Agent SDK's protocol over stdin).
     fn control(&mut self, request: Value) {
         self.requests += 1;
@@ -177,6 +192,11 @@ impl ChatSession {
     }
 
     /// The folder's name, for its tab.
+    /// Its `claude` process, so the room sees the session end when the tab closes.
+    pub fn pid(&self) -> u32 {
+        self.child.id()
+    }
+
     pub fn name(&self) -> &str {
         self.cwd.trim_end_matches('/').rsplit('/').next().unwrap_or(&self.cwd)
     }
@@ -234,12 +254,23 @@ impl ChatSession {
             }
             Some("system") if event["subtype"] == "init" => {
                 self.model = event["model"].as_str().unwrap_or_default().to_owned();
+                let commands: Vec<String> =
+                    event["slash_commands"].as_array().into_iter().flatten().filter_map(|name| name.as_str().map(str::to_owned)).collect();
+                self.take_commands(commands);
             }
             Some("control_response") => {
                 let response = &event["response"]["response"];
                 if let Some(model) = response["model"].as_str() {
                     self.model = model.to_owned();
                 }
+                // The `initialize` answer: `commands` as `{name, description, ...}`.
+                let names: Vec<String> = response["commands"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|command| command["name"].as_str().map(str::to_owned))
+                    .collect();
+                self.take_commands(names);
                 if event["response"]["subtype"] == "error" {
                     let error = event["response"]["error"].as_str().unwrap_or("refused");
                     self.transcript.push(Entry::Note(format!("Claude Code said no: {error}")));
@@ -366,6 +397,9 @@ pub struct Chats {
     pub files: crate::compose::FileIndex,
     /// Images dropped on the window, sent with the next message.
     pub attachments: Vec<crate::compose::Attachment>,
+    /// Slash commands from the last session that listed them (read once from disk),
+    /// for `/` before the open chat's own session has started.
+    pub known_commands: Option<Vec<String>>,
 }
 
 /// A session Claude Code saved on disk, which `claude --resume <id>` continues.

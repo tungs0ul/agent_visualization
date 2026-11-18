@@ -55,6 +55,8 @@ const GREEN: egui::Color32 = egui::Color32::from_rgb(80, 220, 140);
 const DIM: egui::Color32 = egui::Color32::from_gray(150);
 const AMBER: egui::Color32 = egui::Color32::from_rgb(255, 190, 80);
 const WHITE: egui::Color32 = egui::Color32::WHITE;
+/// The remove control only forgets the session in the app; Claude is never touched.
+const FORGET_HOVER: &str = "Remove from the room (Claude keeps running; it comes back if it sends events again)";
 
 fn card() -> egui::Frame {
     egui::Frame::new()
@@ -129,6 +131,7 @@ pub fn draw(
         .map(|session| (session.id.clone(), session.name(), session.is_busy()))
         .collect();
     let mut picked = None;
+    let mut forget = None;
     if live.len() > 1 {
         egui::Area::new("hud-sessions".into())
             .fixed_pos(egui::pos2(area.max.x - 8.0, area.min.y + 64.0))
@@ -145,15 +148,23 @@ pub fn draw(
                         };
                         let text = egui::RichText::new(format!("{dot} {}", truncate(name, 24)))
                             .color(if current { CYAN } else { egui::Color32::from_gray(210) });
-                        if ui.selectable_label(current, text).on_hover_text("Show this session's room").clicked() && !current {
-                            picked = Some(id.clone());
-                        }
+                        ui.horizontal(|ui| {
+                            if ui.selectable_label(current, text).on_hover_text("Show this session's room").clicked() && !current {
+                                picked = Some(id.clone());
+                            }
+                            if ui.small_button("✖").on_hover_text(FORGET_HOVER).clicked() {
+                                forget = Some(id.clone());
+                            }
+                        });
                     }
                 });
             });
     }
     if let Some(id) = picked {
         model.show(&id);
+    }
+    if let Some(id) = forget {
+        model.forget(&id);
     }
 
     toast_stack(ctx, area, &toasts);
@@ -310,6 +321,8 @@ pub fn draw(
         ),
     };
     let mut open = true;
+    let mut forget_shown = false;
+    let session_id = session.id.clone();
     egui::Window::new(name.clone())
         .id("robot-details".into())
         .open(&mut open)
@@ -323,6 +336,9 @@ pub fn draw(
                     && ui.small_button("Open terminal").on_hover_text("Bring this session's terminal to the front").clicked()
                 {
                     focus_terminal(pid);
+                }
+                if info.is_none() && ui.small_button("Remove").on_hover_text(FORGET_HOVER).clicked() {
+                    forget_shown = true;
                 }
             });
             if let Some(task) = task {
@@ -345,8 +361,11 @@ pub fn draw(
                 }
             });
         });
-    if !open {
+    if !open || forget_shown {
         selected.0 = None;
+    }
+    if forget_shown {
+        model.forget(&session_id);
     }
     Ok(())
 }

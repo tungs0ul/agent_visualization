@@ -21,5 +21,6 @@ egui_commonmark = "0.25"
 crossbeam-channel = "0.5"
 # Images attached to chat messages (already built for Bevy).
 base64 = "0.23"
-# The app's own CPU and memory in the stats overlay (already built for Bevy).
-sysinfo = { version = "0.39", default-features = false, features = ["system"] }
+# Images pasted from the clipboard (already built for bevy_egui).
+arboard = "3.7"
+png = "0.18"
