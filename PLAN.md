@@ -918,6 +918,39 @@ any game, film theme when they provide the 3d model for the agent and background
 - When Claude finishes a turn (`Stop.last_assistant_message`), show the answer in a
   centre pop-up (dismissable; compact in mini mode).
 
+### Backlog from the 2026-11-18 feature research (not started)
+
+Ranked by a research pass (code.claude.com docs for hooks, statusline, agent-view,
+Agent SDK and file checkpointing; `claude --help` 2.1.327; Tarsa; Agent Flow; the
+Claude Code desktop redesign). Nothing here is built yet; the user picks.
+
+1. **Session list from `claude agents --json`** (S). Lists every live session with
+   `pid`, `status` (busy/waiting/idle), `name` (e.g. "tung-f4"), even those started
+   before the app; would replace pid guessing in `end_dead_sessions` and end ghost
+   sessions. Checked live; one call took 0.21 s and 145 MB, so poll at start, on focus
+   and about every 60 s. The research also reports `waitingFor` values no hook gives
+   (`sandbox request`, `dialog open`); not seen in the one live check.
+2. **Undo a chat turn's file edits** (M). Chats start with
+   `CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING=true` and `--replay-user-messages`; an
+   "Undo this turn" button runs `claude -p --resume <id> --rewind-files <uuid>`. App
+   chats only; Bash and sub-agent edits are not undone. In-stream control request name
+   unverified.
+3. **Stuck and loop alert** (S): same tool and input three times, three failures in a
+   row, or busy with no event for N minutes; robot shows "?", notification fires.
+4. **Pause or stop one sub-agent** (S): hold file keyed on `agent_id` (M25 "Not done").
+   Check live first whether a sub-agent's `continue: false` ends only that sub-agent.
+5. **"Ready for review" shelf** (S-M): a turn ending with a non-empty diff badges the
+   writing desk until the diff is opened.
+6. **Next-prompt chips** (S): chats with `--prompt-suggestions`.
+7. **Sub-agent reasoning in bubbles** (S, chats): `--forward-subagent-text`.
+8. **What fills the context** (S-M, chats): SDK `getContextUsage` on the wall screen.
+9. **Run in background from the teleporter** (M): `claude --bg --name`, back via item 1.
+10. **Branch a chat** (S): `--resume <id> --fork-session` into a new tab.
+11. **Hot files on the bookshelf** (S): Read/Edit counts per file, click to open.
+
+Left out: dollar cost (V2 phase 6 dropped it as a guess), Gantt/replay (V2 phase 5
+trimmed), remote control (non-goal).
+
 ### M25: Pause, resume and stop a session (requested 2026-11-18, done 2026-11-18)
 
 User: "there is no way to stop or pause an agent, maybe we want to have feature that we
