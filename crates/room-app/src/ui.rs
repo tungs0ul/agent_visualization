@@ -17,10 +17,9 @@ use crate::chat::{Chats, Speaker};
 use crate::mini::{ToggleMini, ViewMode};
 use crate::server::Server;
 use crate::model::{Model, Pose, SessionState, Status, Who};
-use crate::scene::{Agent, Roster};
 use bevy::ecs::system::SystemParam;
-use crate::scene::{self, SceneChange};
-use crate::scene::WorldCamera;
+use crate::director;
+use crate::view3d::{Avatar, RoomCamera3d};
 
 const DENY_MESSAGE: &str = "The user denied this in Agent Room.";
 /// From this logical width on, the log gets its own side panel.
@@ -39,25 +38,23 @@ pub fn draw(
     mut contexts: EguiContexts,
     mut log: ResMut<RoomLog>,
     mut model: ResMut<Model>,
-    mut scene: MessageWriter<SceneChange>,
     mode: Res<ViewMode>,
     mut auto: ResMut<AutoAccept>,
     mut toggle_mini: MessageWriter<ToggleMini>,
     window: Single<&Window, With<PrimaryWindow>>,
-    mut camera: Single<&mut Camera, With<WorldCamera>>,
+    mut camera: Single<&mut Camera, With<RoomCamera3d>>,
     in_room: InRoom,
     mut chat: ChatParams,
     mut markdown: ResMut<MarkdownCache>,
     mut panel: ResMut<PanelPrefs>,
     mut stats: ResMut<crate::stats::Stats>,
-    mut styled: Local<Option<crate::theme::Look>>,
-    theme: Res<crate::theme::Theme>,
+    mut styled: Local<bool>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
     // Panels in the room's theme (PLAN.md M14).
-    if *styled != Some(theme.look()) {
-        ctx.set_visuals(crate::theme::visuals(theme.look()));
-        *styled = Some(theme.look());
+    if !*styled {
+        ctx.set_visuals(visuals());
+        *styled = true;
     }
     let mut root = egui::Ui::new(
         ctx.clone(),
@@ -203,9 +200,7 @@ pub fn draw(
         });
     }
     if let Some(id) = picked {
-        for change in model.show(&id) {
-            scene.write(SceneChange(change));
-        }
+        model.show(&id);
     }
     let window_size = UVec2::new(window.physical_width(), window.physical_height());
     fit_camera(&mut camera, root.available_rect_before_wrap(), window.scale_factor(), window_size);
@@ -261,17 +256,18 @@ pub fn draw(
 /// Where characters are on screen, for cards drawn next to them.
 #[derive(SystemParam)]
 pub struct InRoom<'w, 's> {
-    roster: Res<'w, Roster>,
-    characters: Query<'w, 's, &'static GlobalTransform, With<Agent>>,
-    camera: Query<'w, 's, &'static GlobalTransform, With<WorldCamera>>,
+    robots: Query<'w, 's, (&'static Avatar, &'static GlobalTransform)>,
+    camera: Query<'w, 's, &'static GlobalTransform, With<RoomCamera3d>>,
 }
 
 impl InRoom<'_, '_> {
     /// Logical window position just above the character's head.
     fn screen_position(&self, camera: &Camera, who: &Who) -> Option<Vec2> {
-        let character = self.characters.get(self.roster.character(who)?).ok()?;
+        let (_, robot) = self.robots.iter().find(|(avatar, _)| avatar.who == *who)?;
         let camera_transform = self.camera.single().ok()?;
-        camera.world_to_viewport(camera_transform, character.translation() + Vec3::new(0.0, 60.0, 0.0)).ok()
+        let head = robot.translation() + Vec3::Y * 1.1 * robot.scale().y;
+        let offset = camera.logical_viewport_rect().map_or(Vec2::ZERO, |rect| rect.min);
+        Some(camera.world_to_viewport(camera_transform, head).ok()? + offset)
     }
 }
 
@@ -664,7 +660,7 @@ fn roster(ui: &mut egui::Ui, session: &SessionState) {
         Some(place) => format!("{} · {place}", session.main_pose.word()),
         None => session.main_pose.word().to_owned(),
     };
-    agent_row(ui, scene::MAIN_ACCENT, "Claude", &main_state, session.main_doing.as_deref(), false);
+    agent_row(ui, director::MAIN_ACCENT, "Claude", &main_state, session.main_doing.as_deref(), false);
     // Working agents first, then the most recent finished ones.
     let working = session.agents.iter().filter(|(_, info)| info.status != Status::Done);
     let finished = session.agents.iter().rev().filter(|(_, info)| info.status == Status::Done).take(MAX_FINISHED_ROWS);
@@ -677,7 +673,7 @@ fn roster(ui: &mut egui::Ui, session: &SessionState) {
             None => word.to_owned(),
         };
         let detail = if done { info.report.as_deref() } else { info.doing.as_deref().or(info.task.as_deref()) };
-        agent_row(ui, scene::accent_for(&info.agent_type), &name, &state, detail, done);
+        agent_row(ui, director::accent_for(&info.agent_type), &name, &state, detail, done);
     }
 }
 
@@ -786,6 +782,20 @@ fn event_log(ui: &mut egui::Ui, lines: &VecDeque<LogLine>, session: Option<&str>
 /// egui lays out with last frame's window size, so right after the user shrinks the
 /// window the free area can stick out of it. A viewport outside the window makes wgpu
 /// reject the frame and Bevy quits, so clamp to the current size.
+/// The panels' look: dark glass, cyan highlights, to match the space station.
+fn visuals() -> egui::Visuals {
+    use egui::Color32;
+    let mut visuals = egui::Visuals::dark();
+    visuals.panel_fill = Color32::from_rgb(0x0B, 0x11, 0x20);
+    visuals.window_fill = Color32::from_rgb(0x0F, 0x18, 0x2C);
+    visuals.extreme_bg_color = Color32::from_rgb(0x06, 0x0A, 0x16);
+    visuals.selection.bg_fill = Color32::from_rgb(0x1E, 0x7F, 0xA8);
+    visuals.hyperlink_color = Color32::from_rgb(0x7F, 0xDB, 0xFF);
+    visuals.widgets.inactive.weak_bg_fill = Color32::from_rgb(0x16, 0x24, 0x3A);
+    visuals.widgets.hovered.weak_bg_fill = Color32::from_rgb(0x1D, 0x33, 0x52);
+    visuals
+}
+
 fn fit_camera(camera: &mut Camera, free: egui::Rect, scale: f32, window_size: UVec2) {
     let mut viewport = Viewport {
         physical_position: UVec2::new((free.min.x * scale).max(0.0) as u32, (free.min.y * scale).max(0.0) as u32),

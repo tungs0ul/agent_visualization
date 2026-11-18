@@ -1,21 +1,18 @@
 //! Agent Room: a small always-on-top window that shows what Claude Code and its
 //! sub-agents are doing, and lets the user answer permission prompts.
 //!
-//! The room scene with Claude and a seat per sub-agent (animated: poses, speech
-//! bubbles, walking, report planes), plus the event log and permission cards (egui)
-//! beside or below it.
+//! A 3D space-station HQ where every agent is a robot walking to the station for its
+//! work (`director`, `view3d`, `world3d`), with a HUD, the event log and permission
+//! cards (egui) over and beside it.
 
-mod anim;
-mod camera;
 mod chat;
+mod director;
 mod log;
 mod mini;
 mod model;
 mod repo;
-mod scene;
 mod server;
 mod stats;
-mod theme;
 mod hud;
 mod view3d;
 mod world3d;
@@ -31,18 +28,15 @@ use bevy::render::error_handler::{RenderErrorHandler, RenderErrorPolicy};
 use bevy::render::render_resource::BlendState;
 use bevy::winit::{EventLoopProxyWrapper, UpdateMode, WinitSettings, WinitUserEvent};
 use bevy_egui::{EguiGlobalSettings, EguiPlugin, EguiPrimaryContextPass, PrimaryEguiContext};
-use bevy_prototype_lyon::prelude::ShapePlugin;
 use room_proto::event::{AgentRef, EventKind};
 
-use crate::anim::Animating;
 use crate::log::{AutoAccept, FinalAnswer, PendingPermission, PendingQuestion, RoomLog, agent_label, always_asks, parse_questions};
 use room_proto::{Decision, PermissionReply};
 use crate::model::{Model, Who};
-use crate::scene::{Roster, SceneChange};
 use crate::server::{Incoming, Server};
 use crate::window::{NeedsCornerPlacement, SavedWindow, ScreenshotMode};
 
-/// Redraw rate while characters move (about 30 fps: smooth enough, half the power of 60).
+/// Redraw rate while robots work or move (about 30 fps: smooth enough, half the power of 60).
 const FRAME: Duration = Duration::from_millis(33);
 /// Redraw rate for animations while the window is not focused.
 const UNFOCUSED_FRAME: Duration = Duration::from_millis(100);
@@ -70,7 +64,7 @@ fn main() -> AppExit {
     app
         // Sleep until input or a hook event arrives (PLAN.md 6).
         .insert_resource(WinitSettings::desktop_app())
-        .insert_resource(ClearColor(scene::BACKDROP))
+        .insert_resource(ClearColor(Color::srgb(0.02, 0.02, 0.06)))
         // When the window changes size (mini mode, resizing) one frame can still mix the
         // old and new sizes; wgpu rejects it and Bevy would quit. Skip that frame instead;
         // the next one is consistent again.
@@ -84,52 +78,32 @@ fn main() -> AppExit {
                 .set(TaskPoolPlugin { task_pool_options: TaskPoolOptions::with_num_threads(3) })
                 .set(AssetPlugin { file_path: concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets").to_owned(), ..default() }),
         )
-        .add_plugins((EguiPlugin::default(), ShapePlugin))
-        .add_message::<SceneChange>()
+        .add_plugins(EguiPlugin::default())
         .add_message::<mini::ToggleMini>()
-        .add_message::<camera::RoomClick>()
-        .add_message::<view3d::Toggle3d>()
-        .insert_resource(view3d::View3d::from_env())
+        .init_resource::<view3d::View3d>()
         .init_resource::<hud::Trace>()
         .init_resource::<hud::Selected>()
         .insert_resource(mini::ViewMode::from_saved(saved))
         .insert_resource(server)
         .insert_resource(NeedsCornerPlacement(saved.is_none()))
         .init_resource::<RoomLog>()
-        .init_resource::<scene::Zoom>()
         .init_resource::<stats::Stats>()
-        .insert_resource(theme::Theme::load())
         .insert_resource(ui::PanelPrefs::load())
         .init_resource::<AutoAccept>()
         .init_resource::<repo::RepoCache>()
-        .init_resource::<camera::CameraControl>()
         .init_resource::<ui::MarkdownCache>()
         .init_resource::<chat::Chats>()
         .init_resource::<Model>()
-        .init_resource::<Roster>()
-        .init_resource::<Animating>()
-        .add_systems(Startup, ((scene::load_font, scene::spawn_room).chain(), spawn_ui_camera, connect_waker, chat::init_folder))
+        .add_systems(Startup, (view3d::build, spawn_ui_camera, connect_waker, chat::init_folder))
         .add_systems(
             Update,
             (
                 (window::place_in_corner, window::hotkeys, mini::toggle, mini::drag, mini::apply_mode, mini::settle_redraw, window::remember_geometry)
                     .chain(),
                 (receive_events, chat::dev_chat, chat::read_chats),
-                scene::apply_changes,
-                scene::apply_pending,
-                mini::hide_new_desks,
-                (scene::route_agents, scene::update_away_sign),
-                (anim::walk, anim::leave_when_done, anim::animate_parts, anim::update_bubbles, anim::update_chips),
-                (anim::hand_over, anim::pulse),
-                anim::detect_motion,
-                camera::camera_input,
-                chat::open_on_claude_click,
-                scene::follow_action,
-                anim::keep_text_readable,
                 settle_permissions,
                 stats::measure,
-                (theme::switch, theme::recolor, theme::stars).chain(),
-                (view3d::toggle, view3d::build, view3d::sync, view3d::deliver, view3d::activity_holograms, view3d::light_trails, hud::trace, view3d::frame, view3d::cameras).chain(),
+                (view3d::sync, view3d::deliver, view3d::activity_holograms, view3d::light_trails, hud::trace, view3d::frame).chain(),
                 pace_updates,
                 log_frame_rate.run_if(|| std::env::var_os("AGENT_ROOM_FPS_LOG").is_some()),
                 window::take_screenshots,
@@ -180,14 +154,12 @@ fn receive_events(
     auto: Res<AutoAccept>,
     mode: Res<mini::ViewMode>,
     mut repos: ResMut<repo::RepoCache>,
-    mut scene: MessageWriter<SceneChange>,
 ) {
     let now = Instant::now();
     for Incoming { event, reply } in server.events.try_iter() {
         let internal_helper = model.is_internal_helper(&event);
         for change in model.apply(&event) {
             trace!("{change:?}");
-            scene.write(SceneChange(change));
         }
         // Where everyone works (PLAN.md M4d): the session's repo from its cwd, each
         // agent's from the paths its tool calls touch.
@@ -315,7 +287,7 @@ fn settle_permissions(mut log: ResMut<RoomLog>) {
 /// `AGENT_ROOM_FPS_LOG=1`: prints frames drawn per second every 5 s, and why
 /// (for `scripts/measure.sh` and power work).
 fn log_frame_rate(
-    animating: Res<Animating>,
+    model: Res<Model>,
     view: Res<view3d::View3d>,
     log: Res<RoomLog>,
     mut window: Local<Option<(std::time::Instant, u32, u32, u32)>>,
@@ -323,13 +295,13 @@ fn log_frame_rate(
     let now = std::time::Instant::now();
     let (start, frames, busy, moving) = window.get_or_insert((now, 0, 0, 0));
     *frames += 1;
-    *busy += animating.0 as u32;
+    *busy += model.shown().is_some_and(|session| session.is_busy()) as u32;
     *moving += view.moving as u32;
     let elapsed = now - *start;
     if elapsed >= Duration::from_secs(5) {
         let secs = elapsed.as_secs_f32();
         eprintln!(
-            "fps {:.1} (animating {busy}, 3d moving {moving}, pending {})",
+            "fps {:.1} (busy {busy}, moving {moving}, pending {})",
             *frames as f32 / secs,
             log.pending.len() + log.questions.len()
         );
@@ -341,7 +313,7 @@ fn log_frame_rate(
 #[allow(clippy::too_many_arguments)]
 fn pace_updates(
     log: Res<RoomLog>,
-    animating: Res<Animating>,
+    model: Res<Model>,
     view: Res<view3d::View3d>,
     stats: Res<stats::Stats>,
     screenshots: Option<Res<ScreenshotMode>>,
@@ -352,7 +324,8 @@ fn pace_updates(
     if screenshots.is_some() {
         return;
     }
-    let busy = animating.0 || (view.on && view.moving);
+    // Someone works (their clip plays) or something in the HQ moves.
+    let busy = model.shown().is_some_and(|session| session.is_busy()) || view.moving;
     let now = std::time::Instant::now();
     if busy || last_busy.is_none() {
         *last_busy = Some(now);
@@ -362,7 +335,7 @@ fn pace_updates(
         Some(FRAME)
     } else if !log.pending.is_empty() || !log.questions.is_empty() {
         Some(COUNTDOWN_TICK)
-    } else if view.on && !dozing {
+    } else if !dozing {
         Some(IDLE_3D_FRAME)
     } else if stats.shown {
         Some(stats::REFRESH)

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Measures Agent Room's CPU and memory in the states of the V2.md power budget.
 #
-#   scripts/measure.sh                       # 3D (default view)
-#   AGENT_ROOM_VIEW3D=0 scripts/measure.sh   # 2D
+#   scripts/measure.sh
+#   MEASURE_SECONDS=10 scripts/measure.sh    # shorter samples
 #
 # Builds the release app, starts it with a throwaway AGENT_ROOM_DIR, hands focus to
 # Finder (the app usually sits unfocused beside the terminal), then samples `top`:
@@ -66,8 +66,7 @@ else
     echo "no replay log at $LOG; skipping the active state" >&2
 fi
 
-view="3D"; [[ "${AGENT_ROOM_VIEW3D:-1}" == "0" ]] && view="2D"
-printf '%-8s %-6s %8s %8s\n' state view "cpu %" "mem MB"
-printf '%-8s %-6s %8s %8s\n' idle "$view" "$idle_cpu" "$idle_mem"
-printf '%-8s %-6s %8s %8s\n' dozing "$view" "$doze_cpu" "$doze_mem"
-printf '%-8s %-6s %8s %8s\n' active "$view" "$active_cpu" "$active_mem"
+printf '%-8s %8s %8s\n' state "cpu %" "mem MB"
+printf '%-8s %8s %8s\n' idle "$idle_cpu" "$idle_mem"
+printf '%-8s %8s %8s\n' dozing "$doze_cpu" "$doze_mem"
+printf '%-8s %8s %8s\n' active "$active_cpu" "$active_mem"

@@ -1,8 +1,10 @@
 # Agent Room
 
-A small always-on-top window that shows Claude Code at work as a little animated room.
-Claude sits at the center desk; every sub-agent it starts walks in, sits at its own desk,
-says what it is doing, walks its report over to Claude and leaves. When Claude Code
+A small always-on-top window that shows Claude Code at work as a 3D space-station HQ.
+Claude is a robot at the main desk; it and every sub-agent it starts walk to the
+station for what they are doing (reading files, research, running commands, writing),
+and sub-agents bring their reports back to Claude. A mini mode follows Claude up close
+beside your terminal. When Claude Code
 asks for permission, you can answer right there with **Allow** / **Deny** (or **Y** / **N**).
 
 It is a native Rust app (Bevy), not a web view. Everything stays on your machine.
@@ -127,7 +129,7 @@ scripts/install-dev.sh                             # install this checkout into 
 scripts/replay.py ~/.agent-room/spike/events.jsonl # replay recorded events into the app
 ```
 
-Fonts: Nunito (SIL Open Font License), see `assets/LICENSES.md`.
+3D models: made by the Blender scripts in `tools/blender/`, see `assets/LICENSES.md`.
 
 ## License
 

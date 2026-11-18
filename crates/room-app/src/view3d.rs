@@ -1,10 +1,9 @@
-//! 3D view (PLAN.md M15), switched with the 3 key or the "3D" button.
-//!
-//! The 2D room stays the source of truth for who is there and what each one does;
-//! in 3D every agent is a robot that walks to the location for its work (PLAN.md M17).
-//! The workspace itself is built in `world3d`. The robot comes from
-//! `tools/blender/robot.py`; each agent shows its colour on the robot's ear rings and
-//! chest light. Other models are CC0 (`assets/models/*/License.txt`).
+//! The 3D HQ (PLAN.md M15, M17; V2.md): every agent is a robot that walks to the
+//! station for its work. What each robot does comes from `director` (model in,
+//! roles and places out); this module plays it: walking, clips, holograms, trails,
+//! documents and labels. The workspace itself is built in `world3d`. The robot comes
+//! from `tools/blender/robot.py`; each agent shows its colour on the robot's ear rings
+//! and chest light.
 
 use std::collections::HashMap;
 use std::f32::consts::PI;
@@ -18,11 +17,9 @@ use bevy::prelude::*;
 use bevy::world_serialization::{WorldAssetRoot, WorldInstanceReady};
 use bevy_egui::{EguiContexts, egui};
 
-use crate::anim::Accent;
+use crate::director::{self, Role};
 use crate::model::{Model, Pose, Who};
-use crate::scene::{Agent, Roster, WorldCamera};
 use crate::world3d::{INBOX, Location};
-
 
 /// The robot every agent is (`tools/blender/robot.py`): 1 m tall, facing +z.
 const ROBOT: &str = "models/robot/robot.glb";
@@ -41,25 +38,13 @@ enum Act {
     Handover,
 }
 
+/// Something in 3D moves this frame (a robot walks, the camera glides, a trail
+/// fades): redraw at full rate. Otherwise only the idle clip plays, slowly, and then
+/// the HQ dozes (`main::pace_updates`).
 #[derive(Resource, Default)]
 pub struct View3d {
-    pub on: bool,
-    built: bool,
-    /// Something in 3D moves this frame (a robot walks, the camera glides, a trail
-    /// fades): redraw at full rate. Otherwise only the idle clip plays, slowly.
     pub moving: bool,
 }
-
-impl View3d {
-    /// 3D is the default view (PLAN.md M17); `AGENT_ROOM_VIEW3D=0` starts in 2D.
-    pub fn from_env() -> Self {
-        Self { on: std::env::var("AGENT_ROOM_VIEW3D").map_or(true, |v| v != "0"), built: false, moving: false }
-    }
-}
-
-/// Asks to switch between the 2D and 3D view (the egui button sends it).
-#[derive(Message)]
-pub struct Toggle3d;
 
 #[derive(Component)]
 pub(crate) struct RoomCamera3d;
@@ -72,8 +57,15 @@ pub(crate) enum Rig {
 
 #[derive(Component)]
 pub(crate) struct Avatar {
-    /// The 2D character it follows.
-    of: Entity,
+    /// The agent it is, in which session.
+    pub(crate) who: Who,
+    session: String,
+    /// What it does now (from the director).
+    pose: Pose,
+    /// A sub-agent that has stopped: it hands its report over, then leaves.
+    done: bool,
+    /// Seconds spent handing a report over in person.
+    handing: f32,
     rig: Rig,
     /// The glow of its `Accent` material (ear rings, chest light).
     glow: LinearRgba,
@@ -117,35 +109,14 @@ impl Clips {
 }
 
 
-/// 3 or the button switches the view.
-pub fn toggle(
-    keys: Res<ButtonInput<KeyCode>>,
-    egui_input: Res<bevy_egui::input::EguiWantsInput>,
-    mut requests: MessageReader<Toggle3d>,
-    mut view: ResMut<View3d>,
-) {
-    let key = keys.just_pressed(KeyCode::Digit3) && !egui_input.wants_any_keyboard_input();
-    let switch = key || requests.read().count() % 2 == 1;
-    if switch {
-        view.on = !view.on;
-    }
-    // The systems after this one report movement afresh every frame.
-    view.moving = switch;
-}
-
-/// Builds the 3D room the first time the view is switched on.
+/// Builds the HQ, its camera and lights at startup.
 pub fn build(
     mut commands: Commands,
-    mut view: ResMut<View3d>,
     assets: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut graphs: ResMut<Assets<AnimationGraph>>,
 ) {
-    if !view.on || view.built {
-        return;
-    }
-    view.built = true;
     commands.insert_resource(Clips::load(&assets, &mut graphs));
 
     // Night in space: a dark backdrop, bloom so emissive parts glow (PLAN.md M17).
@@ -154,7 +125,6 @@ pub fn build(
         Camera3d::default(),
         Camera {
             order: 0,
-            is_active: false,
             clear_color: ClearColorConfig::Custom(Color::srgb(0.02, 0.02, 0.06)),
             ..default()
         },
@@ -187,82 +157,55 @@ fn scene_child(commands: &mut Commands, assets: &AssetServer, file: &'static str
         .id()
 }
 
-/// The 2D camera draws when 3D is off and the other way round; the 3D one uses the
-/// same screen area (left of the side panel).
-pub fn cameras(
-    view: Res<View3d>,
-    mut flat: Query<&mut Camera, (With<WorldCamera>, Without<RoomCamera3d>)>,
-    mut deep: Query<&mut Camera, (With<RoomCamera3d>, Without<WorldCamera>)>,
-) {
-    let Ok(mut flat) = flat.single_mut() else { return };
-    if flat.is_active == view.on {
-        flat.is_active = !view.on;
-    }
-    if let Ok(mut deep) = deep.single_mut() {
-        if deep.is_active != view.on {
-            deep.is_active = view.on;
-        }
-        let same = match (&deep.viewport, &flat.viewport) {
-            (Some(a), Some(b)) => a.physical_position == b.physical_position && a.physical_size == b.physical_size,
-            (None, None) => true,
-            _ => false,
-        };
-        if !same {
-            deep.viewport = flat.viewport.clone();
-        }
-    }
-}
-
-type Characters<'w, 's> = Query<'w, 's, (Entity, &'static Accent, &'static Pose), (With<Agent>, Without<Avatar>)>;
-type Avatars<'w, 's> = Query<'w, 's, (Entity, &'static mut Avatar, &'static mut Transform), Without<Agent>>;
-
-/// Gives every 2D character and desk a 3D stand-in, moves them, drops stale ones.
+/// Plays the director: every robot of the shown session walks to its place and plays
+/// the clip for its pose; new agents get a robot, finished ones leave once their
+/// report is handed over, and robots of other sessions go.
 #[allow(clippy::too_many_arguments)]
 pub fn sync(
     mut commands: Commands,
     mut view: ResMut<View3d>,
     time: Res<Time>,
     assets: Res<AssetServer>,
-    roster: Res<Roster>,
-    characters: Characters,
-    mut avatars: Avatars,
+    model: Res<Model>,
+    mut avatars: Query<(Entity, &mut Avatar, &mut Transform)>,
     clips: Option<Res<Clips>>,
     mut players: Query<(&mut AnimationPlayer, &mut AnimationTransitions)>,
 ) {
-    if !view.on {
-        return;
+    // The systems after this one report movement afresh every frame.
+    view.moving = false;
+    // Before any session, Claude waits at its desk.
+    let cast = model.shown().map_or_else(|| director::cast(&Default::default()), director::cast);
+    let roles: HashMap<Who, Role> = cast.into_iter().map(|role| (role.who.clone(), role)).collect();
+    let session_id = model.shown().map_or("", |session| session.id.as_str());
+    // Who stays, with what to do now.
+    let mut staying: Vec<(Entity, Location)> = Vec::new();
+    for (entity, mut avatar, _) in &mut avatars {
+        let role = roles.get(&avatar.who).filter(|_| avatar.session == session_id);
+        let Some(role) = role.filter(|_| !(avatar.done && avatar.reported)) else {
+            commands.entity(entity).despawn();
+            continue;
+        };
+        avatar.pose = role.pose;
+        avatar.done = role.done;
+        let place = director::location_for(role.pose, avatar.who == Who::Main, avatar.at);
+        staying.push((entity, place));
     }
-    let main = roster.character(&Who::Main);
-    // Where everyone wants to be; several at one place stand side by side.
-    let mut wanted: Vec<(Entity, Location)> = avatars
-        .iter()
-        .filter_map(|(entity, avatar, _)| {
-            let (_, _, pose) = characters.get(avatar.of).ok()?;
-            Some((entity, location_for(*pose, Some(avatar.of) == main, avatar.at)))
-        })
-        .collect();
-    wanted.sort_by_key(|(entity, location)| (*location as u8, entity.to_bits()));
+    // Several at one place stand side by side.
+    staying.sort_by_key(|(entity, location)| (*location as u8, entity.to_bits()));
     let mut slots: HashMap<Entity, (Location, usize)> = HashMap::new();
     let mut count: HashMap<Location, usize> = HashMap::new();
-    for (entity, location) in wanted {
+    for (entity, location) in staying {
         let slot = count.entry(location).or_default();
         slots.insert(entity, (location, *slot));
         *slot += 1;
     }
-    let mut have: HashMap<Entity, ()> = HashMap::new();
     for (avatar_entity, mut avatar, mut transform) in &mut avatars {
-        let Ok((_, _, pose)) = characters.get(avatar.of) else {
-            commands.entity(avatar_entity).despawn();
-            continue;
-        };
-        have.insert(avatar.of, ());
         let Some(&(location, slot)) = slots.get(&avatar_entity) else { continue };
         avatar.at = location;
         // Claude has its own spot at the main desk; sub-agents there stand in front of
         // the platform, facing it.
-        let is_main = Some(avatar.of) == main;
         let (target, face) = match location {
-            Location::MainDesk if is_main => location.work_spot(0),
+            Location::MainDesk if avatar.who == Who::Main => location.work_spot(0),
             Location::MainDesk => (visitor_spot(slot), PI),
             _ => location.work_spot(slot),
         };
@@ -289,7 +232,7 @@ pub fn sync(
         let act = if walking {
             Act::Walk
         } else {
-            match pose {
+            match avatar.pose {
                 Pose::Idle => Act::Idle,
                 Pose::Waiting => Act::Wave,
                 Pose::Thinking => Act::Think,
@@ -307,17 +250,31 @@ pub fn sync(
             avatar.playing = Some(act);
         }
     }
-    for (entity, accent, _) in &characters {
-        if have.contains_key(&entity) {
+    // Newcomers: Claude starts at its desk; a new sub-agent appears beside it to get
+    // its task. Agents that finished before the room saw them get no robot.
+    for role in roles.values() {
+        if role.done || avatars.iter().any(|(_, avatar, _)| avatar.who == role.who && avatar.session == session_id) {
             continue;
         }
-        let is_main = Some(entity) == main;
-        let (scale, glow) = if is_main { (1.6, MAIN_GLOW) } else { (1.3, accent.0.to_linear() * 3.0) };
-        // Claude starts at its desk; a new sub-agent appears beside it to get its task.
+        let is_main = role.who == Who::Main;
+        let (scale, glow) = if is_main { (1.6, MAIN_GLOW) } else { (1.3, role.accent.to_linear() * 3.0) };
         let start = if is_main { Location::MainDesk.work_spot(0).0 } else { visitor_spot(0) };
         let avatar = commands
             .spawn((
-                Avatar { of: entity, rig: Rig::Robot, glow, accent: accent.0, player: None, playing: None, reported: false, at: Location::MainDesk },
+                Avatar {
+                    who: role.who.clone(),
+                    session: session_id.to_owned(),
+                    pose: role.pose,
+                    done: false,
+                    handing: 0.0,
+                    rig: Rig::Robot,
+                    glow,
+                    accent: role.accent,
+                    player: None,
+                    playing: None,
+                    reported: false,
+                    at: Location::MainDesk,
+                },
                 Transform::from_translation(start).with_scale(Vec3::splat(scale)),
                 Visibility::default(),
             ))
@@ -329,22 +286,6 @@ pub fn sync(
 
 /// A robot's walking pace (metres per second).
 const WALK_SPEED: f32 = 1.8;
-
-/// Where a robot goes for what it is doing (PLAN.md M17), given where it is now.
-/// Claude thinks or waits where it stands (a new message no longer sends it back to
-/// the centre; it says "On it!" on the spot) and goes home only when the turn ends.
-/// Sub-agents waiting, getting their task or bringing a report go to the main desk
-/// (to its visitor spots).
-fn location_for(pose: Pose, is_main: bool, now: Location) -> Location {
-    match pose {
-        Pose::Reading => Location::FileReading,
-        Pose::Web => Location::Bookshelf,
-        Pose::Typing => Location::WritingDesk,
-        Pose::Terminal => Location::Lab,
-        Pose::Thinking | Pose::Waiting if is_main => now,
-        Pose::Idle | Pose::Thinking | Pose::Delegating | Pose::Waiting | Pose::Reporting => Location::MainDesk,
-    }
-}
 
 /// Where a sub-agent stands at the main desk: in front of the platform, facing Claude.
 fn visitor_spot(slot: usize) -> Vec3 {
@@ -362,32 +303,30 @@ pub(crate) struct Document;
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub fn deliver(
     mut commands: Commands,
-    view: Res<View3d>,
     time: Res<Time>,
-    roster: Res<Roster>,
-    characters: Query<&Pose, With<Agent>>,
     mut avatars: Query<(&mut Avatar, &Transform), Without<Document>>,
     mut documents: Query<(Entity, &mut Transform), With<Document>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    if !view.on {
-        return;
-    }
-    let main = roster.character(&Who::Main);
     let desk = Location::MainDesk.work_spot(0).0;
-    let main_at_desk = avatars.iter().any(|(avatar, at)| Some(avatar.of) == main && at.translation.distance(desk) < 0.15);
+    let main_at_desk = avatars.iter().any(|(avatar, at)| avatar.who == Who::Main && at.translation.distance(desk) < 0.15);
     let mut left = documents.iter().count();
     for (mut avatar, at) in &mut avatars {
-        if Some(avatar.of) == main {
+        if avatar.who == Who::Main {
             continue;
         }
-        let reporting = characters.get(avatar.of).is_ok_and(|pose| *pose == Pose::Reporting);
-        if !reporting {
+        if avatar.pose != Pose::Reporting {
             avatar.reported = false;
+            avatar.handing = 0.0;
             continue;
         }
         let arrived = (0..8).any(|slot| at.translation.distance(visitor_spot(slot)) < 0.15);
+        // Claude is there: hand it over in person (the handover clip), then it's done.
+        if arrived && !avatar.reported && main_at_desk {
+            avatar.handing += time.delta_secs();
+            avatar.reported = avatar.handing >= HANDOVER_SECS;
+        }
         if arrived && !avatar.reported && !main_at_desk {
             avatar.reported = true;
             let glow = materials.add(StandardMaterial {
@@ -419,6 +358,9 @@ pub fn deliver(
         at.rotation = Quat::from_rotation_y(t * 0.6);
     }
 }
+
+/// How long an in-person hand-over takes.
+const HANDOVER_SECS: f32 = 1.6;
 
 /// Once a robot is in the world: start its animations and give it its colour.
 #[allow(clippy::too_many_arguments)]
@@ -473,31 +415,16 @@ fn prepare_avatar(
     }
 }
 
-/// Names and what each one is doing above the 3D characters, and the 2D/3D switch.
-#[allow(clippy::too_many_arguments)]
+/// Station signs, and names with what each one is doing above the robots.
 pub fn labels(
     mut contexts: EguiContexts,
-    view: Res<View3d>,
     mode: Res<crate::mini::ViewMode>,
-    mut toggle: MessageWriter<Toggle3d>,
     model: Res<Model>,
-    roster: Res<Roster>,
     camera: Query<(&Camera, &GlobalTransform), With<RoomCamera3d>>,
     avatars: Query<(&Avatar, &GlobalTransform)>,
     mut selected: ResMut<crate::hud::Selected>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
-    if !mode.mini {
-        egui::Area::new("view-switch".into()).anchor(egui::Align2::LEFT_TOP, egui::vec2(8.0, 8.0)).show(ctx, |ui| {
-            let label = if view.on { "2D" } else { "3D" };
-            if ui.small_button(label).on_hover_text("Switch between the 2D and 3D room (3)").clicked() {
-                toggle.write(Toggle3d);
-            }
-        });
-    }
-    if !view.on {
-        return Ok(());
-    }
     let Ok((camera, camera_at)) = camera.single() else { return Ok(()) };
     let offset = camera.logical_viewport_rect().map_or(Vec2::ZERO, |rect| rect.min);
     // A sign over each location, in its colour.
@@ -529,22 +456,19 @@ pub fn labels(
             });
     }
     let Some(session) = model.shown() else { return Ok(()) };
-    let mut lines: HashMap<Entity, (String, Option<String>)> = HashMap::new();
-    if let Some(main) = roster.character(&Who::Main) {
-        lines.insert(main, ("Claude".to_owned(), session.main_doing.clone()));
-    }
-    for (id, info) in &session.agents {
-        if let Some(entity) = roster.character(&Who::Sub(id.clone())) {
-            lines.insert(entity, (info.agent_type.clone(), info.doing.clone()));
-        }
-    }
     for (avatar, at) in &avatars {
-        let Some((name, doing)) = lines.get(&avatar.of) else { continue };
+        let (name, doing) = match &avatar.who {
+            Who::Main => ("Claude", &session.main_doing),
+            Who::Sub(id) => match session.agent(id) {
+                Some(info) => (info.agent_type.as_str(), &info.doing),
+                None => continue,
+            },
+        };
         let lift = if mode.mini { 1.35 } else { 1.05 };
         let head = at.translation() + Vec3::Y * lift * at.scale().y;
         let Ok(screen) = camera.world_to_viewport(camera_at, head) else { continue };
         let screen = screen + offset;
-        egui::Area::new(egui::Id::new(("label3d", avatar.of)))
+        egui::Area::new(egui::Id::new(("label3d", &avatar.who)))
             .fixed_pos(egui::pos2(screen.x, screen.y))
             .pivot(egui::Align2::CENTER_BOTTOM)
             .interactable(true)
@@ -563,7 +487,7 @@ pub fn labels(
                 // Clicking a robot's label opens its details (`hud`).
                 let click = shown.response.interact(egui::Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
                 if click.clicked() {
-                    selected.0 = Some(avatar.of);
+                    selected.0 = Some(avatar.who.clone());
                 }
             });
     }
@@ -576,16 +500,11 @@ pub fn frame(
     mut view: ResMut<View3d>,
     mode: Res<crate::mini::ViewMode>,
     time: Res<Time>,
-    roster: Res<Roster>,
     avatars: Query<(&Avatar, &Transform), Without<RoomCamera3d>>,
     mut camera: Query<&mut Transform, With<RoomCamera3d>>,
 ) {
-    if !view.on {
-        return;
-    }
     let Ok(mut camera) = camera.single_mut() else { return };
-    let main = roster.character(&Who::Main);
-    let (eye, look) = match avatars.iter().find(|(avatar, _)| Some(avatar.of) == main) {
+    let (eye, look) = match avatars.iter().find(|(avatar, _)| avatar.who == Who::Main) {
         Some((_, at)) if mode.mini => (at.translation + Vec3::new(0.0, 3.0, 4.2), at.translation + Vec3::Y * 0.8),
         _ => (FULL_EYE, FULL_LOOK),
     };
@@ -631,20 +550,15 @@ fn holo_for(pose: Pose) -> Option<&'static str> {
 #[allow(clippy::type_complexity)]
 pub fn activity_holograms(
     mut commands: Commands,
-    view: Res<View3d>,
     time: Res<Time>,
     assets: Res<AssetServer>,
-    characters: Query<&Pose, With<Agent>>,
     avatars: Query<(Entity, &Avatar, &Transform), Without<ActivityHolo>>,
     mut holos: Query<(Entity, &mut ActivityHolo, &mut Transform)>,
 ) {
-    if !view.on {
-        return;
-    }
     let mut shown: HashMap<Entity, Pose> = HashMap::new();
     for (entity, mut holo, mut at) in &mut holos {
         let robot = avatars.get(holo.of).ok();
-        let pose = robot.and_then(|(_, avatar, _)| characters.get(avatar.of).ok()).copied();
+        let pose = robot.map(|(_, avatar, _)| avatar.pose);
         let walking = robot.is_some_and(|(_, avatar, _)| avatar.playing == Some(Act::Walk));
         if pose != Some(holo.pose) || walking {
             commands.entity(entity).despawn();
@@ -664,10 +578,9 @@ pub fn activity_holograms(
         if shown.contains_key(&robot) || avatar.playing == Some(Act::Walk) {
             continue;
         }
-        let Ok(pose) = characters.get(avatar.of) else { continue };
-        let Some(file) = holo_for(*pose) else { continue };
+        let Some(file) = holo_for(avatar.pose) else { continue };
         commands.spawn((
-            ActivityHolo { of: robot, pose: *pose, age: 0.0 },
+            ActivityHolo { of: robot, pose: avatar.pose, age: 0.0 },
             WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(file))),
             Transform::from_scale(Vec3::ZERO),
         ));
@@ -697,9 +610,6 @@ pub fn light_trails(
     mut since: Local<f32>,
     mut look: Local<Option<(Handle<Mesh>, Handle<StandardMaterial>)>>,
 ) {
-    if !view.on {
-        return;
-    }
     let dt = time.delta_secs();
     view.moving |= !dots.is_empty();
     for (entity, mut dot, mut at) in &mut dots {
@@ -779,16 +689,5 @@ mod tests {
         // Going onto the platform (Claude's own desk): straight in.
         let desk = Location::MainDesk.work_spot(0).0;
         assert_eq!(detour(Vec3::new(-6.0, 0.0, 0.0), desk), desk);
-    }
-
-    #[test]
-    fn claude_takes_a_new_message_where_it_stands() {
-        // A new prompt (Thinking) or a permission wait keeps Claude at the lab.
-        assert_eq!(location_for(Pose::Thinking, true, Location::Lab), Location::Lab);
-        assert_eq!(location_for(Pose::Waiting, true, Location::Lab), Location::Lab);
-        // The turn is over: home to the main desk.
-        assert_eq!(location_for(Pose::Idle, true, Location::Lab), Location::MainDesk);
-        // A sub-agent waiting still comes to the main desk.
-        assert_eq!(location_for(Pose::Waiting, false, Location::Lab), Location::MainDesk);
     }
 }

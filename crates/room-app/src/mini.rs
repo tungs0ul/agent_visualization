@@ -1,23 +1,18 @@
 //! Mini mode (PLAN.md M4c): a widget-sized window in the top-right corner with a
-//! frosted, see-through background, showing only Claude and the agents. Meant to sit
-//! beside the terminal or editor while you work. M toggles it.
+//! frosted backdrop, the camera following Claude's robot up close (`view3d::frame`).
+//! Meant to sit beside the terminal or editor while you work. M toggles it.
 
 use bevy::ecs::system::NonSendMarker;
 use bevy::prelude::*;
 use bevy::window::{Monitor, PrimaryMonitor, PrimaryWindow, RawHandleWrapper, WindowLevel, WindowPosition};
 use bevy_egui::input::EguiWantsInput;
 
-use crate::scene::{BACKDROP, Desk};
 use crate::window::SavedWindow;
 
 /// Logical size of the mini window.
 pub const MINI_SIZE: Vec2 = Vec2::new(320.0, 200.0);
 /// Logical gap to the screen's right edge and below the menu bar.
 const MINI_MARGIN: Vec2 = Vec2::new(12.0, 44.0);
-
-/// Room parts hidden in mini mode, where only the characters are drawn.
-#[derive(Component)]
-pub struct Furniture;
 
 #[derive(Resource, Default)]
 pub struct ViewMode {
@@ -66,17 +61,13 @@ pub fn drag(
     }
 }
 
-type RoomParts = Or<(With<Furniture>, With<Desk>)>;
-
-/// Applies a mode change to the window, the background and the room. Runs on the main
+/// Applies a mode change to the window and its backdrop. Runs on the main
 /// thread (`NonSendMarker`) because the glass is an AppKit view.
 pub fn apply_mode(
     _main_thread: NonSendMarker,
     mut mode: ResMut<ViewMode>,
     window: Single<(&mut Window, Option<&RawHandleWrapper>), With<PrimaryWindow>>,
     monitors: Query<&Monitor, With<PrimaryMonitor>>,
-    mut clear: ResMut<ClearColor>,
-    mut furniture: Query<&mut Visibility, RoomParts>,
 ) {
     if mode.applied == Some(mode.mini) {
         return;
@@ -99,7 +90,6 @@ pub fn apply_mode(
         window.window_level = WindowLevel::AlwaysOnTop;
         window.resolution.set(MINI_SIZE.x, MINI_SIZE.y);
         window.position = WindowPosition::At(top_right);
-        clear.0 = Color::NONE;
     } else {
         window.decorations = true;
         if let Some(full) = mode.full {
@@ -107,11 +97,6 @@ pub fn apply_mode(
             window.position = WindowPosition::At(IVec2::new(full.x, full.y));
             window.window_level = if full.on_top { WindowLevel::AlwaysOnTop } else { WindowLevel::Normal };
         }
-        clear.0 = BACKDROP;
-    }
-    let shown = if mode.mini { Visibility::Hidden } else { Visibility::Inherited };
-    for mut visibility in &mut furniture {
-        visibility.set_if_neq(shown);
     }
     #[cfg(target_os = "macos")]
     set_glass(handle, mode.mini);
@@ -139,15 +124,6 @@ pub fn settle_redraw(mut mode: ResMut<ViewMode>, mut redraw: MessageWriter<bevy:
         redraw.write(bevy::window::RequestRedraw);
     } else {
         mode.settle_until = None;
-    }
-}
-
-/// Desks of agents who arrive while in mini mode start hidden too.
-pub fn hide_new_desks(mode: Res<ViewMode>, mut desks: Query<&mut Visibility, Added<Desk>>) {
-    if mode.mini {
-        for mut visibility in &mut desks {
-            *visibility = Visibility::Hidden;
-        }
     }
 }
 

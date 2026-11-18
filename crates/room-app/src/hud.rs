@@ -15,8 +15,7 @@ use room_proto::event::AgentRef;
 
 use crate::log::{RoomLog, agent_label};
 use crate::model::{Model, Pose, Status, Who};
-use crate::scene::Roster;
-use crate::view3d::{RoomCamera3d, View3d};
+use crate::view3d::RoomCamera3d;
 
 /// The stages a turn goes through, as the bottom timeline shows them.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -59,9 +58,9 @@ pub struct Trace {
     busy: bool,
 }
 
-/// The robot whose details are open (its 2D character entity).
+/// The robot whose details are open.
 #[derive(Resource, Default)]
-pub struct Selected(pub Option<Entity>);
+pub struct Selected(pub Option<Who>);
 
 /// Poses of everyone still in the shown session: Claude first.
 fn poses(session: &crate::model::SessionState) -> Vec<Pose> {
@@ -121,17 +120,14 @@ pub fn ago(at: Instant) -> String {
 #[allow(clippy::too_many_arguments)]
 pub fn draw(
     mut contexts: EguiContexts,
-    view: Res<View3d>,
     mode: Res<crate::mini::ViewMode>,
     mut model: ResMut<Model>,
-    mut scene: MessageWriter<crate::scene::SceneChange>,
     log: Res<RoomLog>,
     trace: Res<Trace>,
-    roster: Res<Roster>,
     mut selected: ResMut<Selected>,
     camera: Query<&Camera, With<RoomCamera3d>>,
 ) -> Result {
-    if !view.on || mode.mini {
+    if mode.mini {
         return Ok(());
     }
     let Ok(camera) = camera.single() else { return Ok(()) };
@@ -170,15 +166,13 @@ pub fn draw(
             });
     }
     if let Some(id) = picked {
-        for change in model.show(&id) {
-            scene.write(crate::scene::SceneChange(change));
-        }
+        model.show(&id);
     }
 
     let Some(session) = model.shown() else { return Ok(()) };
 
-    // Title, top left (beside the 2D/3D switch).
-    egui::Area::new("hud-title".into()).fixed_pos(area.min + egui::vec2(48.0, 8.0)).interactable(false).show(ctx, |ui| {
+    // Title, top left.
+    egui::Area::new("hud-title".into()).fixed_pos(area.min + egui::vec2(8.0, 8.0)).interactable(false).show(ctx, |ui| {
         card().show(ui, |ui| {
             ui.label(egui::RichText::new("Agent Room").strong().size(16.0).color(WHITE));
             ui.label(egui::RichText::new(format!("HQ of {}", session.name())).small().color(DIM));
@@ -266,17 +260,14 @@ pub fn draw(
     // The clicked robot's details: status, task, what it does, report, history.
     // `AGENT_ROOM_SHOW_DETAILS=1` opens Claude's (screenshot tests can't click).
     if selected.0.is_none() && std::env::var_os("AGENT_ROOM_SHOW_DETAILS").is_some() {
-        selected.0 = roster.character(&Who::Main);
+        selected.0 = Some(Who::Main);
     }
-    let Some(entity) = selected.0 else { return Ok(()) };
-    let who = if roster.character(&Who::Main) == Some(entity) {
-        Some((AgentRef::Main, None))
-    } else {
-        session
-            .agents
-            .iter()
-            .find(|(id, _)| roster.character(&Who::Sub(id.clone())) == Some(entity))
-            .map(|(id, info)| (AgentRef::Sub { id: id.clone(), agent_type: info.agent_type.clone() }, Some(info)))
+    let who = match &selected.0 {
+        None => return Ok(()),
+        Some(Who::Main) => Some((AgentRef::Main, None)),
+        Some(Who::Sub(id)) => session
+            .agent(id)
+            .map(|info| (AgentRef::Sub { id: id.clone(), agent_type: info.agent_type.clone() }, Some(info))),
     };
     let Some((agent, info)) = who else {
         selected.0 = None;

@@ -302,28 +302,6 @@ fn first_prompt(path: &std::path::Path) -> Option<(String, bool)> {
     })
 }
 
-/// A click on Claude (the main character) opens the chat for the session shown.
-pub fn open_on_claude_click(
-    mut clicks: MessageReader<crate::camera::RoomClick>,
-    roster: Res<crate::scene::Roster>,
-    characters: Query<&GlobalTransform>,
-    model: Res<crate::model::Model>,
-    mut chats: ResMut<Chats>,
-) {
-    let Some(click) = clicks.read().last() else { return };
-    let Some(claude) = roster.character(&crate::model::Who::Main).and_then(|e| characters.get(e).ok()) else {
-        return;
-    };
-    // The body and head sit above the character's origin.
-    let body = claude.translation().truncate() + Vec2::new(0.0, 25.0);
-    if click.0.distance(body) < CLICK_RADIUS {
-        chats.open_for(model.shown().and_then(|session| session.cwd.as_deref()));
-    }
-}
-
-/// How close (room units) to Claude a click must land.
-const CLICK_RADIUS: f32 = 60.0;
-
 pub fn read_chats(mut chats: ResMut<Chats>, server: Res<crate::server::Server>) {
     if let Some(session) = chats.session.as_mut() {
         session.read();

@@ -1459,3 +1459,11 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   active from 35 % to 22 %. Active unfocused is still over the 10 % budget; the next
   lever is deleting 2D (phase 1). A subagent is making the teleporter model
   (`tools/blender/teleporter.py`). **Next:** phase 1 (Director, delete 2D).
+- 2026-11-18, Claude Opus 5.5 (V2 phase 1): 2D deleted on the user's request ("we can
+  remove 2d completely"). `director.rs` turns the model into robot roles and places
+  (tested with a recorded turn); `view3d` plays them, keyed by agent and session; the
+  3D camera owns the viewport the panels leave free; panels use the director's
+  colours and one dark style. Removed scene/anim/camera/theme, lyon and the Nunito
+  font. Measured: active 22.7 % to 14.8 %, idle 9 % to 5.3 %, memory about 270 MB.
+  Screenshots of the full view checked; mini mode not re-checked (screen was locked).
+  **Next:** check mini mode; phase 2 (stations) or the active-power levers in V2.md.
