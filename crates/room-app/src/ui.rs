@@ -359,13 +359,15 @@ fn final_answer_popup(ctx: &egui::Context, log: &mut RoomLog, markdown: &mut Mar
     let Some(text) = log.final_answer.as_ref().filter(|answer| answer.open).map(|answer| answer.text.clone()) else {
         return;
     };
-    let mut close = false;
+    let mut close = ctx.input(|input| input.key_pressed(egui::Key::Escape));
+    let mut open = true;
     let size = ctx.viewport_rect().size() * FINAL_ANSWER_SHARE;
     egui::Window::new("Claude")
         .id("final-answer".into())
         .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
         .collapsible(false)
         .resizable(false)
+        .open(&mut open)
         .fixed_size(size)
         .show(ctx, |ui| {
             // Larger, comfortable reading text; smaller in the mini widget.
@@ -382,18 +384,21 @@ fn final_answer_popup(ctx: &egui::Context, log: &mut RoomLog, markdown: &mut Mar
                 }
             }
             style.spacing.item_spacing.y = 8.0;
-            egui::ScrollArea::vertical()
+            // Both ways: a wide table or code block scrolls inside the window instead
+            // of stretching it off screen (and its Close button with it).
+            egui::ScrollArea::both()
                 .max_height(size.y - if mini { 40.0 } else { 56.0 })
+                .max_width(size.x)
                 .auto_shrink(false)
                 .show(ui, |ui| {
                     egui_commonmark::CommonMarkViewer::new().show(ui, &mut markdown.0, &text);
                 });
             ui.separator();
-            if ui.button("Close").clicked() {
+            if ui.button("Close").on_hover_text("Close (Esc)").clicked() {
                 close = true;
             }
         });
-    if close && let Some(answer) = log.final_answer.as_mut() {
+    if (close || !open) && let Some(answer) = log.final_answer.as_mut() {
         answer.open = false;
     }
 }

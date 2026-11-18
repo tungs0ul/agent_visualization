@@ -89,6 +89,10 @@ fn main() -> AppExit {
         .insert_resource(RenderErrorHandler(|_, _, _| RenderErrorPolicy::Ignore))
         .add_plugins(
             DefaultPlugins
+                // No sound yet: Bevy's audio keeps an output stream open, which keeps
+                // macOS's audio service busy all the time (V2.md phase 0).
+                .build()
+                .disable::<bevy::audio::AudioPlugin>()
                 .set(WindowPlugin { primary_window: Some(window::initial_window(saved)), ..default() })
                 // The 3D models (PLAN.md M15) live in the checkout's `assets/`.
                 // Three threads, not one per core: waking a big pool every frame cost more

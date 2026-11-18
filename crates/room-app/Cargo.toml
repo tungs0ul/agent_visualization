@@ -21,11 +21,3 @@ egui_commonmark = "0.25"
 crossbeam-channel = "0.5"
 # The app's own CPU and memory in the stats overlay (already built for Bevy).
 sysinfo = { version = "0.39", default-features = false, features = ["system"] }
-
-[target.'cfg(target_os = "macos")'.dependencies]
-# The frosted widget background of mini mode: an NSVisualEffectView placed behind
-# Bevy's view (see mini.rs).
-objc2 = "0.6"
-objc2-app-kit = { version = "0.3", features = ["NSView", "NSResponder", "NSVisualEffectView", "NSGraphics"] }
-objc2-foundation = { version = "0.3", features = ["NSGeometry"] }
-raw-window-handle = "0.6"

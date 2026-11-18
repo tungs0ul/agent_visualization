@@ -1,8 +1,7 @@
 //! Mini mode (PLAN.md M4c): a widget-sized window in the top-right corner with a
-//! frosted backdrop, the camera following Claude's robot up close (`view3d::frame`).
+//! the camera following Claude's robot up close (`view3d::frame`).
 //! Meant to sit beside the terminal or editor while you work. M toggles it.
 
-use bevy::ecs::system::NonSendMarker;
 use bevy::prelude::*;
 use bevy::window::{Monitor, PrimaryMonitor, PrimaryWindow, RawHandleWrapper, WindowLevel, WindowPosition};
 use bevy_egui::input::EguiWantsInput;
@@ -62,9 +61,9 @@ pub fn drag(
 }
 
 /// Applies a mode change to the window and its backdrop. Runs on the main
-/// thread (`NonSendMarker`) because the glass is an AppKit view.
+/// (The 3D view paints an opaque background in both modes, so the window needs no
+/// see-through glass.)
 pub fn apply_mode(
-    _main_thread: NonSendMarker,
     mut mode: ResMut<ViewMode>,
     window: Single<(&mut Window, Option<&RawHandleWrapper>), With<PrimaryWindow>>,
     monitors: Query<&Monitor, With<PrimaryMonitor>>,
@@ -74,7 +73,9 @@ pub fn apply_mode(
     }
     let (mut window, handle) = window.into_inner();
     // The native window (and its handle) appears a few frames after startup.
-    let Some(handle) = handle else { return };
+    if handle.is_none() {
+        return;
+    }
     let Ok(monitor) = monitors.single() else { return };
 
     if mode.mini {
@@ -98,10 +99,6 @@ pub fn apply_mode(
             window.window_level = if full.on_top { WindowLevel::AlwaysOnTop } else { WindowLevel::Normal };
         }
     }
-    #[cfg(target_os = "macos")]
-    set_glass(handle, mode.mini);
-    #[cfg(not(target_os = "macos"))]
-    let _ = handle;
 
     if let Some(mut saved) = mode.full {
         saved.mini = mode.mini;
@@ -125,53 +122,4 @@ pub fn settle_redraw(mut mode: ResMut<ViewMode>, mut redraw: MessageWriter<bevy:
     } else {
         mode.settle_until = None;
     }
-}
-
-#[cfg(target_os = "macos")]
-thread_local! {
-    /// The frosted view while mini mode is on (AppKit objects live on the main thread).
-    static GLASS: std::cell::RefCell<Option<objc2::rc::Retained<objc2_app_kit::NSVisualEffectView>>> =
-        const { std::cell::RefCell::new(None) };
-}
-
-/// The backdrop behind Bevy's view: frosted in mini mode (`on`), opaque otherwise. A
-/// frosted NSVisualEffectView *behind* Bevy's view. It has to be a sibling below
-/// Bevy's view, in its superview: inside Bevy's view it would sit above the Metal layer
-/// and blur the room itself (what `window-vibrancy` did).
-#[cfg(target_os = "macos")]
-fn set_glass(handle: &RawHandleWrapper, on: bool) {
-    use objc2::{MainThreadMarker, MainThreadOnly};
-    use objc2_app_kit::{
-        NSAutoresizingMaskOptions, NSView, NSVisualEffectBlendingMode, NSVisualEffectMaterial, NSVisualEffectState,
-        NSVisualEffectView, NSWindowOrderingMode,
-    };
-    GLASS.with_borrow_mut(|glass| {
-        if let Some(old) = glass.take() {
-            old.removeFromSuperview();
-        }
-        let raw_window_handle::RawWindowHandle::AppKit(handle) = handle.get_window_handle() else { return };
-        // `apply_mode` runs on the main thread (`NonSendMarker`).
-        let Some(main_thread) = MainThreadMarker::new() else { return };
-        // SAFETY: the handle points at the live NSView of our window.
-        let view: &NSView = unsafe { handle.ns_view.cast::<NSView>().as_ref() };
-        // SAFETY: plain AppKit getter, on the main thread.
-        let Some(container) = (unsafe { view.superview() }) else { return };
-        let effect = NSVisualEffectView::initWithFrame(NSVisualEffectView::alloc(main_thread), container.bounds());
-        // Mini: frosted glass showing the desktop. Full view: the window is still
-        // see-through (it's created transparent), so give it the standard opaque window
-        // background, or the title bar shows the desktop.
-        if on {
-            effect.setMaterial(NSVisualEffectMaterial::Popover);
-            effect.setBlendingMode(NSVisualEffectBlendingMode::BehindWindow);
-        } else {
-            effect.setMaterial(NSVisualEffectMaterial::WindowBackground);
-            effect.setBlendingMode(NSVisualEffectBlendingMode::WithinWindow);
-        }
-        effect.setState(NSVisualEffectState::Active);
-        effect.setAutoresizingMask(NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewHeightSizable);
-        // Bottom of the whole stack: below Bevy's view *and* the title bar with the
-        // close/minimise/zoom buttons, which it would otherwise cover.
-        container.addSubview_positioned_relativeTo(&effect, NSWindowOrderingMode::Below, None);
-        *glass = Some(effect);
-    });
 }

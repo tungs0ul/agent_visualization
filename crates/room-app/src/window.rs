@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use bevy::prelude::*;
 use bevy::render::view::window::screenshot::{Screenshot, save_to_disk};
 use bevy::window::{
-    CompositeAlphaMode, Monitor, MonitorSelection, PrimaryMonitor, PrimaryWindow, WindowLevel, WindowMode, WindowMoved, WindowPosition,
+    Monitor, MonitorSelection, PrimaryMonitor, PrimaryWindow, WindowLevel, WindowMode, WindowMoved, WindowPosition,
     WindowResized, WindowResolution,
 };
 use bevy_egui::input::EguiWantsInput;
@@ -94,10 +94,6 @@ pub fn initial_window(saved: Option<SavedWindow>) -> Window {
         title: "Agent Room".into(),
         resolution,
         resizable: true,
-        // Always created see-through so mini mode can show the glass behind it; the
-        // full view paints an opaque background over it (`mini::apply_mode`).
-        transparent: true,
-        composite_alpha_mode: CompositeAlphaMode::PostMultiplied,
         decorations: !mini,
         window_level: if mini || saved.is_none_or(|s| s.on_top) { WindowLevel::AlwaysOnTop } else { WindowLevel::Normal },
         position: saved.map_or(WindowPosition::Automatic, |s| WindowPosition::At(IVec2::new(s.x, s.y))),
