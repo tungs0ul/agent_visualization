@@ -114,6 +114,8 @@ pub struct SessionState {
     briefs: HashMap<String, String>,
     /// Order of last activity across sessions (higher is more recent).
     last_seen: u64,
+    /// When the app first heard of it (event count): a stable order for seats.
+    first_seen: u64,
 }
 
 impl SessionState {
@@ -188,6 +190,18 @@ impl Model {
         changes
     }
 
+    /// Sessions the HQ shows robots for: live ones the user works in, oldest first, so
+    /// every session keeps its seat at the main desk (V2.md phase 3b).
+    pub fn live(&self) -> Vec<&SessionState> {
+        let mut live: Vec<_> = self.sessions.values().filter(|session| !session.ended && !session.headless).collect();
+        live.sort_by_key(|session| session.first_seen);
+        live
+    }
+
+    pub fn session(&self, id: &str) -> Option<&SessionState> {
+        self.sessions.get(id)
+    }
+
     pub fn shown(&self) -> Option<&SessionState> {
         self.shown.as_ref().and_then(|id| self.sessions.get(id))
     }
@@ -210,8 +224,10 @@ impl Model {
 
     pub fn apply(&mut self, event: &RoomEvent) -> Vec<Change> {
         let mut changes = Vec::new();
+        let first_seen = self.events_seen + 1;
         let session = self.sessions.entry(event.session_id.clone()).or_insert_with(|| SessionState {
             id: event.session_id.clone(),
+            first_seen,
             ..default()
         });
         if event.cwd.is_some() {

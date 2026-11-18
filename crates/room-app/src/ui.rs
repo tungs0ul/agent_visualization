@@ -207,7 +207,7 @@ pub fn draw(
 
     // The oldest permission card also floats next to whoever asks (PLAN.md M4e).
     if let Some(index) = log.pending.iter().position(|card| model.shown().is_some_and(|s| s.id == card.session))
-        && let Some(at) = in_room.screen_position(&camera, &log.pending[index].who)
+        && let Some(at) = in_room.screen_position(&camera, &log.pending[index].session, &log.pending[index].who)
     {
         let card = &log.pending[index];
         let enabled = card.accepts_input(now);
@@ -262,8 +262,8 @@ pub struct InRoom<'w, 's> {
 
 impl InRoom<'_, '_> {
     /// Logical window position just above the character's head.
-    fn screen_position(&self, camera: &Camera, who: &Who) -> Option<Vec2> {
-        let (_, robot) = self.robots.iter().find(|(avatar, _)| avatar.who == *who)?;
+    fn screen_position(&self, camera: &Camera, session: &str, who: &Who) -> Option<Vec2> {
+        let (_, robot) = self.robots.iter().find(|(avatar, _)| avatar.who == *who && avatar.session == session)?;
         let camera_transform = self.camera.single().ok()?;
         let head = robot.translation() + Vec3::Y * 1.1 * robot.scale().y;
         let offset = camera.logical_viewport_rect().map_or(Vec2::ZERO, |rect| rect.min);

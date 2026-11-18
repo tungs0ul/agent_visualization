@@ -19,7 +19,7 @@ use bevy_egui::{EguiContexts, egui};
 
 use crate::director::{self, Role};
 use crate::model::{Model, Pose, Who};
-use crate::world3d::{INBOX, Location};
+use crate::world3d::{INBOX, Location, TELEPORTER, TELEPORTER_DECK};
 
 /// The robot every agent is (`tools/blender/robot.py`): 1 m tall, facing +z.
 const ROBOT: &str = "models/robot/robot.glb";
@@ -55,11 +55,33 @@ pub(crate) enum Rig {
     Robot,
 }
 
+/// A robot's life in the HQ: it beams in on the teleporter, works, and when its
+/// session ends (or, for a sub-agent, after its hand-over) walks back and beams out.
+/// Newest wins: a session that comes back while its robot walks away keeps it.
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Presence {
+    /// Materialising; negative while it waits for the robots beaming in before it.
+    Arriving(f32),
+    Here,
+    /// Walking back to the teleporter, to wait round it.
+    Departing,
+    /// Stepping onto the deck to beam out.
+    Boarding,
+    /// Dematerialising.
+    Leaving(f32),
+}
+
+/// How long beaming in or out takes.
+const BEAM_SECS: f32 = 1.4;
+
 #[derive(Component)]
 pub(crate) struct Avatar {
     /// The agent it is, in which session.
     pub(crate) who: Who,
-    session: String,
+    pub(crate) session: String,
+    presence: Presence,
+    /// Its full size (Claude is bigger).
+    size: f32,
     /// What it does now (from the director).
     pose: Pose,
     /// A sub-agent that has stopped: it hands its report over, then leaves.
@@ -157,9 +179,9 @@ fn scene_child(commands: &mut Commands, assets: &AssetServer, file: &'static str
         .id()
 }
 
-/// Plays the director: every robot of the shown session walks to its place and plays
-/// the clip for its pose; new agents get a robot, finished ones leave once their
-/// report is handed over, and robots of other sessions go.
+/// Plays the director: every robot walks to its place and plays the clip for its
+/// pose; new agents beam in, and agents whose session ended (or sub-agents done with
+/// their hand-over) walk to the teleporter and beam out.
 #[allow(clippy::too_many_arguments)]
 pub fn sync(
     mut commands: Commands,
@@ -173,41 +195,102 @@ pub fn sync(
 ) {
     // The systems after this one report movement afresh every frame.
     view.moving = false;
-    // Before any session, Claude waits at its desk.
-    let cast = model.shown().map_or_else(|| director::cast(&Default::default()), director::cast);
-    let roles: HashMap<Who, Role> = cast.into_iter().map(|role| (role.who.clone(), role)).collect();
-    let session_id = model.shown().map_or("", |session| session.id.as_str());
-    // Who stays, with what to do now.
-    let mut staying: Vec<(Entity, Location)> = Vec::new();
-    for (entity, mut avatar, _) in &mut avatars {
-        let role = roles.get(&avatar.who).filter(|_| avatar.session == session_id);
-        let Some(role) = role.filter(|_| !(avatar.done && avatar.reported)) else {
-            commands.entity(entity).despawn();
-            continue;
+    let dt = time.delta_secs();
+    let roles: HashMap<(String, Who), Role> =
+        director::cast_all(&model).into_iter().map(|role| ((role.session.clone(), role.who.clone()), role)).collect();
+    // The Claude that waited before any session becomes the first session's Claude.
+    for (_, mut avatar, _) in &mut avatars {
+        if avatar.session.is_empty()
+            && avatar.who == Who::Main
+            && !roles.contains_key(&(String::new(), Who::Main))
+            && let Some(role) = roles.values().find(|role| role.who == Who::Main && role.seat == 0)
+        {
+            avatar.session = role.session.clone();
+        }
+    }
+    // Who stays and where it goes.
+    let mut wanted: Vec<(Entity, Location)> = Vec::new();
+    let mut seats: HashMap<Entity, usize> = HashMap::new();
+    for (entity, mut avatar, mut transform) in &mut avatars {
+        let role = roles.get(&(avatar.session.clone(), avatar.who.clone()));
+        let leave = role.is_none_or(|role| role.done && avatar.reported);
+        avatar.presence = match avatar.presence {
+            Presence::Arriving(t) if t >= BEAM_SECS => Presence::Here,
+            Presence::Arriving(t) => Presence::Arriving(t + dt),
+            Presence::Here if leave => Presence::Departing,
+            Presence::Departing | Presence::Boarding if !leave => Presence::Here,
+            Presence::Leaving(t) if t >= BEAM_SECS => {
+                commands.entity(entity).despawn();
+                continue;
+            }
+            Presence::Leaving(t) => Presence::Leaving(t + dt),
+            other => other,
         };
-        avatar.pose = role.pose;
-        avatar.done = role.done;
-        let place = director::location_for(role.pose, avatar.who == Who::Main, avatar.at);
-        staying.push((entity, place));
+        // Beaming: grow in or shrink away on the deck, nothing else.
+        if let Presence::Arriving(t) | Presence::Leaving(t) = avatar.presence {
+            let grown = (t / BEAM_SECS).clamp(0.0, 1.0);
+            let grown = if matches!(avatar.presence, Presence::Leaving(_)) { 1.0 - grown } else { grown };
+            transform.scale = Vec3::splat(avatar.size * grown.max(0.001));
+            view.moving = true;
+            continue;
+        }
+        transform.scale = Vec3::splat(avatar.size);
+        if let Some(role) = role {
+            avatar.pose = role.pose;
+            avatar.done = role.done;
+            seats.insert(entity, role.seat);
+        }
+        if avatar.presence == Presence::Here {
+            let place = director::location_for(avatar.pose, avatar.who == Who::Main, avatar.at);
+            wanted.push((entity, place));
+        }
     }
     // Several at one place stand side by side.
-    staying.sort_by_key(|(entity, location)| (*location as u8, entity.to_bits()));
+    wanted.sort_by_key(|(entity, location)| (*location as u8, entity.to_bits()));
     let mut slots: HashMap<Entity, (Location, usize)> = HashMap::new();
     let mut count: HashMap<Location, usize> = HashMap::new();
-    for (entity, location) in staying {
+    for (entity, location) in wanted {
         let slot = count.entry(location).or_default();
         slots.insert(entity, (location, *slot));
         *slot += 1;
     }
+    let deck = TELEPORTER + Vec3::Y * TELEPORTER_DECK;
+    // One robot on the deck at a time: the others wait round it, and the first to
+    // arrive there beams out next.
+    let mut deck_taken = avatars.iter().any(|(_, avatar, _)| match avatar.presence {
+        Presence::Arriving(t) => t >= 0.0,
+        Presence::Leaving(_) | Presence::Boarding => true,
+        _ => false,
+    });
+    let mut departing: Vec<Entity> =
+        avatars.iter().filter(|(_, avatar, _)| avatar.presence == Presence::Departing).map(|(entity, _, _)| entity).collect();
+    departing.sort_by_key(|entity| entity.to_bits());
     for (avatar_entity, mut avatar, mut transform) in &mut avatars {
-        let Some(&(location, slot)) = slots.get(&avatar_entity) else { continue };
-        avatar.at = location;
-        // Claude has its own spot at the main desk; sub-agents there stand in front of
-        // the platform, facing it.
-        let (target, face) = match location {
-            Location::MainDesk if avatar.who == Who::Main => location.work_spot(0),
-            Location::MainDesk => (visitor_spot(slot), PI),
-            _ => location.work_spot(slot),
+        let (target, face) = match avatar.presence {
+            Presence::Boarding => (deck, 0.0),
+            Presence::Departing => {
+                let place = departing.iter().position(|entity| *entity == avatar_entity).unwrap_or(0);
+                let waiting = TELEPORTER + Quat::from_rotation_y(0.9 + 0.7 * place as f32) * Vec3::new(0.0, 0.0, 2.0);
+                if !deck_taken && transform.translation.distance(waiting) < 0.1 {
+                    deck_taken = true;
+                    avatar.presence = Presence::Boarding;
+                }
+                (waiting, 0.0)
+            }
+            Presence::Here => {
+                let Some(&(location, slot)) = slots.get(&avatar_entity) else { continue };
+                avatar.at = location;
+                // Each session's Claude has its own seat at the main desk; sub-agents
+                // there stand in front of the platform, facing it.
+                match location {
+                    Location::MainDesk if avatar.who == Who::Main => {
+                        location.work_spot(seats.get(&avatar_entity).copied().unwrap_or(0))
+                    }
+                    Location::MainDesk => (visitor_spot(slot), PI),
+                    _ => location.work_spot(slot),
+                }
+            }
+            _ => continue,
         };
         // Walk there at a robot's pace.
         let here = transform.translation;
@@ -219,16 +302,19 @@ pub fn sync(
             // Around the main platform, not across it.
             let goal = detour(here, target) - here;
             let heading = Vec3::new(goal.x, 0.0, goal.z).normalize_or_zero();
-            let step = (WALK_SPEED * time.delta_secs()).min(flat.length());
+            let step = (WALK_SPEED * dt).min(flat.length());
             let next = here + heading * step;
             // Up or down a platform edge gradually.
             let y = here.y + (target.y - here.y) * (step / flat.length()).min(1.0);
             transform.translation = Vec3::new(next.x, y, next.z);
         } else {
             transform.translation = target;
+            if avatar.presence == Presence::Boarding && target == deck {
+                avatar.presence = Presence::Leaving(0.0);
+            }
         }
         let facing = if walking { Quat::from_rotation_y(transform_heading(here, transform.translation, flat)) } else { Quat::from_rotation_y(face) };
-        transform.rotation = transform.rotation.slerp(facing, (time.delta_secs() * 8.0).min(1.0));
+        transform.rotation = transform.rotation.slerp(facing, (dt * 8.0).min(1.0));
         let act = if walking {
             Act::Walk
         } else {
@@ -250,20 +336,24 @@ pub fn sync(
             avatar.playing = Some(act);
         }
     }
-    // Newcomers: Claude starts at its desk; a new sub-agent appears beside it to get
-    // its task. Agents that finished before the room saw them get no robot.
-    for role in roles.values() {
-        if role.done || avatars.iter().any(|(_, avatar, _)| avatar.who == role.who && avatar.session == session_id) {
+    // Newcomers beam in one after another (never two on the deck at once).
+    let mut queue = avatars.iter().filter(|(_, avatar, _)| matches!(avatar.presence, Presence::Arriving(_))).count();
+    let mut roles: Vec<&Role> = roles.values().collect();
+    roles.sort_by_key(|role| (role.seat, role.who != Who::Main));
+    for role in roles {
+        let present = avatars.iter().any(|(_, avatar, _)| avatar.who == role.who && avatar.session == role.session);
+        if role.done || present {
             continue;
         }
         let is_main = role.who == Who::Main;
-        let (scale, glow) = if is_main { (1.6, MAIN_GLOW) } else { (1.3, role.accent.to_linear() * 3.0) };
-        let start = if is_main { Location::MainDesk.work_spot(0).0 } else { visitor_spot(0) };
+        let (size, glow) = if is_main { (1.6, claude_glow(role.seat)) } else { (1.3, role.accent.to_linear() * 3.0) };
         let avatar = commands
             .spawn((
                 Avatar {
                     who: role.who.clone(),
-                    session: session_id.to_owned(),
+                    session: role.session.clone(),
+                    presence: Presence::Arriving(-(queue as f32) * BEAM_SECS),
+                    size,
                     pose: role.pose,
                     done: false,
                     handing: 0.0,
@@ -275,12 +365,76 @@ pub fn sync(
                     reported: false,
                     at: Location::MainDesk,
                 },
-                Transform::from_translation(start).with_scale(Vec3::splat(scale)),
+                Transform::from_translation(deck).with_scale(Vec3::splat(0.001)),
                 Visibility::default(),
             ))
             .id();
+        queue += 1;
         let model = scene_child(&mut commands, &assets, ROBOT, avatar);
         commands.entity(model).observe(prepare_avatar);
+    }
+}
+
+/// Each session's Claude glows in its own colour (the first one cyan).
+fn claude_glow(seat: usize) -> LinearRgba {
+    [MAIN_GLOW, LinearRgba::rgb(3.0, 0.5, 2.6), LinearRgba::rgb(0.8, 3.2, 0.9), LinearRgba::rgb(3.4, 1.8, 0.3)][seat % 4]
+}
+
+/// The teleporter's moving parts (named nodes in `teleporter.glb`).
+#[derive(Default)]
+pub struct TeleporterParts {
+    rings: Vec<(Entity, f32)>,
+    beam: Option<Entity>,
+    orbiters: Option<Entity>,
+}
+
+/// While a robot beams in or out, the teleporter's rings spin up, its orbiters
+/// circle and the beam shows; otherwise it rests (and costs no redraws).
+pub fn teleporter(
+    mut view: ResMut<View3d>,
+    time: Res<Time>,
+    avatars: Query<&Avatar>,
+    names: Query<(Entity, &Name)>,
+    mut parts: Query<(&mut Transform, &mut Visibility)>,
+    mut found: Local<TeleporterParts>,
+) {
+    if found.beam.is_none() {
+        for (entity, name) in &names {
+            match name.as_str() {
+                "Ring0" => found.rings.push((entity, 1.6)),
+                "Ring1" => found.rings.push((entity, -1.1)),
+                "Ring2" => found.rings.push((entity, 0.7)),
+                "Beam" => found.beam = Some(entity),
+                "Orbiters" => found.orbiters = Some(entity),
+                _ => {}
+            }
+        }
+        // Not loaded yet: try again next frame.
+        if found.beam.is_none() {
+            found.rings.clear();
+            return;
+        }
+    }
+    let active = avatars.iter().any(|avatar| matches!(avatar.presence, Presence::Arriving(t) | Presence::Leaving(t) if t >= 0.0));
+    if let Some(beam) = found.beam
+        && let Ok((_, mut visibility)) = parts.get_mut(beam)
+    {
+        visibility.set_if_neq(if active { Visibility::Inherited } else { Visibility::Hidden });
+    }
+    if !active {
+        return;
+    }
+    view.moving = true;
+    let dt = time.delta_secs();
+    for &(ring, speed) in &found.rings {
+        if let Ok((mut at, _)) = parts.get_mut(ring) {
+            at.rotate_y(speed * 3.0 * dt);
+        }
+    }
+    if let Some(orbiters) = found.orbiters
+        && let Ok((mut at, _)) = parts.get_mut(orbiters)
+    {
+        at.rotate_y(2.4 * dt);
     }
 }
 
@@ -309,13 +463,20 @@ pub fn deliver(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let desk = Location::MainDesk.work_spot(0).0;
-    let main_at_desk = avatars.iter().any(|(avatar, at)| avatar.who == Who::Main && at.translation.distance(desk) < 0.15);
+    // Sessions whose Claude stands at its seat on the main platform.
+    let at_desk: Vec<String> = avatars
+        .iter()
+        .filter(|(avatar, at)| {
+            avatar.who == Who::Main && avatar.presence == Presence::Here && at.translation.xz().length() < 2.0 && at.translation.y > 0.3
+        })
+        .map(|(avatar, _)| avatar.session.clone())
+        .collect();
     let mut left = documents.iter().count();
     for (mut avatar, at) in &mut avatars {
         if avatar.who == Who::Main {
             continue;
         }
+        let main_at_desk = at_desk.contains(&avatar.session);
         if avatar.pose != Pose::Reporting {
             avatar.reported = false;
             avatar.handing = 0.0;
@@ -345,7 +506,7 @@ pub fn deliver(
         }
     }
     // Claude is back: it takes the documents.
-    if main_at_desk {
+    if !at_desk.is_empty() {
         for (entity, _) in &documents {
             commands.entity(entity).despawn();
         }
@@ -419,7 +580,7 @@ fn prepare_avatar(
 pub fn labels(
     mut contexts: EguiContexts,
     mode: Res<crate::mini::ViewMode>,
-    model: Res<Model>,
+    mut model: ResMut<Model>,
     camera: Query<(&Camera, &GlobalTransform), With<RoomCamera3d>>,
     avatars: Query<(&Avatar, &GlobalTransform)>,
     mut selected: ResMut<crate::hud::Selected>,
@@ -455,12 +616,16 @@ pub fn labels(
                     });
             });
     }
-    let Some(session) = model.shown() else { return Ok(()) };
+    // With several sessions, each Claude's label names its project.
+    let several = model.live().len() > 1;
+    let mut picked = None;
     for (avatar, at) in &avatars {
+        let Some(session) = model.session(&avatar.session) else { continue };
         let (name, doing) = match &avatar.who {
-            Who::Main => ("Claude", &session.main_doing),
+            Who::Main if several => (format!("Claude · {}", session.name()), &session.main_doing),
+            Who::Main => ("Claude".to_owned(), &session.main_doing),
             Who::Sub(id) => match session.agent(id) {
-                Some(info) => (info.agent_type.as_str(), &info.doing),
+                Some(info) => (info.agent_type.clone(), &info.doing),
                 None => continue,
             },
         };
@@ -468,7 +633,7 @@ pub fn labels(
         let head = at.translation() + Vec3::Y * lift * at.scale().y;
         let Ok(screen) = camera.world_to_viewport(camera_at, head) else { continue };
         let screen = screen + offset;
-        egui::Area::new(egui::Id::new(("label3d", &avatar.who)))
+        egui::Area::new(egui::Id::new(("label3d", &avatar.session, &avatar.who)))
             .fixed_pos(egui::pos2(screen.x, screen.y))
             .pivot(egui::Align2::CENTER_BOTTOM)
             .interactable(true)
@@ -479,7 +644,7 @@ pub fn labels(
                     let tint = avatar.accent.to_srgba();
                     let color =
                         egui::Color32::from_rgb((tint.red * 255.0) as u8, (tint.green * 255.0) as u8, (tint.blue * 255.0) as u8);
-                    ui.label(egui::RichText::new(name).small().strong().color(color));
+                    ui.label(egui::RichText::new(name.as_str()).small().strong().color(color));
                     if let Some(doing) = doing {
                         ui.label(egui::RichText::new(doing).small());
                     }
@@ -488,8 +653,13 @@ pub fn labels(
                 let click = shown.response.interact(egui::Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
                 if click.clicked() {
                     selected.0 = Some(avatar.who.clone());
+                    picked = Some(avatar.session.clone());
                 }
             });
+    }
+    // Its session's panels come up with it.
+    if let Some(session) = picked {
+        model.show(&session);
     }
     Ok(())
 }
@@ -499,12 +669,15 @@ pub fn labels(
 pub fn frame(
     mut view: ResMut<View3d>,
     mode: Res<crate::mini::ViewMode>,
+    model: Res<Model>,
     time: Res<Time>,
     avatars: Query<(&Avatar, &Transform), Without<RoomCamera3d>>,
     mut camera: Query<&mut Transform, With<RoomCamera3d>>,
 ) {
     let Ok(mut camera) = camera.single_mut() else { return };
-    let (eye, look) = match avatars.iter().find(|(avatar, _)| avatar.who == Who::Main) {
+    let shown = model.shown().map_or("", |session| session.id.as_str());
+    let claude = avatars.iter().find(|(avatar, _)| avatar.who == Who::Main && avatar.session == shown);
+    let (eye, look) = match claude.or_else(|| avatars.iter().find(|(avatar, _)| avatar.who == Who::Main)) {
         Some((_, at)) if mode.mini => (at.translation + Vec3::new(0.0, 3.0, 4.2), at.translation + Vec3::Y * 0.8),
         _ => (FULL_EYE, FULL_LOOK),
     };

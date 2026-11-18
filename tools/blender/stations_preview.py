@@ -18,14 +18,13 @@ DIR = os.path.join(REPO, "assets", "models", "stations")
 ROBOT = os.path.join(REPO, "assets", "models", "robot", "robot.glb")
 args = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 out_dir = args[0] if args else "/tmp"
-names = args[1:] or ["main_desk", "bookshelf", "file_reading", "lab", "writing_desk", "plant",
+names = args[1:] or ["main_desk", "bookshelf", "lab", "writing_desk", "plant",
                      "wall_panel", "pillar", "document", "holograms"]
 
 # robot work spot per station, glTF (x, y, z) -> Blender (x, -z, y); yaw 180 = facing the station
 SPOTS = {
     "main_desk": ((0.0, 0.35, 0.0), 180),
     "bookshelf": ((0.0, 0.033, 1.3), 180),
-    "file_reading": ((0.0, 0.043, 0.85), 180),
     "lab": ((0.0, 0.053, 1.0), 180),
     "writing_desk": ((0.0, 0.043, 0.85), 180),
 }

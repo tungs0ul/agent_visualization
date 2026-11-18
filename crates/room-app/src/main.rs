@@ -103,7 +103,7 @@ fn main() -> AppExit {
                 (receive_events, chat::dev_chat, chat::read_chats),
                 settle_permissions,
                 stats::measure,
-                (view3d::sync, view3d::deliver, view3d::activity_holograms, view3d::light_trails, hud::trace, view3d::frame).chain(),
+                (view3d::sync, view3d::teleporter, view3d::deliver, view3d::activity_holograms, view3d::light_trails, hud::trace, view3d::frame).chain(),
                 pace_updates,
                 log_frame_rate.run_if(|| std::env::var_os("AGENT_ROOM_FPS_LOG").is_some()),
                 window::take_screenshots,
@@ -295,7 +295,7 @@ fn log_frame_rate(
     let now = std::time::Instant::now();
     let (start, frames, busy, moving) = window.get_or_insert((now, 0, 0, 0));
     *frames += 1;
-    *busy += model.shown().is_some_and(|session| session.is_busy()) as u32;
+    *busy += model.live().iter().any(|session| session.is_busy()) as u32;
     *moving += view.moving as u32;
     let elapsed = now - *start;
     if elapsed >= Duration::from_secs(5) {
@@ -325,7 +325,7 @@ fn pace_updates(
         return;
     }
     // Someone works (their clip plays) or something in the HQ moves.
-    let busy = model.shown().is_some_and(|session| session.is_busy()) || view.moving;
+    let busy = model.live().iter().any(|session| session.is_busy()) || view.moving;
     let now = std::time::Instant::now();
     if busy || last_busy.is_none() {
         *last_busy = Some(now);

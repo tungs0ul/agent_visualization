@@ -1467,3 +1467,11 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   font. Measured: active 22.7 % to 14.8 %, idle 9 % to 5.3 %, memory about 270 MB.
   Screenshots of the full view checked; mini mode not re-checked (screen was locked).
   **Next:** check mini mode; phase 2 (stations) or the active-power levers in V2.md.
+- 2026-11-18, Claude Opus 5.5 (V2 phases 2, 3 teleporter, 3b): every live session's
+  Claude and sub-agents in one HQ (`director::cast_all`, seats by first appearance);
+  teleporter placed with arrive/leave and a departure queue; Research station
+  (subagent-built `research.glb`) replaces the file-reading desk, bookshelf reads
+  files; HUD stage strip removed. Checked with a two-session replay (contact sheet).
+  Measured A/B: no power regression; measurement noise about 4 points. **Next:**
+  active power (HUD/labels only on change, audio thread), beam particles, the stray
+  ring by the Research station, mini mode re-check.

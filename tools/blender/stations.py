@@ -6,7 +6,7 @@ Run headless from the repo root (Blender 5.2):
         --python tools/blender/stations.py [-- name ...]
 
 With no names it writes every model into assets/models/stations/:
-main_desk, bookshelf, file_reading, lab, writing_desk, plant, wall_panel,
+main_desk, bookshelf, lab, writing_desk, plant, wall_panel,
 pillar, document. Pass names after `--` to rebuild only some of them.
 
 Conventions (the app relies on them): metres; modelled Z-up facing Blender -Y,
@@ -677,60 +677,6 @@ def build_bookshelf():
     floor_disc(0, -1.3, 0.7, h=0.03)
 
 
-def build_file_reading():
-    floor_disc(0, -0.45, 1.5)
-    cy, rin, rout = -1.6, 1.25, 1.72
-    with at((0, cy, 0.04)):
-        ring((0, 0, 0), rin + 0.12, rout - 0.08, 0.0, 0.74, "PanelDark", segs=32, a0=-38, a1=38)
-        for a0, a1 in ((-38, -13.5), (-12.5, 12.5), (13.5, 38)):
-            ring((0, 0, 0), rin + 0.1, rout - 0.06, 0.02, 0.72, "Panel", segs=10, a0=a0, a1=a1, bevel=0.012)
-            am = (a0 + a1) / 2
-            ring((0, 0, 0), rin + 0.088, rin + 0.1, 0.3, 0.62, "PanelDark", segs=6, a0=am - 9, a1=am + 9)
-            ring((0, 0, 0), rin + 0.08, rin + 0.09, 0.57, 0.585, "GlowCyan", segs=3, a0=am - 4, a1=am + 4)
-        glow_strip_sector(rin + 0.1, 0.08, -37, 37, "GlowOrange", h=0.012, depth=0.012)
-        ring((0, 0, 0), rin, rout, 0.74, 0.81, "Panel", segs=40, a0=-40, a1=40, bevel=0.022, bsegs=3)
-        ring((0, 0, 0), rin + 0.06, rout - 0.12, 0.81, 0.816, "PanelDark", segs=40, a0=-35, a1=35)
-        glow_strip_sector(rin + 0.008, 0.775, -39, 39, "GlowCyan", h=0.016, depth=0.012)
-        ring((0, 0, 0), rout - 0.1, rout, 0.81, 0.91, "Panel", segs=36, a0=-38, a1=38, bevel=0.015)
-        glow_strip_sector(rout - 0.1, 0.88, -34, 34, "GlowCyan", h=0.012, depth=0.008)
-        # embedded reading slab
-        with at((0, rin + 0.2, 0.817)):
-            box((0, 0, 0.006), (0.42, 0.26, 0.012), "Trim", bevel=0.004)
-            box((0, 0, 0.013), (0.38, 0.22, 0.002), "Paper")
-            for i in range(6):
-                box((-0.02, 0.07 - i * 0.03, 0.0145), (0.28, 0.008, 0.002), "PanelDark")
-        # holo panels: big page in the middle, file previews left, open virtual book right
-        r = rout - 0.04
-        holo_screen((0, r, 1.48), 0.56, 0.74, yaw=0, tilt=-6, content="page", seed=4)
-        for a, c, s in ((-25, "files", 5), (25, "book", 6)):
-            holo_screen((r * math.sin(rad(a)), r * math.cos(rad(a)), 1.36), 0.5, 0.4, yaw=-a, tilt=-6, content=c,
-                        seed=s)
-        for a, kind in ((-17, "doc"), (17, "book")):
-            holo_icon(((r - 0.05) * math.sin(rad(a)), (r - 0.05) * math.cos(rad(a)), 1.78), kind, 0.13,
-                      rot=(0, 0, -a))
-        box((0, rout - 0.05, 0.93), (0.9, 0.04, 0.03), "Trim", bevel=0.01)
-        box((0, rout - 0.072, 0.93), (0.8, 0.006, 0.01), "GlowCyan")
-        # file stack on the left
-        fa = -30
-        with at(((rin + 0.22) * math.sin(rad(fa)), (rin + 0.22) * math.cos(rad(fa)), 0.816), (0, 0, -fa)):
-            rng = random.Random(11)
-            z = 0.0
-            for k in range(7):
-                th = rng.uniform(0.012, 0.025)
-                m = ["Paper", "BookBlue", "Paper", "BookAmber", "Paper", "BookTeal", "Paper"][k]
-                box((rng.uniform(-0.01, 0.01), rng.uniform(-0.01, 0.01), z + th / 2), (0.24, 0.31, th), m,
-                    rot=(0, 0, rng.uniform(-7, 7)), bevel=0.002, segs=1)
-                z += th
-            box((0.08, -0.16, z - 0.03), (0.05, 0.012, 0.03), "GlowOrange")
-        # green check light on a little post on the right
-        ca = 31
-        cx, cyy = (rin + 0.25) * math.sin(rad(ca)), (rin + 0.25) * math.cos(rad(ca))
-        disc((cx, cyy, 0.816), 0.05, 0.0, 0.02, "Trim", segs=24, bevel=0.005)
-        disc((cx, cyy, 0.816), 0.012, 0.02, 0.13, "Trim", segs=12)
-        check_badge((cx, cyy, 0.816 + 0.2), r=0.075, rot=(0, 0, -ca))
-    potted_plant((-1.25, 0.15, 0.043), scale=0.7, seed=9, leaves=11)
-
-
 def tank(x, y, core="GlowCyan", accent="GlowCyan"):
     with at((x, y, 0)):
         disc((0, 0, 0), 0.42, 0.0, 0.08, "Trim", segs=8, phase=22.5, bevel=0.015)
@@ -1005,7 +951,6 @@ def build_document():
 STATIONS = {
     "main_desk": build_main_desk,
     "bookshelf": build_bookshelf,
-    "file_reading": build_file_reading,
     "lab": build_lab,
     "writing_desk": build_writing_desk,
     "plant": build_plant,

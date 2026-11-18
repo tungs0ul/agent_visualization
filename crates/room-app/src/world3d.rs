@@ -16,10 +16,10 @@ use bevy::world_serialization::WorldAssetRoot;
 pub enum Location {
     /// Centre platform: the main agent thinks, plans and coordinates.
     MainDesk,
-    /// Research: web pages and references.
-    Bookshelf,
     /// Read files (Read, Grep, Glob).
-    FileReading,
+    Bookshelf,
+    /// Search and fetch the web: a knowledge-graph console (`tools/blender/research.py`).
+    Research,
     /// Run scripts and programs.
     Lab,
     /// Create or edit files.
@@ -27,13 +27,13 @@ pub enum Location {
 }
 
 impl Location {
-    pub const ALL: [Location; 5] = [Self::MainDesk, Self::Bookshelf, Self::FileReading, Self::Lab, Self::WritingDesk];
+    pub const ALL: [Location; 5] = [Self::MainDesk, Self::Bookshelf, Self::Research, Self::Lab, Self::WritingDesk];
 
     pub fn center(self) -> Vec3 {
         match self {
             Self::MainDesk => Vec3::new(0.0, 0.0, 0.0),
             Self::Bookshelf => Vec3::new(-4.2, 0.0, -3.4),
-            Self::FileReading => Vec3::new(-5.8, 0.0, 1.2),
+            Self::Research => Vec3::new(-5.8, 0.0, 1.2),
             Self::Lab => Vec3::new(4.4, 0.0, -3.4),
             Self::WritingDesk => Vec3::new(5.8, 0.0, 1.2),
         }
@@ -43,7 +43,7 @@ impl Location {
         match self {
             Self::MainDesk => "Main desk",
             Self::Bookshelf => "Bookshelf",
-            Self::FileReading => "File reading",
+            Self::Research => "Research",
             Self::Lab => "Processing lab",
             Self::WritingDesk => "Writing desk",
         }
@@ -52,8 +52,8 @@ impl Location {
     pub fn subtitle(self) -> &'static str {
         match self {
             Self::MainDesk => "Plan & coordinate",
-            Self::Bookshelf => "Research & reference",
-            Self::FileReading => "Read files",
+            Self::Bookshelf => "Read files",
+            Self::Research => "Search the web",
             Self::Lab => "Run scripts",
             Self::WritingDesk => "Write files",
         }
@@ -63,8 +63,8 @@ impl Location {
     pub fn glow(self) -> LinearRgba {
         match self {
             Self::MainDesk => LinearRgba::rgb(0.2, 0.8, 3.0),
-            Self::Bookshelf => LinearRgba::rgb(2.4, 1.2, 0.2),
-            Self::FileReading => LinearRgba::rgb(0.4, 2.6, 1.0),
+            Self::Bookshelf => LinearRgba::rgb(0.4, 2.6, 1.0),
+            Self::Research => LinearRgba::rgb(2.4, 1.2, 0.2),
             Self::Lab => LinearRgba::rgb(0.3, 2.2, 2.6),
             Self::WritingDesk => LinearRgba::rgb(1.6, 0.5, 3.0),
         }
@@ -74,7 +74,7 @@ impl Location {
         match self {
             Self::MainDesk => "models/stations/main_desk.glb",
             Self::Bookshelf => "models/stations/bookshelf.glb",
-            Self::FileReading => "models/stations/file_reading.glb",
+            Self::Research => "models/stations/research.glb",
             Self::Lab => "models/stations/lab.glb",
             Self::WritingDesk => "models/stations/writing_desk.glb",
         }
@@ -88,7 +88,7 @@ impl Location {
         let (front, height) = match self {
             Self::MainDesk => (0.0, 0.35),
             Self::Bookshelf => (1.3, 0.033),
-            Self::FileReading => (0.85, 0.043),
+            Self::Research => (0.85, 0.043),
             Self::Lab => (1.0, 0.053),
             Self::WritingDesk => (0.85, 0.043),
         };
@@ -98,6 +98,12 @@ impl Location {
 
 /// Where the main desk's inbox tray is (sub-agents leave documents there).
 pub const INBOX: Vec3 = Vec3::new(0.6, 1.2, -0.86);
+
+/// The teleporter (`tools/blender/teleporter.py`): every agent arrives and leaves
+/// here (V2.md phase 3). Front left, between the reading desk and the main platform.
+pub const TELEPORTER: Vec3 = Vec3::new(-3.4, 0.0, 4.0);
+/// Height of its deck, where a robot stands to beam in or out.
+pub const TELEPORTER_DECK: f32 = 0.22;
 
 /// What building the world needs.
 pub struct Kit<'a, 'w, 's> {
@@ -151,6 +157,7 @@ pub fn build(kit: &mut Kit) {
     for location in Location::ALL {
         kit.model(location.model(), location.center());
     }
+    kit.model("models/stations/teleporter.glb", TELEPORTER);
     // Routes from the main desk to every workstation.
     for location in Location::ALL.into_iter().skip(1) {
         let from = Location::MainDesk.center();
@@ -158,6 +165,9 @@ pub fn build(kit: &mut Kit) {
         let dir = (to - from).normalize();
         kit.path(from + dir * 2.6, to - dir * 1.4, location.glow());
     }
+    // And to the teleporter.
+    let dir = (TELEPORTER - Location::MainDesk.center()).normalize();
+    kit.path(dir * 2.6, TELEPORTER - dir * 1.6, LinearRgba::rgb(0.4, 1.6, 3.2));
     // Each workstation casts its colour on the polished floor.
     for location in Location::ALL {
         let light = PointLight {

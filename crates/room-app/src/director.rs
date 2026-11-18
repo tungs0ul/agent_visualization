@@ -5,7 +5,7 @@
 
 use bevy::prelude::*;
 
-use crate::model::{Pose, SessionState, Status, Who};
+use crate::model::{Model, Pose, SessionState, Status, Who};
 use crate::world3d::Location;
 
 /// Claude's own colour in the panels.
@@ -36,9 +36,13 @@ pub fn accent_for(agent_type: &str) -> Color {
     SUB_ACCENTS[index]
 }
 
-/// One robot the HQ shows for a session.
+/// One robot the HQ shows.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Role {
+    /// Its session (empty for the Claude waiting before any session).
+    pub session: String,
+    /// Its session's seat at the main desk (0 is the centre).
+    pub seat: usize,
     pub who: Who,
     pub pose: Pose,
     /// Its colour (sub-agents by type).
@@ -47,11 +51,24 @@ pub struct Role {
     pub done: bool,
 }
 
-/// Everyone in the session: Claude first, then the sub-agents in the order they
+/// Everyone in the HQ: every live session's Claude and sub-agents (V2.md phase
+/// 3b), or one Claude waiting at its desk before any session.
+pub fn cast_all(model: &Model) -> Vec<Role> {
+    let live = model.live();
+    if live.is_empty() {
+        return cast(&SessionState::default(), 0);
+    }
+    live.into_iter().enumerate().flat_map(|(seat, session)| cast(session, seat)).collect()
+}
+
+/// Everyone in one session: Claude first, then the sub-agents in the order they
 /// joined (finished ones included, so a robot can finish its hand-over).
-pub fn cast(session: &SessionState) -> Vec<Role> {
-    let main = Role { who: Who::Main, pose: session.main_pose, accent: MAIN_ACCENT, done: false };
+pub fn cast(session: &SessionState, seat: usize) -> Vec<Role> {
+    let role = |who, pose, accent, done| Role { session: session.id.clone(), seat, who, pose, accent, done };
+    let main = role(Who::Main, session.main_pose, MAIN_ACCENT, false);
     let subs = session.agents.iter().map(|(id, info)| Role {
+        session: session.id.clone(),
+        seat,
         who: Who::Sub(id.clone()),
         pose: info.pose,
         accent: accent_for(&info.agent_type),
@@ -67,8 +84,8 @@ pub fn cast(session: &SessionState) -> Vec<Role> {
 /// (to its visitor spots).
 pub fn location_for(pose: Pose, is_main: bool, now: Location) -> Location {
     match pose {
-        Pose::Reading => Location::FileReading,
-        Pose::Web => Location::Bookshelf,
+        Pose::Reading => Location::Bookshelf,
+        Pose::Web => Location::Research,
         Pose::Typing => Location::WritingDesk,
         Pose::Terminal => Location::Lab,
         Pose::Thinking | Pose::Waiting if is_main => now,
@@ -98,7 +115,7 @@ mod tests {
     }
 
     fn places(model: &Model, now: Location) -> Vec<(Who, Location, bool)> {
-        cast(model.shown().unwrap())
+        cast(model.shown().unwrap(), 0)
             .into_iter()
             .map(|role| {
                 let is_main = role.who == Who::Main;
@@ -115,12 +132,12 @@ mod tests {
         assert_eq!(places(&model, Location::Lab), vec![(Who::Main, Location::Lab, false)]);
 
         model.apply(&tool(None, "Read", json!({ "file_path": "/x/a.rs" })));
-        assert_eq!(places(&model, Location::MainDesk)[0].1, Location::FileReading);
+        assert_eq!(places(&model, Location::MainDesk)[0].1, Location::Bookshelf);
 
         // A sub-agent joins and works at the lab; Claude goes on editing.
         model.apply(&tool(Some("a1"), "Bash", json!({ "command": "ls" })));
         model.apply(&tool(None, "Edit", json!({ "file_path": "/x/a.rs", "old_string": "a", "new_string": "b" })));
-        let now = places(&model, Location::FileReading);
+        let now = places(&model, Location::Bookshelf);
         assert_eq!(now[0].1, Location::WritingDesk);
         assert_eq!(now[1], (Who::Sub("a1".into()), Location::Lab, false));
 
@@ -131,6 +148,31 @@ mod tests {
         // The turn ends: Claude walks home.
         model.apply(&event(None, json!({ "hook_event_name": "Stop" })));
         assert_eq!(places(&model, Location::WritingDesk)[0].1, Location::MainDesk);
+    }
+
+    #[test]
+    fn every_live_session_has_its_claude_in_the_hq() {
+        let mut model = Model::default();
+        // Before any session: one Claude waits at the desk.
+        let waiting = cast_all(&model);
+        assert_eq!((waiting.len(), waiting[0].who.clone()), (1, Who::Main));
+
+        let prompt = |id: &str| {
+            let mut hook = json!({ "session_id": id, "hook_event_name": "UserPromptSubmit", "prompt": "go" });
+            hook["cwd"] = json!(format!("/{id}"));
+            RoomEvent::parse(&hook).unwrap()
+        };
+        model.apply(&prompt("a"));
+        model.apply(&prompt("b"));
+        model.apply(&prompt("a"));
+        let seats: Vec<(String, usize)> = cast_all(&model).into_iter().map(|role| (role.session, role.seat)).collect();
+        // Seats follow when the session first appeared, not the latest activity.
+        assert_eq!(seats, vec![("a".to_owned(), 0), ("b".to_owned(), 1)]);
+
+        // An ended session's robots leave the HQ.
+        model.apply(&RoomEvent::parse(&json!({ "session_id": "a", "hook_event_name": "SessionEnd", "reason": "exit" })).unwrap());
+        let left: Vec<String> = cast_all(&model).into_iter().map(|role| role.session).collect();
+        assert_eq!(left, vec!["b".to_owned()]);
     }
 
     #[test]

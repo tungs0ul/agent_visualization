@@ -21,7 +21,7 @@ Inspect: `python3 -I tools/blender/inspect_glb.py assets/models/stations/lab.glb
 - Front (where the robot works, facing the camera) is +Z. One mesh per file.
 - Workstations have no physical monitors: the screens are floating `Holo` panels.
 - Shared material names the app may tweak: `Panel`, `PanelDark`, `Trim`, `GlowCyan`,
-  `GlowOrange`, `GlowPurple`, `GlowGreen`, `Holo` (alpha 0.35, BLEND), `HoloDark`
+  `GlowOrange`, `GlowPurple`, `GlowGreen`, `Holo` (alpha 0.35, BLEND; `HoloAmber` in research.glb), `HoloDark`
   (terminal background, alpha 0.6, BLEND), `Glass` (alpha 0.2, BLEND), `Paper`, `Leaf`,
   `Pot`, and `BookBlue/BookTeal/BookRed/BookAmber/BookCream`. Glow strength is 6
   (`Holo` 2).
@@ -32,7 +32,7 @@ Inspect: `python3 -I tools/blender/inspect_glb.py assets/models/stations/lab.glb
 |---|---|---|---|
 | main_desk.glb | 4.0 × 2.13 × 4.0 | 23k | (0, 0.35, 0) platform centre; console behind at -Z; inbox tray top at (0.60, 1.18, -0.86) |
 | bookshelf.glb | 3.2 × 2.6 × 0.8 alcove (+ floor ring to z 2.0) | 14k | (0, 0.033, 1.3) |
-| file_reading.glb | 3.0 × 1.9 × 3.0 | 12k | (0, 0.043, 0.85) |
+| research.glb | 3.0 × 2.03 × 3.0 | 11.5k | (0, 0.043, 0.85) |
 | lab.glb | 3.7 × 2.12 × 3.7 | 24k | (0, 0.053, 1.0) |
 | writing_desk.glb | 2.9 × 2.03 × 2.9 | 11k | (0, 0.043, 0.85) |
 | plant.glb | 1.6 × 1.17 × 1.25 | 2k | - |
