@@ -17,6 +17,7 @@ use std::time::Duration;
 use bevy::prelude::*;
 use crossbeam_channel::{Receiver, Sender};
 use room_proto::event::RoomEvent;
+use room_proto::limits::{Limits, LimitsReport};
 use room_proto::{ChannelHello, ChannelInfo, ChannelMessage, HookEnvelope, LOCK_NAME, PermissionReply, SOCKET_NAME};
 
 const READ_TIMEOUT: Duration = Duration::from_secs(2);
@@ -91,12 +92,15 @@ impl Channel {
 struct Senders {
     events: Sender<Incoming>,
     channels: Sender<Channel>,
+    limits: Sender<Limits>,
 }
 
 #[derive(Resource)]
 pub struct Server {
     pub events: Receiver<Incoming>,
     pub channels: Receiver<Channel>,
+    /// Usage limits from `room-hook --status` (PLAN.md M10).
+    pub limits: Receiver<Limits>,
     pub waker: Waker,
     /// Held for the life of the app: a second instance can't take the lock.
     _lock: File,
@@ -124,7 +128,8 @@ impl Server {
 
         let (sender, events) = crossbeam_channel::unbounded();
         let (channel_sender, channels) = crossbeam_channel::unbounded();
-        let senders = Senders { events: sender, channels: channel_sender };
+        let (limits_sender, limits) = crossbeam_channel::unbounded();
+        let senders = Senders { events: sender, channels: channel_sender, limits: limits_sender };
         let waker: Waker = Arc::default();
         let thread_waker = waker.clone();
         thread::Builder::new()
@@ -132,7 +137,7 @@ impl Server {
             .spawn(move || accept_loop(listener, senders, thread_waker))
             .map_err(|e| format!("spawn socket thread: {e}"))?;
         info!("listening on {}", socket.display());
-        Ok(Self { events, channels, waker, _lock: lock })
+        Ok(Self { events, channels, limits, waker, _lock: lock })
     }
 }
 
@@ -177,6 +182,14 @@ fn handle(stream: UnixStream, senders: &Senders, waker: &Waker) {
         // The channel stays connected for the session's life: no read timeout.
     let _ = reader.get_ref().set_read_timeout(None);
         if senders.channels.send(Channel { info: channel, stream: reader.into_inner() }).is_ok()
+            && let Some(wake) = waker.get()
+        {
+            wake();
+        }
+        return;
+    }
+    if let Ok(LimitsReport { limits }) = serde_json::from_str::<LimitsReport>(&line) {
+        if senders.limits.send(limits).is_ok()
             && let Some(wake) = waker.get()
         {
             wake();
@@ -228,7 +241,8 @@ mod tests {
         let (channels, arrived) = crossbeam_channel::unbounded();
         let (app_side, mut hook_side) = UnixStream::pair().unwrap();
         hook_side.write_all(b"{\"channel\":{\"claude_pid\":42,\"session_id\":\"s1\"}}\n").unwrap();
-        handle(app_side, &Senders { events, channels }, &Waker::default());
+        let (limits, _) = crossbeam_channel::unbounded();
+        handle(app_side, &Senders { events, channels, limits }, &Waker::default());
         let mut channel = arrived.try_recv().unwrap();
         assert_eq!(channel.info.claude_pid, 42);
         assert!(!channel.is_closed());
@@ -238,5 +252,17 @@ mod tests {
         assert_eq!(line, "{\"text\":\"hello\"}\n");
         drop(hook_side);
         assert!(channel.is_closed());
+    }
+
+    #[test]
+    fn a_status_report_brings_the_usage_limits() {
+        let (events, no_events) = crossbeam_channel::unbounded();
+        let (channels, _) = crossbeam_channel::unbounded();
+        let (limits, arrived) = crossbeam_channel::unbounded();
+        let (app_side, mut hook_side) = UnixStream::pair().unwrap();
+        hook_side.write_all(b"{\"limits\":{\"five_hour\":{\"used\":23.0,\"resets_at\":9},\"seven_day\":null}}\n").unwrap();
+        handle(app_side, &Senders { events, channels, limits }, &Waker::default());
+        assert_eq!(arrived.try_recv().unwrap().five_hour.unwrap().used, 23.0);
+        assert!(no_events.try_recv().is_err());
     }
 }

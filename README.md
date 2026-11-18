@@ -97,6 +97,17 @@ After pulling new changes, run `scripts/install-dev.sh` again and restart `agent
   oldest card. You can type a reason before denying; Claude gets it. If you don't answer
   within 60 seconds (`AGENT_ROOM_PERMISSION_TIMEOUT`), Claude Code asks in the terminal
   as usual. Agent Room never answers on its own.
+- **Usage limits** (claude.ai subscriptions): the top-right card shows how much of the
+  5-hour and the weekly limit you have used. Sessions you start from the app's Chat
+  report them on their own. For terminal sessions, Claude Code gives them only to a
+  status line command, so add this line to your status line script, after it reads its
+  input into `$input` (it prints nothing and does not change your status line):
+
+  ```bash
+  printf '%s' "$input" | room-hook --status >/dev/null 2>&1 &
+  ```
+
+  Agent Room never edits your Claude Code settings or scripts itself.
 
 ## Privacy
 

@@ -230,6 +230,15 @@ pub fn draw(
                         "Tokens Claude used in this session so far (input includes cache reads), updated after each turn",
                     );
                 }
+                // The account's usage limits, for every session (PLAN.md M10).
+                if let Some((line, hover, fullest)) = crate::usage::limits_line(usage.limits()) {
+                    let color = match fullest {
+                        90.0.. => egui::Color32::from_rgb(255, 110, 100),
+                        70.0.. => AMBER,
+                        _ => DIM,
+                    };
+                    ui.label(egui::RichText::new(line).small().color(color)).on_hover_text(hover);
+                }
             });
         });
 

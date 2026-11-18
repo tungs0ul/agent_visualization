@@ -4,9 +4,11 @@
 //!   Unix socket (one JSON line each way, see PLAN.md 3.5).
 //! - [`event`]: raw Claude Code hook JSON parsed into typed [`event::RoomEvent`]s.
 //! - [`describe`]: short human text for a tool call, used for speech bubbles.
+//! - [`limits`]: the account's 5-hour and 7-day usage, for the app's header.
 
 pub mod describe;
 pub mod event;
+pub mod limits;
 
 use std::path::PathBuf;
 use std::time::Duration;

@@ -27,6 +27,8 @@ pub struct ChatSession {
     /// A turn is running: Claude hasn't sent its `result` yet.
     pub busy: bool,
     pub session_id: Option<String>,
+    /// The usage limits Claude Code last reported (PLAN.md M10), for `Usage`.
+    pub limits: Option<room_proto::limits::Limits>,
     child: Child,
     stdin: ChildStdin,
     lines: Receiver<String>,
@@ -79,6 +81,7 @@ impl ChatSession {
             transcript,
             busy: false,
             session_id: resume.map(str::to_owned),
+            limits: None,
             child,
             stdin,
             lines,
@@ -111,6 +114,7 @@ impl ChatSession {
                         self.transcript.push((Speaker::Claude, text));
                     }
                 }
+                Some("rate_limit_event") => self.limits = room_proto::limits::Limits::from_stream(&event).or(self.limits),
                 Some("result") => {
                     self.busy = false;
                     let id = event["session_id"].as_str().map(str::to_owned);
@@ -302,9 +306,12 @@ fn first_prompt(path: &std::path::Path) -> Option<(String, bool)> {
     })
 }
 
-pub fn read_chats(mut chats: ResMut<Chats>, server: Res<crate::server::Server>) {
+pub fn read_chats(mut chats: ResMut<Chats>, server: Res<crate::server::Server>, mut usage: ResMut<crate::usage::Usage>) {
     if let Some(session) = chats.session.as_mut() {
         session.read();
+        if let Some(limits) = session.limits.take() {
+            usage.report_limits(limits);
+        }
     }
     let new: Vec<Channel> = server.channels.try_iter().collect();
     for channel in new {

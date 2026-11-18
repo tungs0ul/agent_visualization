@@ -926,6 +926,54 @@ transcript's usage fields (context tokens); Claude Code's status-line command in
 (it receives model, context and rate-limit info; a plugin status line could forward
 it to the app socket); CLI output. Pick the supported, cheap one.
 
+**Done 2026-11-18.** Context use comes from the transcript (V2 phase 6, the tank). The
+limits come from two documented places, verified on Claude Code 2.1.327:
+- `claude -p --output-format stream-json` prints a `rate_limit_event` with
+  `rate_limit_info.unifiedWindows.{five_hour,seven_day}.{utilization (0-1), resetsAt}`
+  after each answer. The app's own chat sessions read it.
+- A status line command gets `rate_limits.{five_hour,seven_day}.{used_percentage,
+  resets_at}`. Plugins can't ship a status line, and the app must not edit the user's
+  settings, so `room-hook --status` is a one-line opt-in for the user's own status line
+  script (README "Usage limits"). It prints nothing.
+Both are claude.ai-subscriber only. Shown in the top-right card ("5h 23 % · week 74 %",
+amber from 70 %, red from 90 %, reset times on hover); a window drops once it resets.
+
+### M18: Use the app instead of the terminal (requested 2026-11-18, research done)
+
+User: "the chat still does not feel good. research on if i can chat with claude in this
+app without terminal at all, so i can use this app instead of terminal with claude?"
+
+Yes. The app's chat already runs `claude -p --input-format stream-json
+--output-format stream-json`, which is the same process and protocol the official Agent
+SDKs (Python, TypeScript) drive; they add nothing a Rust client can't do. What makes it
+feel poor today is what the app ignores, not a limit of the protocol:
+
+| Today | Available (docs, checked live where noted) |
+|---|---|
+| Whole answer appears at the end | `--include-partial-messages`: `stream_event` text deltas, token by token |
+| Tool use invisible in the chat | `assistant` tool_use and `user` tool_result blocks; sub-agent messages carry `parent_tool_use_id` |
+| No stop button | `control_request` `interrupt` (init `capabilities` lists `interrupt_receipt_v1`, checked live) |
+| No model or mode switch | `set_model`, `set_permission_mode` control requests; `/model sonnet`, `/compact`, skills work as prompts |
+| Resume shows no history | read the session's transcript `.jsonl` |
+| Permissions only via the plugin hook | still fine (PermissionRequest hook); the SDK's `can_use_tool` control request is the plugin-free route, wire format to verify |
+| One chat at a time | one child process per chat; each is a session and a robot already |
+
+Not available in `-p`: terminal-only UI commands (`/login`, interactive pickers,
+`/config` screens), vim mode. Login must exist already (the terminal's login is shared).
+
+Alternatives considered:
+- Embed a real terminal (PTY + terminal emulator widget) running interactive `claude`:
+  full parity at once, but it is still a terminal inside the window, and streaming text
+  redraws constantly (power). Keep as a fallback idea only.
+- Agent SDK sidecar (Node or Python): same protocol, extra runtime, no gain.
+
+Plan (smallest first, each verifiable by screenshot and a real session):
+1. Streaming text and a Stop button.
+2. Tool steps inline (one dim line each, "Read main.rs", expandable result).
+3. History on resume; several chats as tabs.
+4. Model and permission-mode pickers; slash command hints.
+5. Optional: `can_use_tool` permissions so the app works without the plugin.
+
 ### M5: Permissions
 
 - Permission cards (scene + panel), Allow/Deny, Y/N, countdown, stacking, 300 ms input
@@ -1022,7 +1070,8 @@ config file, and can remove both cleanly.
 - [x] M8 Chat with Claude from the app (8a: new/continue/resume sessions; 8b: send to
       a terminal session through the plugin channel, 2026-11-17; needs the user's try)
 - [x] M9 Auto-accept mode and centre pop-ups (2026-11-17)
-- [ ] M10 Context, 5-hour and weekly limits in the app
+- [x] M10 Context, 5-hour and weekly limits in the app (2026-11-18; terminal sessions need the status line opt-in)
+- [ ] M18 Use the app instead of the terminal (research done 2026-11-18, not started)
 - [x] M12 Hide/show the side panel (2026-11-17; needs a look on screen)
 - [x] M11 Own CPU/RAM/FPS overlay (2026-11-17; needs a look on screen)
 - [x] M13 Permission rules as part of Auto-accept (2026-11-17)
@@ -1516,3 +1565,7 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   pools). Measured unfocused: dozing 0.1 %, working 25-28 % (was about 21 % with
   6 fps walking). Focused cost not measured (a script can't focus the window);
   estimate 50-70 % of a core while something animates at 30 fps, dozing after 30 s.
+- 2026-11-18, Claude Opus 5.5: M10 done (see M10 "Done"): `room_proto::limits`,
+  `room-hook --status`, the server's `LimitsReport` line, the chat's `rate_limit_event`,
+  the top-right card. Checked by screenshot with a fake status line input. Researched
+  M18 (chat as a terminal replacement); not started, waiting for the user's go.

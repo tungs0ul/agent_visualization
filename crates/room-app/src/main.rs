@@ -195,6 +195,9 @@ fn receive_events(
     mut wins: ResMut<wins::Wins>,
 ) {
     let now = Instant::now();
+    for limits in server.limits.try_iter() {
+        usage.report_limits(limits);
+    }
     for Incoming { event, reply } in server.events.try_iter() {
         let internal_helper = model.is_internal_helper(&event);
         for change in model.apply(&event) {

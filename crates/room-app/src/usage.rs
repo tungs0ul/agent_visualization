@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 
 use bevy::prelude::Resource;
+use room_proto::limits::Limits;
 
 /// Tokens a session used so far.
 #[derive(Default, Clone, Copy, PartialEq, Eq, Debug)]
@@ -30,9 +31,21 @@ struct Reading {
 #[derive(Resource, Default)]
 pub struct Usage {
     sessions: HashMap<String, Reading>,
+    /// The account's 5-hour and 7-day usage (PLAN.md M10), shared by all sessions.
+    limits: Limits,
 }
 
 impl Usage {
+    /// A newer report of the usage limits, from a status line or an app session.
+    pub fn report_limits(&mut self, limits: Limits) {
+        self.limits.merge(limits);
+    }
+
+    /// The limits as last reported, without windows that have reset since.
+    pub fn limits(&self) -> Limits {
+        self.limits.current(unix_now())
+    }
+
     pub fn tokens(&self, session: &str) -> Option<Tokens> {
         self.sessions.get(session).map(|reading| reading.tokens).filter(|tokens| tokens.input + tokens.output > 0)
     }
@@ -92,6 +105,36 @@ fn count(reading: &mut Reading, line: &str) {
     reading.tokens.output += field("output_tokens");
 }
 
+fn unix_now() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |since| since.as_secs())
+}
+
+/// The header line for the limits, "5h 23 % · week 70 %", its hover text with the
+/// reset times, and the fuller window's percent (for the colour).
+pub fn limits_line(limits: Limits) -> Option<(String, String, f32)> {
+    let now = unix_now();
+    let windows = [("5h", "5-hour", limits.five_hour), ("week", "Weekly", limits.seven_day)];
+    let known: Vec<_> = windows.into_iter().filter_map(|(short, long, window)| Some((short, long, window?))).collect();
+    let fullest = known.iter().map(|(_, _, window)| window.used).reduce(f32::max)?;
+    let line = known.iter().map(|(short, _, window)| format!("{short} {:.0} %", window.used)).collect::<Vec<_>>().join(" · ");
+    let hover = known
+        .iter()
+        .map(|(_, long, window)| format!("{long} limit: {:.0} % used, resets in {}", window.used, until(window.resets_at.saturating_sub(now))))
+        .collect::<Vec<_>>()
+        .join("\n");
+    Some((line, hover, fullest))
+}
+
+/// "3 d 4 h", "2 h 10 min", "5 min".
+fn until(secs: u64) -> String {
+    let (days, hours, minutes) = (secs / 86_400, secs % 86_400 / 3_600, secs % 3_600 / 60);
+    match (days, hours) {
+        (1.., _) => format!("{days} d {hours} h"),
+        (0, 1..) => format!("{hours} h {minutes} min"),
+        _ => format!("{} min", minutes.max(1)),
+    }
+}
+
 /// The context window of a model: 1M tokens for the `[1m]` variants, else 200k.
 pub fn window(model: Option<&str>) -> u64 {
     if model.is_some_and(|model| model.contains("[1m]")) { 1_000_000 } else { 200_000 }
@@ -139,5 +182,22 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
         assert_eq!(short(1_234_567), "1.2M");
         assert_eq!(short(34_000), "34k");
+    }
+
+    #[test]
+    fn limits_show_what_is_known_and_keep_older_windows() {
+        use room_proto::limits::Window;
+        let mut usage = Usage::default();
+        assert_eq!(limits_line(usage.limits()), None);
+        let later = unix_now() + 2 * 3_600 + 600;
+        usage.report_limits(Limits { five_hour: Some(Window { used: 23.4, resets_at: later }), seven_day: None });
+        usage.report_limits(Limits { five_hour: None, seven_day: Some(Window { used: 70.0, resets_at: later }) });
+        let (line, hover, fullest) = limits_line(usage.limits()).unwrap();
+        assert_eq!(line, "5h 23 % · week 70 %");
+        assert!(hover.starts_with("5-hour limit: 23 % used, resets in 2 h 10 min"), "{hover}");
+        assert_eq!(fullest, 70.0);
+        // A window that has reset is gone until the next report.
+        usage.report_limits(Limits { five_hour: Some(Window { used: 99.0, resets_at: 1 }), seven_day: None });
+        assert_eq!(limits_line(usage.limits()).unwrap().0, "week 70 %");
     }
 }

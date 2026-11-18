@@ -7,6 +7,9 @@
 //!     room-hook              forward the event to the Agent Room app (PLAN.md 3.2)
 //!     room-hook --channel    MCP channel server: passes messages the user types in the
 //!                            app into this terminal session (PLAN.md M8b)
+//!     room-hook --status     for the user's status line command: forwards the account's
+//!                            5-hour and 7-day usage to the app (PLAN.md M10). Prints
+//!                            nothing, so it can sit beside any status line script
 //!     room-hook --log [path] append `{"ts_ms":<unix ms>,"hook":<stdin>}` as one line to
 //!                            `path`, by default `~/.agent-room/spike/events.jsonl`
 //!
@@ -47,6 +50,7 @@ fn run() -> Result<(), String> {
             append_event(&path, &read_stdin()?)
         }
         Some("--channel") => channel::serve(),
+        Some("--status") => status(&read_stdin()?),
         Some(other) => Err(format!("unknown argument: {other}")),
         None => forward(&read_stdin()?),
     }
@@ -62,6 +66,17 @@ fn read_stdin() -> Result<String, String> {
 
 fn state_dir() -> Result<PathBuf, String> {
     room_proto::state_dir().ok_or_else(|| "HOME is not set".to_owned())
+}
+
+/// Forwards the usage limits in a status line's input, if it has any.
+fn status(raw: &str) -> Result<(), String> {
+    let input: serde_json::Value = serde_json::from_str(raw).map_err(|e| format!("status JSON: {e}"))?;
+    let Some(limits) = room_proto::limits::Limits::from_status_line(&input) else { return Ok(()) };
+    let Ok(mut stream) = UnixStream::connect(state_dir()?.join(SOCKET_NAME)) else { return Ok(()) };
+    stream.set_write_timeout(Some(WRITE_TIMEOUT)).map_err(|e| format!("socket timeout: {e}"))?;
+    let mut line = serde_json::to_string(&room_proto::limits::LimitsReport { limits }).map_err(|e| format!("encode: {e}"))?;
+    line.push('\n');
+    stream.write_all(line.as_bytes()).map_err(|e| format!("send: {e}"))
 }
 
 /// Sends the event to the app; for permission requests prints the user's answer.
