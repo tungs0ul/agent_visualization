@@ -5,8 +5,10 @@
 //! work (`director`, `view3d`, `world3d`), with a HUD, the event log and permission
 //! cards (egui) over and beside it.
 
+mod activity;
 mod chat;
 mod console;
+mod diff;
 mod director;
 mod log;
 mod mini;
@@ -124,6 +126,8 @@ fn main() -> AppExit {
         .init_resource::<stats::Stats>()
         .insert_resource(ui::PanelPrefs::load())
         .insert_resource(console::OpenConsole::from_env())
+        .init_resource::<activity::Activity>()
+        .init_resource::<diff::DiffView>()
         .init_resource::<AutoAccept>()
         .init_resource::<repo::RepoCache>()
         .init_resource::<ui::MarkdownCache>()
@@ -195,6 +199,7 @@ fn receive_events(
     prefs: Res<ui::PanelPrefs>,
     mut usage: ResMut<usage::Usage>,
     mut wins: ResMut<wins::Wins>,
+    mut activity: ResMut<activity::Activity>,
 ) {
     let now = Instant::now();
     for limits in server.limits.try_iter() {
@@ -202,6 +207,9 @@ fn receive_events(
     }
     for Incoming { event, reply } in server.events.try_iter() {
         let internal_helper = model.is_internal_helper(&event);
+        if !internal_helper {
+            activity.on_event(&event);
+        }
         for change in model.apply(&event) {
             trace!("{change:?}");
         }

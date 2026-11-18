@@ -346,10 +346,10 @@ mod tests {
     fn summaries() {
         let tool = ToolCall { name: "Bash".into(), input: json!({ "command": "ls", "description": "List files" }) };
         assert_eq!(summary(&EventKind::ToolStarted { tool_use_id: "t".into(), tool }).unwrap(), "List files");
-        let finished = EventKind::ToolFinished { tool_use_id: "t".into(), tool_name: "Bash".into(), launched: None };
+        let finished = EventKind::ToolFinished { tool_use_id: "t".into(), tool_name: "Bash".into(), launched: None, output: String::new() };
         assert_eq!(summary(&finished), None);
         let launched = LaunchedAgent { agent_id: "a1".into(), description: "Count files".into(), background: true };
-        let launch = EventKind::ToolFinished { tool_use_id: "t".into(), tool_name: "Agent".into(), launched: Some(launched) };
+        let launch = EventKind::ToolFinished { tool_use_id: "t".into(), tool_name: "Agent".into(), launched: Some(launched), output: String::new() };
         assert_eq!(summary(&launch).unwrap(), "Started helper: Count files");
     }
 

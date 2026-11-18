@@ -38,7 +38,8 @@ pub enum EventKind {
     /// as a `UserPromptSubmit` starting with `<agent-message from="<id>">`.
     ReportReceived { from_agent: String },
     ToolStarted { tool_use_id: String, tool: ToolCall },
-    ToolFinished { tool_use_id: String, tool_name: String, launched: Option<LaunchedAgent> },
+    /// `output`: the end of a command's stdout and stderr (Bash), else empty.
+    ToolFinished { tool_use_id: String, tool_name: String, launched: Option<LaunchedAgent>, output: String },
     ToolFailed { tool_use_id: String, tool_name: String, error: String, interrupted: bool },
     /// A sub-agent hands its final report to the main agent (`SubagentHandback` tool).
     Handback { tool_use_id: String, message: String },
@@ -120,6 +121,7 @@ impl RoomEvent {
                 tool_use_id: str_or_empty(hook, "tool_use_id"),
                 tool_name: str_or_empty(hook, "tool_name"),
                 launched: hook.get("tool_response").and_then(launched_agent),
+                output: hook.get("tool_response").map(command_output).unwrap_or_default(),
             },
             "PostToolUseFailure" => EventKind::ToolFailed {
                 tool_use_id: str_or_empty(hook, "tool_use_id"),
@@ -163,6 +165,25 @@ fn report_sender(prompt: &str) -> Option<String> {
     let rest = prompt.trim_start().strip_prefix(REPORT_PREFIX)?;
     let id = &rest[..rest.find('"')?];
     (!id.is_empty()).then(|| id.to_owned())
+}
+
+/// The most of a command's output worth keeping: its end.
+const OUTPUT_TAIL: usize = 4_000;
+
+/// stdout then stderr, trimmed, at most the last [`OUTPUT_TAIL`] bytes.
+fn command_output(response: &Value) -> String {
+    let field = |name: &str| response.get(name).and_then(Value::as_str).unwrap_or_default().trim_end();
+    let both = [field("stdout"), field("stderr")].into_iter().filter(|part| !part.is_empty()).collect::<Vec<_>>().join("\n");
+    tail(&both, OUTPUT_TAIL).to_owned()
+}
+
+/// The last `max` bytes of `text`, cut at a character boundary.
+pub fn tail(text: &str, max: usize) -> &str {
+    let mut start = text.len().saturating_sub(max);
+    while !text.is_char_boundary(start) {
+        start += 1;
+    }
+    &text[start..]
 }
 
 fn launched_agent(response: &Value) -> Option<LaunchedAgent> {
@@ -217,5 +238,14 @@ mod tests {
         assert_eq!(report_sender("please read <agent-message from=\"abc\">"), None);
         assert_eq!(report_sender("<agent-message from=\"\">"), None);
         assert_eq!(report_sender("<agent-message from=\"abc"), None);
+    }
+
+    #[test]
+    fn a_finished_command_keeps_the_end_of_its_output() {
+        let hook = serde_json::json!({ "session_id": "s", "hook_event_name": "PostToolUse", "tool_name": "Bash",
+            "tool_use_id": "t", "tool_response": { "stdout": "ok\n", "stderr": "warn" } });
+        let EventKind::ToolFinished { output, .. } = RoomEvent::parse(&hook).unwrap().kind else { panic!() };
+        assert_eq!(output, "ok\nwarn");
+        assert_eq!(tail("héllo", 4), "llo");
     }
 }

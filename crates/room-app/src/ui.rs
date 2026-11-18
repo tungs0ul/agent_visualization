@@ -40,11 +40,12 @@ pub fn draw(
     mut open: ResMut<OpenConsole>,
     mut camera: Single<&mut Camera, With<RoomCamera3d>>,
     in_room: InRoom,
-    mut chat: ChatParams,
+    mut chat: Desk,
     mut markdown: ResMut<MarkdownCache>,
     mut panel: ResMut<PanelPrefs>,
     mut stats: ResMut<crate::stats::Stats>,
     mut styled: Local<bool>,
+    mut was_open: Local<Option<Console>>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
     // Panels in the room's theme (PLAN.md M14).
@@ -117,10 +118,10 @@ pub fn draw(
                 });
             });
     } else {
-        // The stations are the controls (PLAN.md M19): S, L and C open their consoles.
+        // The stations are the controls (PLAN.md M19, M20); each console has a key.
         if !ctx.egui_wants_keyboard_input() {
             for console in Console::ALL {
-                if ctx.input(|input| input.key_pressed(console.key())) {
+                if console.key().is_some_and(|key| ctx.input(|input| input.key_pressed(key))) {
                     open.toggle(console);
                 }
             }
@@ -134,21 +135,46 @@ pub fn draw(
                 .interactable(false)
                 .show(ctx, |ui| ui.label(egui::RichText::new("Auto-accept ON").small().strong().color(AUTO)));
         }
+        // The folder's changes are read each time the writing desk's console opens.
+        let shown_cwd = model.shown().and_then(|session| session.cwd.clone());
+        let stale = chat.diff.cwd != shown_cwd;
+        if open.is(Console::Diff) && (*was_open != Some(Console::Diff) || stale) {
+            match &shown_cwd {
+                Some(cwd) => chat.diff.load(cwd, chat.server.waker.clone()),
+                None => *chat.diff = crate::diff::DiffView::default(),
+            }
+        }
+        *was_open = open.0;
         if let Some(console) = open.0
-            && let Some(spot) = in_room.station_spot(&camera, console.station())
+            && let Some(spot) = in_room.console_spot(&camera, console)
         {
             let spot = egui::pos2(spot.x, spot.y);
+            let shown = model.shown().map(|session| session.id.as_str());
+            let mut launched = false;
             let still_open = match console {
                 Console::Settings => console::hologram(ctx, console, spot, |ui| {
                     settings(ui, &mut window, &mut auto, &mut panel, &mut stats, &mut toggle_mini);
                 }),
                 Console::History => console::hologram(ctx, console, spot, |ui| {
                     answer_button(ui, final_answer);
-                    event_log(ui, lines, model.shown().map(|session| session.id.as_str()));
+                    event_log(ui, lines, shown);
                 }),
                 Console::Chat => console::hologram(ctx, console, spot, |ui| chat_console(ui, &mut chat, &mut markdown, &model)),
+                Console::Diff => console::hologram(ctx, console, spot, |ui| {
+                    let waker = chat.server.waker.clone();
+                    diff_console(ui, &mut chat.diff, shown_cwd.as_deref(), waker);
+                }),
+                Console::Commands => console::hologram(ctx, console, spot, |ui| commands_console(ui, &chat.activity, shown)),
+                Console::Launch => console::hologram(ctx, console, spot, |ui| {
+                    launched = launch_console(ui, &mut chat.chats, &model, chat.server.waker.clone());
+                }),
+                Console::Stats => console::hologram(ctx, console, spot, |ui| {
+                    stats_console(ui, &chat.activity.day, &chat.usage, &model);
+                }),
             };
-            if !still_open {
+            if launched {
+                open.0 = Some(Console::Chat);
+            } else if !still_open {
                 open.0 = None;
             }
         }
@@ -196,8 +222,9 @@ pub fn draw(
         log.note(&pending.session, pending.agent, format!("{verb} {}", pending.tool.describe().1));
     }
     question_popup(ctx, &mut log, now);
-    // The chat already shows Claude's answers; don't cover it with the pop-up.
-    if !open.is(Console::Chat) {
+    // Don't cover a console the user is using; the answer stays a click away (Last
+    // answer, the trophy shelf).
+    if open.0.is_none() {
         final_answer_popup(ctx, &mut log, &mut markdown, mode.mini);
     }
     Ok(())
@@ -222,11 +249,11 @@ impl InRoom<'_, '_> {
 }
 
 impl InRoom<'_, '_> {
-    /// Logical window position over a station, where its console stands.
-    fn station_spot(&self, camera: &Camera, location: crate::world3d::Location) -> Option<Vec2> {
+    /// Logical window position where a console's hologram stands.
+    fn console_spot(&self, camera: &Camera, console: Console) -> Option<Vec2> {
         let camera_transform = self.camera.single().ok()?;
         let offset = camera.logical_viewport_rect().map_or(Vec2::ZERO, |rect| rect.min);
-        Some(camera.world_to_viewport(camera_transform, location.center() + Vec3::Y * 2.2).ok()? + offset)
+        Some(camera.world_to_viewport(camera_transform, console.hologram_at()).ok()? + offset)
     }
 }
 
@@ -401,14 +428,18 @@ fn final_answer_popup(ctx: &egui::Context, log: &mut RoomLog, markdown: &mut Mar
     }
 }
 
-/// The app's own Claude session (PLAN.md M8a).
+/// What the consoles show: the app's own Claude session (PLAN.md M8a), the folder's
+/// changes, commands and today's numbers (M20).
 #[derive(SystemParam)]
-pub struct ChatParams<'w> {
+pub struct Desk<'w> {
     chats: ResMut<'w, Chats>,
     server: Res<'w, Server>,
+    diff: ResMut<'w, crate::diff::DiffView>,
+    activity: Res<'w, crate::activity::Activity>,
+    usage: Res<'w, crate::usage::Usage>,
 }
 
-fn chat_console(ui: &mut egui::Ui, chat: &mut ChatParams, markdown: &mut MarkdownCache, model: &Model) {
+fn chat_console(ui: &mut egui::Ui, chat: &mut Desk, markdown: &mut MarkdownCache, model: &Model) {
     let waker = chat.server.waker.clone();
     let chats = &mut *chat.chats;
     if chats.session.is_none() {
@@ -688,6 +719,212 @@ fn event_log(ui: &mut egui::Ui, lines: &VecDeque<LogLine>, session: Option<&str>
 /// egui lays out with last frame's window size, so right after the user shrinks the
 /// window the free area can stick out of it. A viewport outside the window makes wgpu
 /// reject the frame and Bevy quits, so clamp to the current size.
+/// The writing desk: what changed in the shown session's folder.
+fn diff_console(ui: &mut egui::Ui, diff: &mut crate::diff::DiffView, cwd: Option<&str>, waker: crate::server::Waker) {
+    use crate::diff::DiffState;
+    diff.poll();
+    let Some(cwd) = cwd else {
+        ui.label(egui::RichText::new("No session to look at yet.").weak());
+        return;
+    };
+    ui.horizontal(|ui| {
+        ui.add(egui::Label::new(egui::RichText::new(cwd).small().weak()).truncate());
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui.small_button("Refresh").clicked() {
+                diff.load(cwd, waker);
+            }
+        });
+    });
+    let files = match &diff.state {
+        DiffState::Empty | DiffState::Loading(_) => {
+            ui.label(egui::RichText::new("Reading git…").weak().italics());
+            return;
+        }
+        DiffState::Failed(error) => {
+            ui.label(egui::RichText::new(format!("Not a git folder, or git failed: {error}")).weak());
+            return;
+        }
+        DiffState::Ready(files) if files.is_empty() => {
+            ui.label(egui::RichText::new("No changes since the last commit.").weak());
+            return;
+        }
+        DiffState::Ready(files) => files,
+    };
+    let (added, removed) = files.iter().fold((0, 0), |(a, r), file| (a + file.added.unwrap_or(0), r + file.removed.unwrap_or(0)));
+    ui.label(egui::RichText::new(format!("{} files · +{added} −{removed}", files.len())).small());
+    ui.separator();
+    let mut toggled = None;
+    egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+        for file in files {
+            let unfolded = diff.unfolded.as_deref() == Some(file.path.as_str());
+            let counts = match (file.new, file.added, file.removed) {
+                (true, _, _) => egui::RichText::new("new").color(ALLOW),
+                (_, Some(a), Some(r)) => egui::RichText::new(format!("+{a} −{r}")).color(egui::Color32::from_gray(170)),
+                _ => egui::RichText::new("binary").weak(),
+            };
+            ui.horizontal(|ui| {
+                let arrow = if unfolded { "▼" } else { "▶" };
+                let name = egui::RichText::new(format!("{arrow} {}", file.path)).monospace().small();
+                if ui.add(egui::Label::new(name).truncate().sense(egui::Sense::click())).clicked() && !file.patch.is_empty() {
+                    toggled = Some(file.path.clone());
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| ui.label(counts.small()));
+            });
+            if unfolded {
+                patch_view(ui, &file.patch);
+            }
+        }
+    });
+    if let Some(path) = toggled {
+        diff.unfolded = if diff.unfolded.as_ref() == Some(&path) { None } else { Some(path) };
+    }
+}
+
+/// A patch with added lines green and removed lines red.
+fn patch_view(ui: &mut egui::Ui, patch: &str) {
+    let mono = egui::TextStyle::Monospace.resolve(ui.style());
+    let font = egui::FontId::new(mono.size * 0.85, mono.family);
+    let mut job = egui::text::LayoutJob::default();
+    for line in patch.lines() {
+        let color = match line.as_bytes().first() {
+            Some(b'+') => egui::Color32::from_rgb(120, 220, 140),
+            Some(b'-') => egui::Color32::from_rgb(240, 120, 120),
+            Some(b'@') => console::HOLO,
+            _ => egui::Color32::from_gray(170),
+        };
+        job.append(line, 0.0, egui::TextFormat::simple(font.clone(), color));
+        job.append("\n", 0.0, egui::TextFormat::simple(font.clone(), color));
+    }
+    job.wrap = egui::text::TextWrapping { max_width: ui.available_width() - 12.0, break_anywhere: true, ..default() };
+    egui::Frame::new().fill(egui::Color32::from_rgb(4, 12, 24)).inner_margin(egui::Margin::same(6)).show(ui, |ui| {
+        ui.label(job);
+    });
+}
+
+/// The processing lab: the shown session's recent commands.
+fn commands_console(ui: &mut egui::Ui, activity: &crate::activity::Activity, session: Option<&str>) {
+    use crate::activity::Outcome;
+    let Some(session) = session else {
+        ui.label(egui::RichText::new("No session yet.").weak());
+        return;
+    };
+    let mut any = false;
+    egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+        for (index, command) in activity.commands(session).enumerate() {
+            any = true;
+            let (mark, color) = match command.outcome {
+                Outcome::Running => ("…", AUTO),
+                Outcome::Succeeded => ("✔", ALLOW),
+                Outcome::Failed => ("✖", DENY),
+            };
+            let took = command.took.map_or_else(|| "running".to_owned(), |took| format!("{:.1} s", took.as_secs_f32()));
+            let header = egui::RichText::new(format!("{mark} {}", truncate(&command.text, 60))).monospace().small().color(color);
+            egui::CollapsingHeader::new(header).id_salt(("command", index, &command.text)).show(ui, |ui| {
+                ui.add(egui::Label::new(egui::RichText::new(&command.text).monospace().small()).wrap());
+                ui.label(egui::RichText::new(format!("{took} · {} ago", crate::hud::ago(command.started))).small().weak());
+                if !command.output.is_empty() {
+                    egui::Frame::new().fill(egui::Color32::from_rgb(4, 12, 24)).inner_margin(egui::Margin::same(6)).show(ui, |ui| {
+                        let tail = room_proto::event::tail(&command.output, 1_500);
+                        ui.add(egui::Label::new(egui::RichText::new(tail).monospace().small()).wrap());
+                    });
+                }
+            });
+        }
+        if !any {
+            ui.label(egui::RichText::new("No commands in this session yet.").weak());
+        }
+    });
+}
+
+/// The teleporter: start a new session of the app's own in a folder. True once started.
+fn launch_console(ui: &mut egui::Ui, chats: &mut Chats, model: &Model, waker: crate::server::Waker) -> bool {
+    let mut folders: Vec<String> = model.sessions().iter().filter_map(|session| session.cwd.clone()).collect();
+    folders.sort();
+    folders.dedup();
+    ui.label(egui::RichText::new("Claude beams in and works in this folder:").small());
+    ui.add(egui::TextEdit::singleline(&mut chats.folder).desired_width(f32::INFINITY));
+    if !folders.is_empty() {
+        ui.label(egui::RichText::new("Recent folders").small().weak());
+        for folder in folders {
+            let name = folder.rsplit('/').next().unwrap_or(&folder).to_owned();
+            if ui.selectable_label(chats.folder == folder, name).on_hover_text(&folder).clicked() {
+                chats.folder = folder;
+            }
+        }
+    }
+    ui.add_space(6.0);
+    if chats.session.is_some() {
+        ui.label(egui::RichText::new("This ends the app's current chat session.").small().color(AUTO));
+    }
+    let ready = std::path::Path::new(chats.folder.trim()).is_dir();
+    if ui.add_enabled(ready, colored_button("Start session", ALLOW)).clicked() {
+        chats.session = None;
+        chats.start(waker);
+        return true;
+    }
+    false
+}
+
+/// The wall screen: today's numbers.
+fn stats_console(ui: &mut egui::Ui, day: &crate::activity::Day, usage: &crate::usage::Usage, model: &Model) {
+    let calls: u32 = day.tools.values().sum();
+    let tokens = model.sessions().iter().filter_map(|session| usage.tokens(&session.id)).fold(0, |sum, t| sum + t.input + t.output);
+    egui::Grid::new("today").num_columns(2).spacing([24.0, 4.0]).show(ui, |ui| {
+        for (name, value) in [
+            ("Prompts", day.prompts.to_string()),
+            ("Turns finished", day.turns.to_string()),
+            ("Tool calls", calls.to_string()),
+            ("Tokens (sessions seen)", crate::usage::short(tokens)),
+        ] {
+            ui.label(name);
+            ui.label(egui::RichText::new(value).strong().color(console::HOLO));
+            ui.end_row();
+        }
+    });
+    if let Some((line, _, _)) = crate::usage::limits_line(usage.limits()) {
+        ui.label(egui::RichText::new(format!("Limits: {line}")).small().weak());
+    }
+    ui.add_space(8.0);
+    ui.label(egui::RichText::new("Activity by hour").small().weak());
+    heatmap(ui, &day.hours);
+    ui.add_space(8.0);
+    let mut tools: Vec<_> = day.tools.iter().collect();
+    tools.sort_by(|a, b| b.1.cmp(a.1));
+    let most = tools.first().map_or(1, |(_, count)| **count).max(1);
+    for (name, count) in tools.into_iter().take(6) {
+        ui.horizontal(|ui| {
+            ui.add_sized([80.0, 14.0], egui::Label::new(egui::RichText::new(name).small()).truncate());
+            let width = 180.0 * *count as f32 / most as f32;
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(width.max(2.0), 8.0), egui::Sense::hover());
+            ui.painter().rect_filled(rect, 2.0, console::HOLO.gamma_multiply(0.7));
+            ui.label(egui::RichText::new(count.to_string()).small().weak());
+        });
+    }
+}
+
+/// 24 cells, brighter for busier hours, with the hour under every sixth.
+fn heatmap(ui: &mut egui::Ui, hours: &[u32; 24]) {
+    let busiest = hours.iter().copied().max().unwrap_or(0).max(1);
+    let cell = ((ui.available_width() - 2.0) / 24.0).clamp(6.0, 14.0);
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(cell * 24.0, cell + 12.0), egui::Sense::hover());
+    let painter = ui.painter_at(rect);
+    for (hour, count) in hours.iter().enumerate() {
+        let min = rect.min + egui::vec2(hour as f32 * cell, 0.0);
+        let share = *count as f32 / busiest as f32;
+        let fill = if *count == 0 { egui::Color32::from_rgb(16, 30, 48) } else { console::HOLO.gamma_multiply(0.25 + 0.75 * share) };
+        painter.rect_filled(egui::Rect::from_min_size(min, egui::vec2(cell - 1.0, cell - 1.0)), 2.0, fill);
+        if hour % 6 == 0 {
+            painter.text(
+                min + egui::vec2(0.0, cell + 1.0),
+                egui::Align2::LEFT_TOP,
+                hour.to_string(),
+                egui::FontId::proportional(9.0),
+                egui::Color32::from_gray(150),
+            );
+        }
+    }
+}
+
 /// The panels' look: dark glass, cyan highlights, to match the space station.
 fn visuals() -> egui::Visuals {
     use egui::Color32;

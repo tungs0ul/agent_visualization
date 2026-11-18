@@ -685,6 +685,30 @@ pub fn labels(
                 }
             });
     }
+    // The teleporter and the wall screen have consoles too, but no station sign.
+    for console in crate::console::Console::ALL.into_iter().filter(|console| console.station().is_none() && !mode.mini) {
+        let Ok(screen) = camera.world_to_viewport(camera_at, console.anchor() + Vec3::Y * 1.2) else { continue };
+        let screen = screen + offset;
+        egui::Area::new(egui::Id::new(("console-sign", console.title())))
+            .fixed_pos(egui::pos2(screen.x, screen.y))
+            .pivot(egui::Align2::CENTER_BOTTOM)
+            .order(egui::Order::Background)
+            .show(ctx, |ui| {
+                let sign = egui::Frame::new()
+                    .fill(egui::Color32::from_rgba_unmultiplied(12, 14, 32, 190))
+                    .stroke(egui::Stroke::new(1.0, crate::console::HOLO.gamma_multiply(0.5)))
+                    .corner_radius(6.0)
+                    .inner_margin(egui::Margin::symmetric(6, 2))
+                    .show(ui, |ui| ui.label(egui::RichText::new(console.hint()).small().color(crate::console::HOLO)));
+                if ui
+                    .interact(sign.response.rect, ui.id().with("open"), egui::Sense::click())
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .clicked()
+                {
+                    open.toggle(console);
+                }
+            });
+    }
     // Claude's plan, on a glass board over the main desk while it has work left.
     if !mode.mini
         && let Some(session) = model.shown()
@@ -1340,11 +1364,9 @@ pub fn camera_input(
     {
         let offset = camera.logical_viewport_rect().map_or(Vec2::ZERO, |rect| rect.min);
         let spots = crate::console::Console::ALL.into_iter().filter_map(|console| {
-            let spot = camera.world_to_viewport(camera_at, console.station().center() + Vec3::Y * 0.8).ok()?;
-            Some((console.station(), spot + offset))
+            Some((console, camera.world_to_viewport(camera_at, console.anchor()).ok()? + offset))
         });
-        let reach = 90.0 / hand.zoom;
-        open.0 = crate::console::station_at(cursor, spots, reach).and_then(crate::console::Console::at);
+        open.0 = crate::console::console_at(cursor, spots, 90.0 / hand.zoom);
     }
     if buttons.just_pressed(MouseButton::Right) && over {
         *dragging = Some(MouseButton::Right);
