@@ -48,7 +48,20 @@ pub fn notice(event: &RoomEvent, project: Option<&str>) -> Option<(Kind, String)
             (Kind::Finished, format!("{who} handed over its report"))
         }
         EventKind::ToolFailed { tool_name, interrupted: false, .. } => (Kind::Failed, format!("{who}: {tool_name} failed")),
-        EventKind::TurnFailed { .. } => (Kind::Failed, format!("{who}: the turn failed")),
+        EventKind::TurnFailed { error, kind } => {
+            (Kind::Failed, format!("{who} stopped: {}", crate::log::failure_text(kind.as_deref(), error)))
+        }
+        EventKind::ModelSwitched { model } if !sub => (Kind::Joined, format!("{who} now runs {}", crate::log::short_model(model))),
+        // Claude Code's own notices that matter here (hooks reference, Notification).
+        EventKind::Notification { kind: Some(kind), message } => match kind.as_str() {
+            "elicitation_dialog" | "elicitation_url_dialog" | "agent_needs_input" => (Kind::Waiting, format!("{who}: {message}")),
+            "agent_completed" => (Kind::Done, format!("{who}: {message}")),
+            "quota_auto_resume_fired" => (Kind::Done, format!("Limit lifted: {message}")),
+            "quota_auto_resume_stale" | "quota_auto_resume_disabled" | "auth_storage_failure" => {
+                (Kind::Failed, message.clone())
+            }
+            _ => return None,
+        },
         EventKind::PermissionAsked { tool } if tool.name == room_proto::PLAN_TOOL => (Kind::Waiting, format!("{who} has a plan for you")),
         EventKind::PermissionAsked { tool } => (Kind::Waiting, format!("{who} needs your OK: {}", tool.name)),
         EventKind::ToolStarted { tool, .. } if tool.name == room_proto::QUESTION_TOOL => {
@@ -138,6 +151,23 @@ mod tests {
         // Ordinary work is not news.
         let read = event(json!({ "hook_event_name": "PreToolUse", "tool_name": "Read", "tool_input": {}, "tool_use_id": "t" }));
         assert_eq!(notice(&read, None), None);
+    }
+
+    #[test]
+    fn failures_say_why_and_claude_code_notices_pass_through() {
+        let limit = event(json!({ "hook_event_name": "StopFailure", "error": "rate_limit", "last_assistant_message": "API Error: 429" }));
+        assert_eq!(notice(&limit, None), Some((Kind::Failed, "Claude stopped: usage limit reached".to_owned())));
+        let odd = event(json!({ "hook_event_name": "StopFailure", "error": "unknown", "last_assistant_message": "API Error: boom" }));
+        assert_eq!(notice(&odd, None), Some((Kind::Failed, "Claude stopped: API Error: boom".to_owned())));
+        let resumed = event(json!({ "hook_event_name": "Notification", "notification_type": "quota_auto_resume_fired", "message": "resuming" }));
+        assert_eq!(notice(&resumed, None).map(|(kind, _)| kind), Some(Kind::Done));
+        // The permission prompt already has its own card; idle reminders follow every turn.
+        for kind in ["permission_prompt", "idle_prompt"] {
+            let quiet = event(json!({ "hook_event_name": "Notification", "notification_type": kind, "message": "x" }));
+            assert_eq!(notice(&quiet, None), None);
+        }
+        let switched = event(json!({ "hook_event_name": "PostModelSwitch", "to_model": "claude-opus-5-5" }));
+        assert_eq!(notice(&switched, None), Some((Kind::Joined, "Claude now runs opus-5-5".to_owned())));
     }
 
     #[test]

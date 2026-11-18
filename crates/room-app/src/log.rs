@@ -282,6 +282,28 @@ pub fn agent_label(agent: &AgentRef) -> String {
     }
 }
 
+/// Why a turn stopped, in words (StopFailure's `error` type; hooks reference).
+pub fn failure_text(kind: Option<&str>, error: &str) -> String {
+    let text = match kind {
+        Some("rate_limit") => "usage limit reached",
+        Some("authentication_failed") => "signed out; log in again",
+        Some("oauth_org_not_allowed") => "this organization isn't allowed",
+        Some("account_on_hold") => "the account is on hold",
+        Some("billing_error") => "billing problem",
+        Some("server_error") => "the API is overloaded or down",
+        Some("max_output_tokens") => "the answer got too long",
+        Some("model_not_found") => "model not found",
+        Some("cloud_credential_error") => "cloud credentials failed",
+        _ => return truncate(error, 80),
+    };
+    text.to_owned()
+}
+
+/// `claude-opus-5-5` becomes `opus-5-5`.
+pub fn short_model(model: &str) -> &str {
+    model.trim_start_matches("claude-")
+}
+
 /// One log line per event, or `None` for events that only matter to the scene.
 pub fn summary(kind: &EventKind) -> Option<String> {
     let text = match kind {
@@ -315,8 +337,10 @@ pub fn summary(kind: &EventKind) -> Option<String> {
             Some(text) => format!("Done: {}", truncate(text, 80)),
             None => "Done".to_owned(),
         },
-        EventKind::TurnFailed { error } => format!("Stopped: {}", truncate(error, 80)),
+        EventKind::TurnFailed { error, kind } => format!("Stopped: {}", failure_text(kind.as_deref(), error)),
         EventKind::Compacting => "Compacting the conversation".to_owned(),
+        EventKind::Compacted => "Compacted the conversation".to_owned(),
+        EventKind::ModelSwitched { model } => format!("Model: {}", short_model(model)),
         EventKind::Unknown { event } => event.clone(),
     };
     Some(text)

@@ -52,9 +52,15 @@ pub enum EventKind {
     Notification { kind: Option<String>, message: String },
     /// The main agent finished its turn.
     TurnEnded { last_message: Option<String> },
-    TurnFailed { error: String },
+    /// The turn ended on an API error. `kind` is StopFailure's `error` type
+    /// (`rate_limit`, `authentication_failed`, `billing_error`, `server_error`, …).
+    TurnFailed { error: String, kind: Option<String> },
     /// Claude Code is about to compact the conversation (its context fills up).
     Compacting,
+    /// Compaction finished (`PostCompact`).
+    Compacted,
+    /// The session's model changed (`PostModelSwitch`): `/model`, a fallback, a resume.
+    ModelSwitched { model: String },
     Unknown { event: String },
 }
 
@@ -144,8 +150,14 @@ impl RoomEvent {
             "Stop" => EventKind::TurnEnded { last_message: opt_str(hook, "last_assistant_message") },
             "StopFailure" => EventKind::TurnFailed {
                 error: opt_str(hook, "last_assistant_message").unwrap_or_else(|| str_or_empty(hook, "error")),
+                kind: opt_str(hook, "error"),
             },
             "PreCompact" => EventKind::Compacting,
+            "PostCompact" => EventKind::Compacted,
+            "PostModelSwitch" => match opt_str(hook, "to_model") {
+                Some(model) => EventKind::ModelSwitched { model },
+                None => EventKind::Unknown { event },
+            },
             _ => EventKind::Unknown { event },
         };
         Ok(Self {
@@ -238,6 +250,22 @@ mod tests {
         assert_eq!(report_sender("please read <agent-message from=\"abc\">"), None);
         assert_eq!(report_sender("<agent-message from=\"\">"), None);
         assert_eq!(report_sender("<agent-message from=\"abc"), None);
+    }
+
+    #[test]
+    fn newer_events_parse() {
+        let parse = |hook: Value| RoomEvent::parse(&hook).unwrap().kind;
+        assert_eq!(
+            parse(json!({ "session_id": "s", "hook_event_name": "StopFailure", "error": "rate_limit",
+                "last_assistant_message": "API Error: Rate limit reached" })),
+            EventKind::TurnFailed { error: "API Error: Rate limit reached".into(), kind: Some("rate_limit".into()) }
+        );
+        assert_eq!(parse(json!({ "session_id": "s", "hook_event_name": "PostCompact", "trigger": "auto" })), EventKind::Compacted);
+        assert_eq!(
+            parse(json!({ "session_id": "s", "hook_event_name": "PostModelSwitch", "from_model": "claude-sonnet-5-5",
+                "to_model": "claude-opus-5-5", "source": "auto" })),
+            EventKind::ModelSwitched { model: "claude-opus-5-5".into() }
+        );
     }
 
     #[test]

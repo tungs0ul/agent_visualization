@@ -222,8 +222,15 @@ fn receive_events(
         {
             usage.update(&event.session_id, transcript);
         }
-        if event.kind == EventKind::Compacting {
-            usage.compacted(&event.session_id);
+        // The tank empties when compaction is done (PostCompact). A plugin from before
+        // PostCompact was forwarded never says so: then the next prompt or turn end does.
+        match &event.kind {
+            EventKind::Compacting => usage.compacting(&event.session_id),
+            EventKind::Compacted => usage.compacted(&event.session_id),
+            EventKind::UserPrompt { .. } | EventKind::TurnEnded { .. } if usage.is_compacting(&event.session_id) => {
+                usage.compacted(&event.session_id)
+            }
+            _ => {}
         }
         // A toast (and a sound) for what matters, from sessions the user works in.
         if !internal_helper && let Some(session) = model.session(&event.session_id).filter(|session| !session.headless) {

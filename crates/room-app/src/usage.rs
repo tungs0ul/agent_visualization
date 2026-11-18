@@ -26,6 +26,8 @@ struct Reading {
     context: u64,
     /// When Claude Code last compacted the conversation (the tank drains).
     compacted: Option<std::time::Instant>,
+    /// Compaction started (PreCompact) and hasn't finished (PostCompact) yet.
+    compacting: bool,
 }
 
 #[derive(Resource, Default)]
@@ -55,9 +57,19 @@ impl Usage {
         self.sessions.get(session).map(|reading| (reading.context, reading.compacted)).filter(|(size, at)| *size > 0 || at.is_some())
     }
 
-    /// Claude Code compacts the conversation: the context starts small again.
+    /// Claude Code starts compacting; the tank empties once it is done.
+    pub fn compacting(&mut self, session: &str) {
+        self.sessions.entry(session.to_owned()).or_default().compacting = true;
+    }
+
+    pub fn is_compacting(&self, session: &str) -> bool {
+        self.sessions.get(session).is_some_and(|reading| reading.compacting)
+    }
+
+    /// Claude Code compacted the conversation: the context starts small again.
     pub fn compacted(&mut self, session: &str) {
         let reading = self.sessions.entry(session.to_owned()).or_default();
+        reading.compacting = false;
         reading.context = 0;
         reading.compacted = Some(std::time::Instant::now());
     }

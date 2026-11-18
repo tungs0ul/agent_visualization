@@ -182,7 +182,8 @@ pub fn draw(
                     let (dot, state) = if trace.busy { (GREEN, "working") } else { (DIM, "idle") };
                     ui.label(egui::RichText::new("⚡").color(dot));
                     ui.label(egui::RichText::new("Claude").strong().color(WHITE));
-                    ui.label(egui::RichText::new(format!("· main agent · {state}")).color(DIM));
+                    let model = session.model.as_deref().map(|m| format!(" · {}", crate::log::short_model(m))).unwrap_or_default();
+                    ui.label(egui::RichText::new(format!("· main agent{model} · {state}")).color(DIM));
                 });
                 if let Some(prompt) = &prompt {
                     ui.label(egui::RichText::new(format!("Working on: {}", truncate(prompt, 80))).color(CYAN));
@@ -191,7 +192,9 @@ pub fn draw(
                     ui.label(egui::RichText::new(truncate(doing, 90)).small().color(DIM));
                 }
                 // How full Claude's context is (the tank on the main platform).
-                if let Some((size, _)) = usage.context(&session.id) {
+                if usage.is_compacting(&session.id) {
+                    ui.label(egui::RichText::new("Compacting the context…").small().color(AMBER));
+                } else if let Some((size, _)) = usage.context(&session.id) {
                     let window = crate::usage::window(session.model.as_deref());
                     let percent = (size * 100 / window.max(1)).min(100);
                     let color = match percent {

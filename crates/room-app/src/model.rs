@@ -310,7 +310,7 @@ fn update_session(session: &mut SessionState, event: &RoomEvent, changes: &mut V
             if let Some(failed) = failure(&event.kind) {
                 session.main_failed = failed;
             }
-            if let EventKind::SessionStarted { model: Some(name) } = &event.kind {
+            if let EventKind::SessionStarted { model: Some(name) } | EventKind::ModelSwitched { model: name } = &event.kind {
                 session.model = Some(name.clone());
             }
             if let EventKind::ToolStarted { tool, .. } = &event.kind
@@ -473,7 +473,9 @@ fn react(kind: &EventKind, current: Pose, session: &SessionState) -> (Option<Pos
         }
         EventKind::Notification { message, .. } => (None, Some(message.clone())),
         EventKind::TurnEnded { .. } => (Some(Pose::Idle), Some("All done".to_owned())),
-        EventKind::TurnFailed { .. } => (Some(Pose::Idle), Some("Something went wrong".to_owned())),
+        EventKind::TurnFailed { error, kind } => {
+            (Some(Pose::Idle), Some(format!("Stopped: {}", crate::log::failure_text(kind.as_deref(), error))))
+        }
         _ => (None, None),
     }
 }
