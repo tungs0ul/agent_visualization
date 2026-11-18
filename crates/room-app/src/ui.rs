@@ -13,7 +13,7 @@ use room_proto::event::ToolCall;
 use room_proto::{Decision, PermissionReply};
 
 use crate::log::{AutoAccept, FinalAnswer, LogLine, PendingPermission, Question, RoomLog, keyboard_target};
-use crate::chat::{Chats, Speaker};
+use crate::chat::Chats;
 use crate::console::{self, Console, OpenConsole};
 use crate::mini::{ToggleMini, ViewMode};
 use crate::server::Server;
@@ -442,60 +442,65 @@ pub struct Desk<'w> {
 fn chat_console(ui: &mut egui::Ui, chat: &mut Desk, markdown: &mut MarkdownCache, model: &Model) {
     let waker = chat.server.waker.clone();
     let chats = &mut *chat.chats;
-    if chats.session.is_none() {
+    if chats.session().is_none() {
         chats.refresh_past();
     }
-    let (mut start, mut stop, mut send) = (false, false, false);
+    // One tab per session the app runs, and "+" for a new one.
+    if !chats.sessions.is_empty() {
+        ui.horizontal_wrapped(|ui| {
+            for index in 0..chats.sessions.len() {
+                let session = &chats.sessions[index];
+                let dot = if session.busy { "● " } else { "" };
+                if ui.selectable_label(chats.active == index, format!("{dot}{}", session.name())).clicked() {
+                    chats.active = index;
+                }
+            }
+            if ui.selectable_label(chats.active >= chats.sessions.len(), "+").on_hover_text("Another session").clicked() {
+                chats.active = chats.sessions.len();
+            }
+        });
+        ui.add_space(2.0);
+    }
+    let (mut start, mut end, mut send) = (false, false, false);
     let mut resume: Option<(String, Option<String>)> = None;
     // A closure, so an early return still runs the actions below.
     let mut body = |ui: &mut egui::Ui| {
-        {
-            let Some(session) = chats.session.as_mut() else {
-                session_chooser(ui, chats, model, &mut start, &mut resume);
-                return;
-            };
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new(&session.cwd).small().weak());
-                if ui.small_button("Stop").on_hover_text("End this session").clicked() {
-                    stop = true;
+        let Some(session) = chats.sessions.get_mut(chats.active) else {
+            session_chooser(ui, chats, model, &mut start, &mut resume);
+            return;
+        };
+        chat_controls(ui, session, &mut end);
+        ui.separator();
+        let input_height = 74.0;
+        egui::ScrollArea::vertical()
+            .stick_to_bottom(true)
+            .auto_shrink(false)
+            .max_height((ui.available_height() - input_height).max(140.0))
+            .show(ui, |ui| {
+                for entry in &session.transcript {
+                    chat_entry(ui, entry, markdown);
+                }
+                if !session.streaming.is_empty() {
+                    egui_commonmark::CommonMarkViewer::new().show(ui, &mut markdown.0, &session.streaming);
+                } else if session.busy {
+                    ui.label(egui::RichText::new("Claude is working…").weak().italics());
                 }
             });
-            ui.separator();
-            let input_height = 70.0;
-            egui::ScrollArea::vertical()
-                .stick_to_bottom(true)
-                .auto_shrink(false)
-                .max_height((ui.available_height() - input_height).max(160.0))
-                .show(ui, |ui| {
-                    for (speaker, text) in &session.transcript {
-                        match speaker {
-                            Speaker::You => {
-                                ui.label(egui::RichText::new(format!("You: {text}")).strong());
-                            }
-                            Speaker::Claude => {
-                                egui_commonmark::CommonMarkViewer::new().show(ui, &mut markdown.0, text);
-                            }
-                            Speaker::Note => {
-                                ui.label(egui::RichText::new(text).weak().italics());
-                            }
-                        }
-                        ui.add_space(6.0);
-                    }
-                    if session.busy {
-                        ui.label(egui::RichText::new("Claude is working…").weak().italics());
-                    }
-                });
-            let response = ui.add(
-                egui::TextEdit::multiline(&mut chats.input)
-                    .hint_text("Message Claude (Enter sends, Shift+Enter for a new line)")
-                    .desired_rows(2)
-                    .desired_width(f32::INFINITY),
-            );
-            let enter = response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift);
+        let response = ui.add(
+            egui::TextEdit::multiline(&mut chats.input)
+                .hint_text("Message Claude (Enter sends, Shift+Enter for a new line; /compact, /model and skills work)")
+                .desired_rows(2)
+                .desired_width(f32::INFINITY),
+        );
+        let enter = response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift);
+        ui.horizontal(|ui| {
             if enter || ui.button("Send").clicked() {
                 send = true;
             }
-        }
+            if session.busy && ui.button("Stop").on_hover_text("Stop this turn (the session stays)").clicked() {
+                session.interrupt();
+            }
+        });
     };
     body(ui);
     if let Some((id, cwd)) = resume {
@@ -506,14 +511,84 @@ fn chat_console(ui: &mut egui::Ui, chat: &mut Desk, markdown: &mut MarkdownCache
     } else if start {
         chats.start(waker);
     }
-    if stop {
-        chats.session = None;
+    if end {
+        chats.close_active();
     }
     let message = chats.input.trim().to_owned();
-    if send && !message.is_empty() && let Some(session) = chats.session.as_mut() {
+    if send && !message.is_empty() && let Some(session) = chats.session_mut() {
         session.send(&message);
         chats.input.clear();
     }
+}
+
+/// The session's folder, model and permission mode, and ending it.
+fn chat_controls(ui: &mut egui::Ui, session: &mut crate::chat::ChatSession, end: &mut bool) {
+    ui.horizontal(|ui| {
+        let model = session.model.trim_start_matches("claude-").to_owned();
+        let mut picked_model = None;
+        egui::ComboBox::from_id_salt("chat-model")
+            .selected_text(egui::RichText::new(if model.is_empty() { "model".to_owned() } else { model }).small())
+            .width(110.0)
+            .show_ui(ui, |ui| {
+                for name in crate::chat::MODELS {
+                    if ui.selectable_label(false, name).clicked() {
+                        picked_model = Some(name);
+                    }
+                }
+            });
+        if let Some(name) = picked_model {
+            session.set_model(name);
+        }
+        let mut picked_mode = None;
+        let shown = crate::chat::MODES.iter().find(|(mode, _)| *mode == session.mode).map_or(session.mode, |(_, name)| name);
+        egui::ComboBox::from_id_salt("chat-mode").selected_text(egui::RichText::new(shown).small()).width(150.0).show_ui(ui, |ui| {
+            for (mode, name) in crate::chat::MODES {
+                if ui.selectable_label(session.mode == mode, name).clicked() {
+                    picked_mode = Some(mode);
+                }
+            }
+        });
+        if let Some(mode) = picked_mode {
+            session.set_mode(mode);
+        }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui.small_button("End").on_hover_text("End this session and close its tab").clicked() {
+                *end = true;
+            }
+        });
+    });
+    ui.add(egui::Label::new(egui::RichText::new(&session.cwd).small().weak()).truncate());
+}
+
+/// One line of a chat: your message, Claude's (as markdown), a tool step or a note.
+fn chat_entry(ui: &mut egui::Ui, entry: &crate::chat::Entry, markdown: &mut MarkdownCache) {
+    use crate::chat::{Entry, Step};
+    match entry {
+        Entry::You(text) => {
+            egui::Frame::new().fill(egui::Color32::from_rgb(20, 44, 70)).corner_radius(6.0).inner_margin(egui::Margin::same(6)).show(
+                ui,
+                |ui| {
+                    ui.add(egui::Label::new(egui::RichText::new(text).color(egui::Color32::WHITE)).wrap());
+                },
+            );
+        }
+        Entry::Claude(text) => {
+            egui_commonmark::CommonMarkViewer::new().show(ui, &mut markdown.0, text);
+        }
+        Entry::Tool { label, step, .. } => {
+            let (mark, color) = match step {
+                Step::Running => ("…", AUTO),
+                Step::Done => ("✔", egui::Color32::from_gray(140)),
+                Step::Failed => ("✖", DENY),
+            };
+            ui.label(egui::RichText::new(format!("{mark} {}", truncate(label, 80))).small().color(color));
+            return;
+        }
+        Entry::Note(text) => {
+            ui.label(egui::RichText::new(text).weak().italics());
+        }
+    }
+    ui.add_space(6.0);
 }
 
 /// No session of the app's own yet: continue the session the room shows (if it is
@@ -853,12 +928,8 @@ fn launch_console(ui: &mut egui::Ui, chats: &mut Chats, model: &Model, waker: cr
         }
     }
     ui.add_space(6.0);
-    if chats.session.is_some() {
-        ui.label(egui::RichText::new("This ends the app's current chat session.").small().color(AUTO));
-    }
     let ready = std::path::Path::new(chats.folder.trim()).is_dir();
     if ui.add_enabled(ready, colored_button("Start session", ALLOW)).clicked() {
-        chats.session = None;
         chats.start(waker);
         return true;
     }

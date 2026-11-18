@@ -11,24 +11,56 @@ use bevy::prelude::*;
 use crossbeam_channel::{Receiver, unbounded};
 use serde_json::{Value, json};
 
+use room_proto::event::ToolCall;
+
 use crate::model::SessionState;
 use crate::server::{Channel, Waker};
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Speaker {
-    You,
-    Claude,
-    Note,
+/// One line of a chat.
+#[derive(Clone, PartialEq, Debug)]
+pub enum Entry {
+    You(String),
+    Claude(String),
+    /// A tool Claude used: "Read main.rs", and how it went.
+    Tool { id: String, label: String, step: Step },
+    Note(String),
 }
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Step {
+    Running,
+    Done,
+    Failed,
+}
+
+/// Claude Code's permission modes the chat offers (`set_permission_mode`).
+pub const MODES: [(&str, &str); 4] = [
+    ("default", "Ask before acting"),
+    ("acceptEdits", "Accept edits"),
+    ("plan", "Plan only"),
+    ("auto", "Auto (a classifier decides)"),
+];
+
+/// Models the chat offers (`set_model`); Claude Code resolves the alias.
+pub const MODELS: [&str; 3] = ["opus", "sonnet", "haiku"];
+
+/// Entries kept from a resumed session's history.
+const HISTORY: usize = 120;
 
 pub struct ChatSession {
     pub cwd: String,
-    pub transcript: Vec<(Speaker, String)>,
+    pub transcript: Vec<Entry>,
+    /// Claude's answer as it streams in, until the whole message arrives.
+    pub streaming: String,
     /// A turn is running: Claude hasn't sent its `result` yet.
     pub busy: bool,
     pub session_id: Option<String>,
+    /// The model Claude Code reports (e.g. `claude-opus-5-5`).
+    pub model: String,
+    pub mode: &'static str,
     /// The usage limits Claude Code last reported (PLAN.md M10), for `Usage`.
     pub limits: Option<room_proto::limits::Limits>,
+    requests: u32,
     child: Child,
     stdin: ChildStdin,
     lines: Receiver<String>,
@@ -42,6 +74,8 @@ impl ChatSession {
         let mut command = Command::new("claude");
         command
             .args(["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"])
+            // Claude's answer arrives as it is written, not only when it is done.
+            .arg("--include-partial-messages")
             .current_dir(cwd)
             // Tells room-hook this `-p` session is the user's, not another tool's helper.
             .env("AGENT_ROOM_CHAT", "1")
@@ -73,62 +107,219 @@ impl ChatSession {
             }
         });
         let mut transcript = Vec::new();
-        if resume.is_some() {
-            transcript.push((Speaker::Note, "Resumed: Claude remembers this session's conversation.".to_owned()));
+        if let Some(id) = resume {
+            transcript = history(&transcript_path(cwd, id));
+            transcript.push(Entry::Note("Resumed: Claude remembers this session.".to_owned()));
         }
         Ok(Self {
             cwd: cwd.to_owned(),
             transcript,
+            streaming: String::new(),
             busy: false,
             session_id: resume.map(str::to_owned),
+            model: String::new(),
+            mode: "default",
             limits: None,
+            requests: 0,
             child,
             stdin,
             lines,
         })
     }
 
+    fn write(&mut self, message: &Value) -> bool {
+        writeln!(self.stdin, "{message}").and_then(|()| self.stdin.flush()).is_ok()
+    }
+
     pub fn send(&mut self, text: &str) {
-        let line = json!({ "type": "user", "message": { "role": "user", "content": text } }).to_string();
-        if writeln!(self.stdin, "{line}").and_then(|()| self.stdin.flush()).is_err() {
-            self.transcript.push((Speaker::Note, "Claude has stopped. Start a new session.".to_owned()));
+        if !self.write(&json!({ "type": "user", "message": { "role": "user", "content": text } })) {
+            self.transcript.push(Entry::Note("Claude has stopped. Start a new session.".to_owned()));
             return;
         }
-        self.transcript.push((Speaker::You, text.to_owned()));
+        self.transcript.push(Entry::You(text.to_owned()));
         self.busy = true;
+    }
+
+    /// A control request (the Agent SDK's protocol over stdin).
+    fn control(&mut self, request: Value) {
+        self.requests += 1;
+        let id = format!("room-{}", self.requests);
+        self.write(&json!({ "type": "control_request", "request_id": id, "request": request }));
+    }
+
+    /// Stops the running turn; the session stays.
+    pub fn interrupt(&mut self) {
+        self.control(json!({ "subtype": "interrupt" }));
+    }
+
+    pub fn set_model(&mut self, model: &str) {
+        self.control(json!({ "subtype": "set_model", "model": model }));
+    }
+
+    pub fn set_mode(&mut self, mode: &'static str) {
+        self.control(json!({ "subtype": "set_permission_mode", "mode": mode }));
+        self.mode = mode;
+    }
+
+    /// The folder's name, for its tab.
+    pub fn name(&self) -> &str {
+        self.cwd.trim_end_matches('/').rsplit('/').next().unwrap_or(&self.cwd)
     }
 
     /// Applies what Claude printed since the last frame.
     fn read(&mut self) {
         for line in self.lines.try_iter().collect::<Vec<_>>() {
             let Ok(event) = serde_json::from_str::<Value>(&line) else { continue };
-            match event.get("type").and_then(Value::as_str) {
-                Some("assistant") => {
-                    let texts = event["message"]["content"]
-                        .as_array()
-                        .into_iter()
-                        .flatten()
-                        .filter(|block| block["type"] == "text")
-                        .map(|block| block["text"].as_str().unwrap_or_default().to_owned());
-                    for text in texts.filter(|t| !t.trim().is_empty()) {
-                        self.transcript.push((Speaker::Claude, text));
-                    }
-                }
-                Some("rate_limit_event") => self.limits = room_proto::limits::Limits::from_stream(&event).or(self.limits),
-                Some("result") => {
-                    self.busy = false;
-                    let id = event["session_id"].as_str().map(str::to_owned);
-                    if id.is_some() && id != self.session_id
-                        && let Some(id) = &id
-                    {
-                        remember_chat_session(id);
-                    }
-                    self.session_id = id;
-                }
-                _ => {}
-            }
+            self.apply(&event);
         }
     }
+
+    fn apply(&mut self, event: &Value) {
+        // Sub-agents' messages carry the tool call that started them: the room shows
+        // those agents; the chat follows the main conversation.
+        if !event["parent_tool_use_id"].is_null() {
+            return;
+        }
+        match event["type"].as_str() {
+            Some("stream_event") => {
+                let inner = &event["event"];
+                match inner["type"].as_str() {
+                    Some("message_start") => self.streaming.clear(),
+                    Some("content_block_delta") if inner["delta"]["type"] == "text_delta" => {
+                        self.streaming.push_str(inner["delta"]["text"].as_str().unwrap_or_default());
+                    }
+                    _ => {}
+                }
+            }
+            Some("assistant") => {
+                self.streaming.clear();
+                for block in event["message"]["content"].as_array().into_iter().flatten() {
+                    match block["type"].as_str() {
+                        Some("text") => {
+                            let text = block["text"].as_str().unwrap_or_default();
+                            if !text.trim().is_empty() {
+                                self.transcript.push(Entry::Claude(text.to_owned()));
+                            }
+                        }
+                        Some("tool_use") => self.transcript.push(tool_entry(block)),
+                        _ => {}
+                    }
+                }
+            }
+            Some("user") => {
+                for block in event["message"]["content"].as_array().into_iter().flatten().filter(|b| b["type"] == "tool_result") {
+                    let id = block["tool_use_id"].as_str().unwrap_or_default();
+                    let failed = block["is_error"] == true;
+                    if let Some(Entry::Tool { step, .. }) =
+                        self.transcript.iter_mut().rev().find(|entry| matches!(entry, Entry::Tool { id: tool, .. } if tool == id))
+                    {
+                        *step = if failed { Step::Failed } else { Step::Done };
+                    }
+                }
+            }
+            Some("system") if event["subtype"] == "init" => {
+                self.model = event["model"].as_str().unwrap_or_default().to_owned();
+            }
+            Some("control_response") => {
+                let response = &event["response"]["response"];
+                if let Some(model) = response["model"].as_str() {
+                    self.model = model.to_owned();
+                }
+                if event["response"]["subtype"] == "error" {
+                    let error = event["response"]["error"].as_str().unwrap_or("refused");
+                    self.transcript.push(Entry::Note(format!("Claude Code said no: {error}")));
+                }
+            }
+            Some("rate_limit_event") => self.limits = room_proto::limits::Limits::from_stream(event).or(self.limits),
+            Some("result") => {
+                self.busy = false;
+                self.streaming.clear();
+                // Tools still running when a turn ends were stopped.
+                for entry in &mut self.transcript {
+                    if let Entry::Tool { step: step @ Step::Running, .. } = entry {
+                        *step = Step::Failed;
+                    }
+                }
+                if event["is_error"] == true && event["subtype"] != "success" {
+                    self.transcript.push(Entry::Note("The turn ended early.".to_owned()));
+                }
+                let id = event["session_id"].as_str().map(str::to_owned);
+                if id.is_some() && id != self.session_id
+                    && let Some(id) = &id
+                {
+                    remember_chat_session(id);
+                }
+                self.session_id = id;
+            }
+            _ => {}
+        }
+    }
+}
+
+/// "Read main.rs", from a `tool_use` block.
+fn tool_entry(block: &Value) -> Entry {
+    let call = ToolCall { name: block["name"].as_str().unwrap_or("tool").to_owned(), input: block["input"].clone() };
+    Entry::Tool { id: block["id"].as_str().unwrap_or_default().to_owned(), label: call.describe().1, step: Step::Running }
+}
+
+/// Where Claude Code keeps a folder's session (see [`past_sessions`]).
+fn transcript_path(folder: &str, id: &str) -> std::path::PathBuf {
+    let home = std::env::var_os("HOME").unwrap_or_default();
+    let slug: String = folder.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
+    std::path::Path::new(&home).join(".claude").join("projects").join(slug).join(format!("{id}.jsonl"))
+}
+
+/// The conversation so far, from a session's transcript: what the user typed,
+/// Claude's text and its tool steps, the last [`HISTORY`] entries.
+fn history(path: &std::path::Path) -> Vec<Entry> {
+    let Ok(file) = std::fs::File::open(path) else { return Vec::new() };
+    let mut entries = Vec::new();
+    for line in BufReader::new(file).lines().map_while(Result::ok) {
+        let Ok(entry) = serde_json::from_str::<Value>(&line) else { continue };
+        if entry["isSidechain"] == true || entry["isMeta"] == true {
+            continue;
+        }
+        let content = &entry["message"]["content"];
+        match (entry["type"].as_str(), content) {
+            (Some("user"), Value::String(text)) if !text.trim_start().starts_with('<') => entries.push(Entry::You(text.clone())),
+            (Some("user"), Value::Array(blocks)) => {
+                for block in blocks {
+                    if block["type"] == "text"
+                        && let Some(text) = block["text"].as_str().filter(|text| !text.trim_start().starts_with('<'))
+                    {
+                        entries.push(Entry::You(text.to_owned()));
+                    }
+                    if block["type"] == "tool_result"
+                        && let Some(Entry::Tool { step, .. }) = entries.iter_mut().rev().find(
+                            |e| matches!(e, Entry::Tool { id, .. } if Some(id.as_str()) == block["tool_use_id"].as_str()),
+                        )
+                    {
+                        *step = if block["is_error"] == true { Step::Failed } else { Step::Done };
+                    }
+                }
+            }
+            (Some("assistant"), Value::Array(blocks)) => {
+                for block in blocks {
+                    match block["type"].as_str() {
+                        Some("text") if block["text"].as_str().is_some_and(|t| !t.trim().is_empty()) => {
+                            entries.push(Entry::Claude(block["text"].as_str().unwrap_or_default().to_owned()));
+                        }
+                        Some("tool_use") => entries.push(tool_entry(block)),
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    // A step without a recorded result finished long ago.
+    for entry in &mut entries {
+        if let Entry::Tool { step: step @ Step::Running, .. } = entry {
+            *step = Step::Done;
+        }
+    }
+    let skip = entries.len().saturating_sub(HISTORY);
+    entries.split_off(skip)
 }
 
 impl Drop for ChatSession {
@@ -139,10 +330,12 @@ impl Drop for ChatSession {
     }
 }
 
-/// The app's own sessions; one at a time for now.
+/// The app's own sessions, one tab each.
 #[derive(Resource, Default)]
 pub struct Chats {
-    pub session: Option<ChatSession>,
+    pub sessions: Vec<ChatSession>,
+    /// The tab shown; `sessions.len()` shows the chooser for a new one.
+    pub active: usize,
     pub folder: String,
     pub input: String,
     pub error: Option<String>,
@@ -167,7 +360,7 @@ pub struct PastSession {
 impl Chats {
     /// Points a new chat at the folder of the session the room shows.
     pub fn open_for(&mut self, cwd: Option<&str>) {
-        if self.session.is_none()
+        if self.session().is_none()
             && let Some(cwd) = cwd
         {
             self.folder = cwd.to_owned();
@@ -218,11 +411,28 @@ impl Chats {
         }
     }
 
+    /// The tab shown, unless the chooser for a new one is.
+    pub fn session(&self) -> Option<&ChatSession> {
+        self.sessions.get(self.active)
+    }
+
+    pub fn session_mut(&mut self) -> Option<&mut ChatSession> {
+        self.sessions.get_mut(self.active)
+    }
+
+    /// Ends the shown tab's session (its process stops).
+    pub fn close_active(&mut self) {
+        if self.active < self.sessions.len() {
+            self.sessions.remove(self.active);
+            self.active = self.active.min(self.sessions.len().saturating_sub(1));
+        }
+    }
+
     fn launch(&mut self, resume: Option<&str>, waker: Waker) {
-        self.session = None;
         match ChatSession::start(self.folder.trim(), resume, waker) {
             Ok(session) => {
-                self.session = Some(session);
+                self.sessions.push(session);
+                self.active = self.sessions.len() - 1;
                 self.error = None;
             }
             Err(err) => self.error = Some(err),
@@ -308,7 +518,7 @@ pub fn read_chats(
     mut usage: ResMut<crate::usage::Usage>,
     open: Res<crate::console::OpenConsole>,
 ) {
-    if let Some(session) = chats.session.as_mut() {
+    for session in &mut chats.sessions {
         session.read();
         if let Some(limits) = session.limits.take() {
             usage.report_limits(limits);
@@ -353,7 +563,7 @@ pub fn dev_chat(
     }
     chats.folder = folder.to_owned();
     chats.start(server.waker.clone());
-    if let Some(session) = chats.session.as_mut() {
+    if let Some(session) = chats.session_mut() {
         session.send(message);
     }
 }
@@ -375,6 +585,27 @@ mod tests {
         ];
         std::fs::write(&path, lines.iter().map(Value::to_string).collect::<Vec<_>>().join("\n")).unwrap();
         assert_eq!(first_prompt(&path), Some(("fix it".to_owned(), true)));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn history_shows_prompts_answers_and_tool_steps() {
+        let dir = std::env::temp_dir().join(format!("room-history-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("s.jsonl");
+        let lines = [
+            json!({ "type": "user", "message": { "content": "fix the bug" } }),
+            json!({ "type": "assistant", "message": { "content": [
+                { "type": "text", "text": "Looking." },
+                { "type": "tool_use", "id": "t1", "name": "Read", "input": { "file_path": "/x/main.rs" } } ] } }),
+            json!({ "type": "user", "message": { "content": [{ "type": "tool_result", "tool_use_id": "t1", "is_error": true }] } }),
+            json!({ "type": "assistant", "isSidechain": true, "message": { "content": [{ "type": "text", "text": "sub-agent" }] } }),
+        ];
+        std::fs::write(&path, lines.iter().map(Value::to_string).collect::<Vec<_>>().join("\n")).unwrap();
+        let entries = history(&path);
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0], Entry::You("fix the bug".into()));
+        assert!(matches!(&entries[2], Entry::Tool { step: Step::Failed, label, .. } if label.contains("main.rs")));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
