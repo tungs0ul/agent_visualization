@@ -100,7 +100,15 @@ After pulling new changes, run `scripts/install-dev.sh` again and restart `agent
 - **Chat:** answers stream in as Claude writes, each tool step shows with ✔ or ✖,
   **Stop** ends the turn (not the session), and you can switch the model and the
   permission mode. Resumed sessions show their earlier conversation; several sessions
-  run side by side as tabs.
+  run side by side as tabs. Type **@** to pick a file from the session's folder (Tab or
+  Enter takes the first match). Drop files on the window: images go with your next
+  message, other files are mentioned by path.
+- **Plans:** when Claude finishes a plan in plan mode, the plan opens on a board in the
+  middle. Approve it (accept edits, or ask for each edit), or keep planning and type
+  what should change. Plans are never approved automatically.
+- **Why it stopped:** a turn that ends on an API error says why (usage limit, signed
+  out, API overloaded, ...). The Claude card shows the session's model and follows
+  `/model`; the context line says when Claude Code is compacting.
 - When Claude needs you and the window is behind other apps, macOS shows a
   notification (Settings, "Notifications"; macOS may ask to allow notifications for
   Script Editor the first time). A robot working in a linked git worktree says so on

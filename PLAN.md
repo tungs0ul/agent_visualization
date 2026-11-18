@@ -834,8 +834,8 @@ Built (`view3d.rs`), 3 key or the 2D/3D button top left of the room:
 - Kenney Space Kit models are exported with their root at (2, 0, 1.5);
   `scene_child` moves them back.
 - Assets load from the checkout (`AssetPlugin.file_path` = `CARGO_MANIFEST_DIR/../../assets`);
-  a binary installed elsewhere without the checkout has no 3D models. To do:
-  embed them or install them to `~/.agent-room/assets`.
+  a binary installed elsewhere without the checkout had no 3D models. Done in M21:
+  they are compiled into the binary.
 - Cost: the first switch to 3D compiles shaders (several seconds); in 3D the app
   redraws at 30 fps all the time (animations). 2D stays cheap.
 - `AGENT_ROOM_VIEW3D=1` starts in 3D (screenshot tests).
@@ -917,6 +917,60 @@ any game, film theme when they provide the 3d model for the agent and background
   (e.g. `updatedInput`), or whether this needs the M8 channel.
 - When Claude finishes a turn (`Stop.last_assistant_message`), show the answer in a
   centre pop-up (dismissable; compact in mini mode).
+
+### M21-M24: from the research on similar apps and new hooks (requested 2026-11-18, done 2026-11-18)
+
+User: "Do 1 2 3 4" (the top four from the research: Claude Code 2.1.327 hooks reference,
+claude-view, Claude Code Agent Monitor, Pixel Agents, pixtuoid).
+
+**M21 Models compiled into the app.** `cargo install` builds in a folder it deletes, so
+an installed app had no 3D models (M15 "to do"). `crates/room-app/build.rs` lists
+`assets/` (glb/gltf/bin/png/ktx2) into `$OUT_DIR/embedded_assets.rs`; `assets.rs`
+serves them from memory as Bevy's default asset source (`MemoryAssetReader`), so load
+paths are unchanged. About 4 MB in the binary. Checked: a copy of the binary run from
+the scratchpad, no checkout nearby, draws the whole HQ.
+
+**M22 Plan board.** Checked live (2.1.327, interactive, plan mode): `ExitPlanMode`
+fires `PreToolUse` and then `PermissionRequest` with `tool_input.plan` (markdown) and
+`planFilePath`, `permission_suggestions` empty. The PermissionRequest becomes
+`log::PendingPlan` (never auto-allowed), shown as a centre board: the plan as
+markdown, a feedback line, "Approve, accept edits" / "Approve, ask for each edit" /
+"Keep planning" / "Answer in terminal". Approve answers `allow` with the input echoed
+as `updatedInput` (the hooks reference requires it for ExitPlanMode) and
+`updatedPermissions: [{type: setMode, mode, destination: session}]`
+(`PermissionReply.mode`); Keep planning denies with the feedback as the message. The
+hook waits 5 minutes for plans (`room_proto::reply_timeout`). Verified end to end
+with a fake app socket: after approval the session's `permission_mode` was
+`acceptEdits` and Claude's Write ran without a prompt. Not checked: the board on
+screen (the screen was locked), plan mode in the app's own `-p` chat (Claude Code
+offers ExitPlanMode in `-p` only with a permission host; unknown whether the
+PermissionRequest hook counts).
+
+**M23 Newer hook events.** StopFailure keeps its `error` type: log, bubble and toast
+say why in words (`log::failure_text`). The plugin (0.3.0) forwards `PostCompact` and
+`PostModelSwitch`: the context tank empties when compaction is done (the card says
+"Compacting the context..." meanwhile; an old plugin without PostCompact empties it
+at the next prompt or turn end), the Claude card shows the model and a toast follows
+`/model` (payload checked live: `from_model`, `to_model`, `requested_model`,
+`source`). Toasts for Notification types `elicitation_dialog`,
+`elicitation_url_dialog`, `agent_needs_input`, `agent_completed`,
+`quota_auto_resume_*`, `auth_storage_failure`; `permission_prompt` and `idle_prompt`
+stay quiet (a card exists; idle follows every turn). Reinstall the plugin
+(`scripts/install-dev.sh`) for the new events.
+
+**M24 Chat composer.** `compose.rs`: typing `@` suggests files from the session's
+folder (`git ls-files --cached --others --exclude-standard`, once per folder, in a
+thread; names starting with the query first); Tab, Enter or a click completes it.
+Files dropped on the window open the chat: images (PNG, JPEG, GIF, WebP, at most
+3.7 MB) are sent as base64 image blocks before the text, other files are added as
+`@path`. Image blocks checked live with `claude -p` stream-json (Claude named the
+colour). Not checked on screen: the suggestion list, chips, the drop hint.
+
+Left from the research for later: Cmd+K search over past transcripts (bookshelf),
+open a changed file in the editor, recently closed sessions, source badges, idle
+life (lounge, pet), `PostToolBatch` bursts, `TaskCreated`/`TaskCompleted` board,
+`MessageDisplay` live text (measure its process-per-batch cost first), Elicitation
+answers from the app.
 
 ### M20: More consoles, the chat as a terminal stand-in, notifications, worktrees (requested 2026-11-18, done 2026-11-18)
 
@@ -1133,6 +1187,10 @@ config file, and can remove both cleanly.
 - [ ] M17 Agentverse 3D workspace (robot, Blender stations and environment, movement, hand-over at the main desk, activity holograms, light trails, HUD with session switcher, robot details; 2026-11-17/18). The v2 roadmap from the user's Agentverse brief is in V2.md.
 - [x] M5 Permissions (2026-11-17; user still to try Y/N and a deny reason live)
 - [ ] M6 Polish
+- [x] M21 3D models compiled into the binary (2026-11-18)
+- [x] M22 Plan board (2026-11-18; board not yet seen on screen)
+- [x] M23 StopFailure reasons, PostCompact, PostModelSwitch, notices (2026-11-18; plugin 0.3.0)
+- [x] M24 Chat @ mentions and dropped images (2026-11-18; not yet seen on screen)
 - [x] M7 Distribution, code side (2026-11-17); publishing left to the user
 
 ## 12. Handoff log
@@ -1628,3 +1686,11 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   and worktrees). A subagent started the consoles but was stopped before editing
   anything: the user's new global rule says one waiting subagent should be the main
   session's own work instead.
+- 2026-11-18, Claude Opus 5.5: researched what is left and new features (hooks
+  reference for 2.1.327, similar apps); the user picked four, built as M21-M24 in four
+  commits. Live checks against real Claude Code: plan approval switches the mode,
+  PostModelSwitch payload, image blocks in stream-json. The screen was asleep, then
+  locked, so no screenshot of the plan board, the chat suggestions or the drop hint:
+  **Next:** look at those on screen, reinstall the plugin (0.3.0) for PostCompact and
+  PostModelSwitch. Test plan files the live probes wrote to `~/.claude/plans` were
+  deleted.
