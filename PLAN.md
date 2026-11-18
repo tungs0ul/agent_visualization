@@ -1029,7 +1029,7 @@ config file, and can remove both cleanly.
 - [x] M14 Themes: light, dark, spaceship (2026-11-17)
 - [x] M15 3D station view, first version (2026-11-17; see M15 "Next")
 - [ ] M16 Custom themes from the user's models (paused: one look for now, see M17)
-- [ ] M17 Agentverse 3D workspace (phases 1-3 done 2026-11-17: robot, workspace, movement; 3D default incl. mini; one dark look. Next: 4 capsule hand-over + paths, 5 UI panels, 6 power)
+- [ ] M17 Agentverse 3D workspace (robot, Blender stations and environment, movement, hand-over at the main desk, activity holograms, light trails, HUD with session switcher, robot details; 2026-11-17/18). The v2 roadmap from the user's Agentverse brief is in V2.md.
 - [x] M5 Permissions (2026-11-17; user still to try Y/N and a deny reason live)
 - [ ] M6 Polish
 - [x] M7 Distribution, code side (2026-11-17); publishing left to the user
@@ -1441,3 +1441,12 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   bubble overflow) were stopped unfinished because their separate worktree builds
   heated the Mac; their worktrees are still in `.claude/worktrees` (12.8 GB), waiting
   for the user's OK to delete. **Next:** M17 phases 4-6; bubble overflow fix in 2D.
+- 2026-11-18, Claude Opus 5.5 (unattended night run, then the user's Agentverse brief):
+  bubble overflow fixed (real text layout, wrapping); HUD over the 3D view (title,
+  main agent card, counts, stage timeline, robot details on label click, list of
+  live sessions to switch rooms); robots walk round the main platform; unused models
+  removed. Measured the release build: 3D idles at about 19 % CPU (it never sleeps),
+  212 MB. Wrote **V2.md**: the user's brief turned into phases 0-6 with a power
+  budget, an honest data map (no invented progress), the engine decision (stay on
+  Bevy, not React Three Fiber, for power) and open questions. **Next:** V2 phase 0
+  (3D sleeps when idle) and `scripts/measure.sh`.
