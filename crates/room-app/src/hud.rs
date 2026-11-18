@@ -53,6 +53,7 @@ const EDGE: egui::Color32 = egui::Color32::from_rgb(60, 110, 200);
 const CYAN: egui::Color32 = egui::Color32::from_rgb(90, 210, 255);
 const GREEN: egui::Color32 = egui::Color32::from_rgb(80, 220, 140);
 const DIM: egui::Color32 = egui::Color32::from_gray(150);
+const AMBER: egui::Color32 = egui::Color32::from_rgb(255, 190, 80);
 const WHITE: egui::Color32 = egui::Color32::WHITE;
 
 fn card() -> egui::Frame {
@@ -91,13 +92,31 @@ pub fn draw(
     toasts: Res<crate::notify::Toasts>,
     usage: Res<crate::usage::Usage>,
 ) -> Result {
-    if mode.mini {
-        return Ok(());
-    }
     let Ok(camera) = camera.single() else { return Ok(()) };
     let Some(rect) = camera.logical_viewport_rect() else { return Ok(()) };
     let area = egui::Rect::from_min_max(egui::pos2(rect.min.x, rect.min.y), egui::pos2(rect.max.x, rect.max.y));
     let ctx = contexts.ctx_mut()?;
+    // Who is blocked on the user, in both views: the most asked-for thing at a glance.
+    let waiting = needs_you(&model, &log);
+    if !waiting.is_empty() {
+        let text = match waiting.len() {
+            1 => format!("{} needs you", waiting[0]),
+            n => format!("{n} sessions need you"),
+        };
+        let at = if mode.mini { area.min + egui::vec2(6.0, 6.0) } else { egui::pos2(area.center().x, area.max.y - 8.0) };
+        let pivot = if mode.mini { egui::Align2::LEFT_TOP } else { egui::Align2::CENTER_BOTTOM };
+        egui::Area::new("hud-needs-you".into()).fixed_pos(at).pivot(pivot).interactable(false).show(ctx, |ui| {
+            card()
+                .fill(egui::Color32::from_rgb(70, 40, 6))
+                .stroke(egui::Stroke::new(1.5, AMBER))
+                .show(ui, |ui| {
+                    ui.label(egui::RichText::new(format!("⚠ {text}")).strong().color(AMBER));
+                });
+        });
+    }
+    if mode.mini {
+        return Ok(());
+    }
 
     // Every Claude Code session sends its events here, one room each. When more than
     // one is live, list them under the counts so the user sees them and can switch
@@ -236,7 +255,14 @@ pub fn draw(
         .default_width(360.0)
         .frame(card())
         .show(ctx, |ui| {
-            ui.label(egui::RichText::new(format!("Status: {state}")).color(CYAN));
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new(format!("Status: {state}")).color(CYAN));
+                if let Some(pid) = session.claude_pid
+                    && ui.small_button("Open terminal").on_hover_text("Bring this session's terminal to the front").clicked()
+                {
+                    focus_terminal(pid);
+                }
+            });
             if let Some(task) = task {
                 ui.label(egui::RichText::new(format!("Task: {}", truncate(&task, 200))).color(WHITE));
             }
@@ -290,4 +316,57 @@ fn toast_stack(ctx: &egui::Context, area: egui::Rect, toasts: &crate::notify::To
                 ui.add_space(4.0);
             }
         });
+}
+
+/// Live sessions blocked on the user (a permission card, a question, or an agent
+/// waiting), by project name.
+pub fn needs_you(model: &Model, log: &RoomLog) -> Vec<String> {
+    model
+        .live()
+        .into_iter()
+        .filter(|session| {
+            log.pending.iter().any(|card| card.session == session.id)
+                || log.questions.iter().any(|card| card.session == session.id)
+                || session.main_pose == Pose::Waiting
+                || session.agents.iter().any(|(_, info)| info.status == Status::Waiting)
+        })
+        .map(|session| session.name())
+        .collect()
+}
+
+/// The window title says who needs you too (seen in the Dock menu and Mission
+/// Control when the window is hidden).
+pub fn title(model: Res<Model>, log: Res<RoomLog>, mut window: Single<&mut Window, With<bevy::window::PrimaryWindow>>) {
+    let waiting = needs_you(&model, &log).len();
+    let title = match waiting {
+        0 => "Agent Room".to_owned(),
+        n => format!("Agent Room · {n} need{} you", if n == 1 { "s" } else { "" }),
+    };
+    if window.title != title {
+        window.title = title;
+    }
+}
+
+/// Brings the terminal app running a `claude` process to the front: walks up its
+/// parent processes to the first one inside an `.app` bundle (Ghostty, Terminal,
+/// iTerm, an editor) and opens that app. In the background: `ps` per step.
+pub fn focus_terminal(pid: u32) {
+    std::thread::spawn(move || {
+        let mut pid = pid;
+        for _ in 0..12 {
+            let Ok(out) = std::process::Command::new("ps").args(["-o", "ppid=,comm=", "-p", &pid.to_string()]).output() else {
+                return;
+            };
+            let line = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+            let Some((parent, command)) = line.split_once(char::is_whitespace) else { return };
+            if let Some(end) = command.find(".app/") {
+                let _ = std::process::Command::new("open").arg(&command[..end + 4]).status();
+                return;
+            }
+            match parent.trim().parse::<u32>() {
+                Ok(parent) if parent > 1 => pid = parent,
+                _ => return,
+            }
+        }
+    });
 }

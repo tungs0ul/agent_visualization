@@ -706,10 +706,20 @@ pub fn labels(
                     }
                 });
                 // Clicking a robot's label opens its details (`hud`).
-                let click = shown.response.interact(egui::Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+                let click = shown
+                    .response
+                    .interact(egui::Sense::click())
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .on_hover_text("Click: details · double-click: its terminal");
                 if click.clicked() {
                     selected.0 = Some(avatar.who.clone());
                     picked = Some(avatar.session.clone());
+                }
+                // Double-click: straight to the session's terminal.
+                if click.double_clicked()
+                    && let Some(pid) = session.claude_pid
+                {
+                    crate::hud::focus_terminal(pid);
                 }
             });
     }
@@ -1043,6 +1053,8 @@ pub struct LinkState {
     lines: HashMap<Entity, Entity>,
     /// Red warning rings under failing robots.
     rings: HashMap<Entity, Entity>,
+    /// Orange beacons over robots waiting for the user.
+    beacons: HashMap<Entity, Entity>,
     /// Sub-agents that got their task capsule, and robots whose report flew.
     greeted: Vec<Entity>,
     reported: Vec<Entity>,
@@ -1132,6 +1144,26 @@ pub fn links(
             };
             spawn_capsule(&mut commands, &assets, waist(at), to);
         }
+        // The beacon: this one waits for you.
+        match (avatar.pose == Pose::Waiting && avatar.presence == Presence::Here, state.beacons.get(&robot).copied()) {
+            (true, beacon) => {
+                let beacon = beacon.unwrap_or_else(|| {
+                    let glow = materials.add(StandardMaterial { base_color: Color::BLACK, emissive: LinearRgba::rgb(6.0, 2.6, 0.2), ..default() });
+                    let beacon = commands.spawn((LinkPart, Mesh3d(meshes.add(Sphere::new(0.1))), MeshMaterial3d(glow), Transform::default())).id();
+                    state.beacons.insert(robot, beacon);
+                    beacon
+                });
+                if let Ok(mut transform) = parts.get_mut(beacon) {
+                    let bob = 0.06 * (time.elapsed_secs() * 3.0).sin();
+                    *transform = Transform::from_translation(at.translation + Vec3::Y * (1.25 * at.scale.y + bob));
+                }
+            }
+            (false, Some(beacon)) => {
+                commands.entity(beacon).despawn();
+                state.beacons.remove(&robot);
+            }
+            _ => {}
+        }
         // The warning ring.
         match (avatar.failed && avatar.presence == Presence::Here, state.rings.get(&robot).copied()) {
             (true, ring) => {
@@ -1155,9 +1187,16 @@ pub fn links(
         }
     }
     // Robots that left: drop what was theirs.
-    let gone: Vec<Entity> = state.lines.keys().chain(state.rings.keys()).copied().filter(|robot| avatars.get(*robot).is_err()).collect();
+    let gone: Vec<Entity> = state
+        .lines
+        .keys()
+        .chain(state.rings.keys())
+        .chain(state.beacons.keys())
+        .copied()
+        .filter(|robot| avatars.get(*robot).is_err())
+        .collect();
     for robot in gone {
-        for part in [state.lines.remove(&robot), state.rings.remove(&robot)].into_iter().flatten() {
+        for part in [state.lines.remove(&robot), state.rings.remove(&robot), state.beacons.remove(&robot)].into_iter().flatten() {
             commands.entity(part).despawn();
         }
     }

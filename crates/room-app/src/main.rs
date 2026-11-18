@@ -130,6 +130,7 @@ fn main() -> AppExit {
                     .chain(),
                 (receive_events, chat::dev_chat, chat::read_chats),
                 settle_permissions,
+                hud::title,
                 stats::measure,
                 (view3d::sync, view3d::teleporter, view3d::deliver, view3d::links, view3d::activity_holograms, view3d::light_trails, hud::trace, view3d::camera_input, view3d::frame).chain(),
                 pace_updates,
