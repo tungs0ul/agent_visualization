@@ -16,6 +16,7 @@ mod server;
 mod stats;
 mod hud;
 mod view3d;
+mod wins;
 mod world3d;
 mod ui;
 mod usage;
@@ -108,6 +109,7 @@ fn main() -> AppExit {
         .init_resource::<view3d::CameraView>()
         .init_resource::<notify::Toasts>()
         .init_resource::<usage::Usage>()
+        .init_resource::<wins::Wins>()
         .init_resource::<view3d::BrightHolos>()
         .init_resource::<hud::Trace>()
         .init_resource::<hud::Selected>()
@@ -132,14 +134,14 @@ fn main() -> AppExit {
                 settle_permissions,
                 hud::title,
                 stats::measure,
-                (view3d::sync, view3d::teleporter, view3d::deliver, view3d::links, view3d::context_tank, view3d::activity_holograms, view3d::light_trails, hud::trace, view3d::camera_input, view3d::frame).chain(),
+                (view3d::sync, view3d::teleporter, view3d::deliver, view3d::links, view3d::context_tank, view3d::celebrate, view3d::activity_holograms, view3d::light_trails, hud::trace, view3d::camera_input, view3d::frame).chain(),
                 pace_updates,
                 log_frame_rate.run_if(|| std::env::var_os("AGENT_ROOM_FPS_LOG").is_some()),
                 window::take_screenshots,
             )
                 .chain(),
         )
-        .add_systems(EguiPrimaryContextPass, (ui::draw, view3d::labels, hud::draw).chain());
+        .add_systems(EguiPrimaryContextPass, (ui::draw, view3d::labels, view3d::trophy_clicks, hud::draw).chain());
     if let Some(mode) = ScreenshotMode::from_env() {
         app.insert_resource(mode).insert_resource(WinitSettings::continuous());
     }
@@ -187,6 +189,7 @@ fn receive_events(
     mut toasts: ResMut<notify::Toasts>,
     prefs: Res<ui::PanelPrefs>,
     mut usage: ResMut<usage::Usage>,
+    mut wins: ResMut<wins::Wins>,
 ) {
     let now = Instant::now();
     for Incoming { event, reply } in server.events.try_iter() {
@@ -209,6 +212,15 @@ fn receive_events(
             let project = (model.live().len() > 1).then(|| session.name());
             if let Some((kind, text)) = notify::notice(&event, project.as_deref()) {
                 toasts.push(kind, text, prefs.sound);
+            }
+            // Commits and passing tests get a burst of light; finished turns, a trophy.
+            if let Some(win) = wins.on_event(&event, &session.name()) {
+                let who = agent_label(&event.agent);
+                let text = match &project {
+                    Some(project) => format!("{project} · {who}: {}", win.text()),
+                    None => format!("{who}: {}", win.text()),
+                };
+                toasts.push(notify::Kind::Win, text, prefs.sound);
             }
         }
         // Where everyone works (PLAN.md M4d): the session's repo from its cwd, each

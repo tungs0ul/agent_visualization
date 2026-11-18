@@ -317,7 +317,7 @@ fn toast_stack(ctx: &egui::Context, area: egui::Rect, toasts: &crate::notify::To
                 let fade = (left * 4.0).clamp(0.0, 1.0);
                 let accent = match kind {
                     Kind::Joined => CYAN,
-                    Kind::Finished | Kind::Done => GREEN,
+                    Kind::Finished | Kind::Done | Kind::Win => GREEN,
                     Kind::Failed => egui::Color32::from_rgb(255, 110, 100),
                     Kind::Waiting => egui::Color32::from_rgb(255, 190, 80),
                 };

@@ -1473,3 +1473,154 @@ pub fn context_tank(
         material.emissive = color;
     }
 }
+
+/// A spark of a celebration burst.
+#[derive(Component)]
+pub(crate) struct Spark {
+    velocity: Vec3,
+    age: f32,
+}
+
+/// How long a burst's sparks fly.
+const SPARK_SECS: f32 = 1.6;
+
+/// Where the trophy shelf starts (front right, the teleporter's mirror) and how far
+/// apart trophies stand.
+const SHELF_AT: Vec3 = Vec3::new(2.6, 0.0, 4.6);
+const TROPHY_STEP: f32 = 0.34;
+
+fn trophy_spot(index: usize) -> Vec3 {
+    SHELF_AT + Vec3::new(index as f32 * TROPHY_STEP, 0.42, 0.0)
+}
+
+/// What `celebrate` keeps: the shared look and the trophy cubes on the shelf.
+#[derive(Default)]
+pub struct Celebration {
+    look: Option<(Handle<Mesh>, Handle<StandardMaterial>, Handle<StandardMaterial>)>,
+    cubes: Vec<Entity>,
+    /// The trophies the cubes show (count and the oldest one's time).
+    shown: (usize, Option<std::time::Instant>),
+}
+
+/// Plays the wins: a burst of sparks over the robot whose commit or test run
+/// succeeded, and a gold cube on the shelf for every finished turn.
+#[allow(clippy::too_many_arguments)]
+pub fn celebrate(
+    mut commands: Commands,
+    mut view: ResMut<View3d>,
+    time: Res<Time>,
+    mut wins: ResMut<crate::wins::Wins>,
+    avatars: Query<(&Avatar, &Transform), Without<Spark>>,
+    mut sparks: Query<(Entity, &mut Spark, &mut Transform)>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut state: Local<Celebration>,
+) {
+    let (cube, spark_glow, gold) = state
+        .look
+        .get_or_insert_with(|| {
+            let shelf = materials.add(StandardMaterial { base_color: Color::BLACK, emissive: LinearRgba::rgb(0.9, 0.6, 0.12), ..default() });
+            let length = TROPHY_STEP * crate::wins::SHELF as f32;
+            commands.spawn((
+                Mesh3d(meshes.add(Cuboid::new(length, 0.03, 0.2))),
+                MeshMaterial3d(shelf),
+                Transform::from_translation(SHELF_AT + Vec3::new(length / 2.0 - TROPHY_STEP / 2.0, 0.3, 0.0)),
+            ));
+            (
+                meshes.add(Cuboid::new(1.0, 1.0, 1.0)),
+                materials.add(StandardMaterial { base_color: Color::BLACK, emissive: LinearRgba::rgb(3.0, 2.6, 6.0), ..default() }),
+                materials.add(StandardMaterial {
+                    base_color: Color::srgb(1.0, 0.8, 0.3),
+                    emissive: LinearRgba::rgb(2.6, 1.7, 0.3),
+                    metallic: 0.9,
+                    ..default()
+                }),
+            )
+        })
+        .clone();
+    // New bursts.
+    for (session, who, _) in wins.bursts.drain(..) {
+        let Some((_, at)) = avatars.iter().find(|(avatar, _)| avatar.session == session && avatar.who == who) else { continue };
+        let from = at.translation + Vec3::Y * 1.1 * at.scale.y;
+        for i in 0..28 {
+            let angle = i as f32 * 2.399;
+            let out = Vec3::new(angle.cos(), 0.0, angle.sin()) * (0.6 + (i % 5) as f32 * 0.25);
+            commands.spawn((
+                Spark { velocity: out + Vec3::Y * (2.2 + (i % 3) as f32 * 0.6), age: 0.0 },
+                Mesh3d(cube.clone()),
+                MeshMaterial3d(spark_glow.clone()),
+                Transform::from_translation(from).with_scale(Vec3::splat(0.05)),
+            ));
+        }
+    }
+    let dt = time.delta_secs();
+    for (entity, mut spark, mut at) in &mut sparks {
+        spark.age += dt;
+        if spark.age >= SPARK_SECS {
+            commands.entity(entity).despawn();
+            continue;
+        }
+        spark.velocity.y -= 4.0 * dt;
+        at.translation += spark.velocity * dt;
+        at.rotate_y(6.0 * dt);
+        at.scale = Vec3::splat(0.05 * (1.0 - spark.age / SPARK_SECS));
+        view.moving = true;
+    }
+    // The shelf: rebuilt only when its trophies change.
+    let shown = (wins.trophies.len(), wins.trophies.first().map(|trophy| trophy.at));
+    if shown != state.shown {
+        state.shown = shown;
+        for cube in state.cubes.drain(..) {
+            commands.entity(cube).despawn();
+        }
+        state.cubes = (0..wins.trophies.len())
+            .map(|index| {
+                commands
+                    .spawn((
+                        Mesh3d(cube.clone()),
+                        MeshMaterial3d(gold.clone()),
+                        Transform::from_translation(trophy_spot(index))
+                            .with_rotation(Quat::from_rotation_y(0.6))
+                            .with_scale(Vec3::splat(0.16)),
+                    ))
+                    .id()
+            })
+            .collect();
+    }
+}
+
+/// Each trophy is clickable: it opens that turn's answer again.
+pub fn trophy_clicks(
+    mut contexts: EguiContexts,
+    mode: Res<crate::mini::ViewMode>,
+    wins: Res<crate::wins::Wins>,
+    mut log: ResMut<crate::log::RoomLog>,
+    camera: Query<(&Camera, &GlobalTransform), With<RoomCamera3d>>,
+) -> Result {
+    if mode.mini || wins.trophies.is_empty() {
+        return Ok(());
+    }
+    let ctx = contexts.ctx_mut()?;
+    let Ok((camera, camera_at)) = camera.single() else { return Ok(()) };
+    let offset = camera.logical_viewport_rect().map_or(Vec2::ZERO, |rect| rect.min);
+    for (index, trophy) in wins.trophies.iter().enumerate() {
+        let Ok(spot) = camera.world_to_viewport(camera_at, trophy_spot(index)) else { continue };
+        let spot = spot + offset;
+        egui::Area::new(egui::Id::new(("trophy", index)))
+            .fixed_pos(egui::pos2(spot.x, spot.y))
+            .pivot(egui::Align2::CENTER_CENTER)
+            .order(egui::Order::Background)
+            .show(ctx, |ui| {
+                let (_, response) = ui.allocate_exact_size(egui::vec2(16.0, 16.0), egui::Sense::click());
+                let ago = crate::hud::ago(trophy.at);
+                let response = response
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .on_hover_text(format!("{} · {ago} ago: click to read this turn's answer", trophy.project));
+                if response.clicked() {
+                    log.final_answer =
+                        Some(crate::log::FinalAnswer { session: trophy.session.clone(), text: trophy.answer.clone(), open: true });
+                }
+            });
+    }
+    Ok(())
+}

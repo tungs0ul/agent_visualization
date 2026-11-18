@@ -19,6 +19,8 @@ pub enum Kind {
     Failed,
     Waiting,
     Done,
+    /// A commit or a test run succeeded (`wins`).
+    Win,
 }
 
 impl Kind {
@@ -30,6 +32,7 @@ impl Kind {
             Kind::Failed => "/System/Library/Sounds/Basso.aiff",
             Kind::Waiting => "/System/Library/Sounds/Ping.aiff",
             Kind::Done => "/System/Library/Sounds/Purr.aiff",
+            Kind::Win => "/System/Library/Sounds/Hero.aiff",
         }
     }
 }
