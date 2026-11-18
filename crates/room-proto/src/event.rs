@@ -52,6 +52,8 @@ pub enum EventKind {
     /// The main agent finished its turn.
     TurnEnded { last_message: Option<String> },
     TurnFailed { error: String },
+    /// Claude Code is about to compact the conversation (its context fills up).
+    Compacting,
     Unknown { event: String },
 }
 
@@ -141,6 +143,7 @@ impl RoomEvent {
             "StopFailure" => EventKind::TurnFailed {
                 error: opt_str(hook, "last_assistant_message").unwrap_or_else(|| str_or_empty(hook, "error")),
             },
+            "PreCompact" => EventKind::Compacting,
             _ => EventKind::Unknown { event },
         };
         Ok(Self {
@@ -203,8 +206,8 @@ mod tests {
 
     #[test]
     fn unknown_event_is_kept() {
-        let event = RoomEvent::parse(&json!({ "session_id": "s", "hook_event_name": "PreCompact" })).unwrap();
-        assert_eq!(event.kind, EventKind::Unknown { event: "PreCompact".into() });
+        let event = RoomEvent::parse(&json!({ "session_id": "s", "hook_event_name": "SomethingNew" })).unwrap();
+        assert_eq!(event.kind, EventKind::Unknown { event: "SomethingNew".into() });
         assert_eq!(event.agent, AgentRef::Main);
     }
 

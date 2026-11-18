@@ -106,6 +106,10 @@ pub struct SessionState {
     pub main_repo: Option<Repo>,
     /// Claude's last tool call or turn failed, and nothing has succeeded since.
     pub main_failed: bool,
+    /// The model, from `SessionStart` (its context window: 1M for `[1m]` models).
+    pub model: Option<String>,
+    /// Claude's plan: its latest `TodoWrite` list (text, state).
+    pub todos: Vec<(String, TodoState)>,
     /// Sub-agents in the order they joined, finished ones included.
     pub agents: Vec<(String, AgentInfo)>,
     pub ended: bool,
@@ -306,6 +310,14 @@ fn update_session(session: &mut SessionState, event: &RoomEvent, changes: &mut V
             if let Some(failed) = failure(&event.kind) {
                 session.main_failed = failed;
             }
+            if let EventKind::SessionStarted { model: Some(name) } = &event.kind {
+                session.model = Some(name.clone());
+            }
+            if let EventKind::ToolStarted { tool, .. } = &event.kind
+                && tool.name == "TodoWrite"
+            {
+                session.todos = todos(&tool.input);
+            }
             let (pose, line) = react(&event.kind, session.main_pose, session);
             if let Some(pose) = pose {
                 session.main_pose = pose;
@@ -393,6 +405,34 @@ fn update_sub(session: &mut SessionState, id: &str, agent_type: &str, kind: &Eve
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TodoState {
+    Pending,
+    Doing,
+    Done,
+}
+
+/// A `TodoWrite` call's list: the item being worked on reads as what is done now
+/// (its `activeForm`), the others as written.
+fn todos(input: &serde_json::Value) -> Vec<(String, TodoState)> {
+    let Some(items) = input["todos"].as_array() else { return Vec::new() };
+    items
+        .iter()
+        .filter_map(|item| {
+            let state = match item["status"].as_str()? {
+                "completed" => TodoState::Done,
+                "in_progress" => TodoState::Doing,
+                _ => TodoState::Pending,
+            };
+            let text = match state {
+                TodoState::Doing => item["activeForm"].as_str().or(item["content"].as_str())?,
+                _ => item["content"].as_str()?,
+            };
+            Some((text.to_owned(), state))
+        })
+        .collect()
+}
+
 /// Whether an event marks the agent as failing (a tool call or the turn failed) or
 /// clears it (a tool call succeeded, a new prompt); `None` leaves it as it is.
 fn failure(kind: &EventKind) -> Option<bool> {
@@ -472,6 +512,24 @@ mod tests {
             Some((id, "Explore")),
             json!({ "hook_event_name": "PreToolUse", "tool_name": "Read", "tool_input": { "file_path": "/x/a.rs" }, "tool_use_id": "t" }),
         )
+    }
+
+    #[test]
+    fn claude_s_plan_comes_from_its_todo_list() {
+        let mut model = Model::default();
+        model.apply(&event(
+            "s",
+            None,
+            json!({ "hook_event_name": "PreToolUse", "tool_name": "TodoWrite", "tool_use_id": "t", "tool_input": { "todos": [
+                { "content": "Read the code", "activeForm": "Reading the code", "status": "completed" },
+                { "content": "Fix the bug", "activeForm": "Fixing the bug", "status": "in_progress" },
+                { "content": "Run the tests", "activeForm": "Running the tests", "status": "pending" }
+            ] } }),
+        ));
+        let todos = &model.shown().unwrap().todos;
+        assert_eq!(todos[0], ("Read the code".to_owned(), TodoState::Done));
+        assert_eq!(todos[1], ("Fixing the bug".to_owned(), TodoState::Doing));
+        assert_eq!(todos[2].1, TodoState::Pending);
     }
 
     #[test]

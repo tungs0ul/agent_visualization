@@ -132,7 +132,7 @@ fn main() -> AppExit {
                 settle_permissions,
                 hud::title,
                 stats::measure,
-                (view3d::sync, view3d::teleporter, view3d::deliver, view3d::links, view3d::activity_holograms, view3d::light_trails, hud::trace, view3d::camera_input, view3d::frame).chain(),
+                (view3d::sync, view3d::teleporter, view3d::deliver, view3d::links, view3d::context_tank, view3d::activity_holograms, view3d::light_trails, hud::trace, view3d::camera_input, view3d::frame).chain(),
                 pace_updates,
                 log_frame_rate.run_if(|| std::env::var_os("AGENT_ROOM_FPS_LOG").is_some()),
                 window::take_screenshots,
@@ -200,6 +200,9 @@ fn receive_events(
             && let Some(transcript) = &event.transcript_path
         {
             usage.update(&event.session_id, transcript);
+        }
+        if event.kind == EventKind::Compacting {
+            usage.compacted(&event.session_id);
         }
         // A toast (and a sound) for what matters, from sessions the user works in.
         if !internal_helper && let Some(session) = model.session(&event.session_id).filter(|session| !session.headless) {

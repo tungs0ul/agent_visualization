@@ -1,18 +1,159 @@
 {
   "description": "Forward every Claude Code event to Agent Room (silent when the app is closed)",
   "hooks": {
-    "SessionStart":       [{ "hooks": [{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/libexec/room-hook", "args": [] }] }],
-    "SessionEnd":         [{ "hooks": [{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/libexec/room-hook", "args": [] }] }],
-    "UserPromptSubmit":   [{ "hooks": [{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/libexec/room-hook", "args": [] }] }],
-    "PreToolUse":         [{ "hooks": [{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/libexec/room-hook", "args": [] }] }],
-    "PostToolUse":        [{ "hooks": [{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/libexec/room-hook", "args": [] }] }],
-    "PostToolUseFailure": [{ "hooks": [{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/libexec/room-hook", "args": [] }] }],
-    "PermissionRequest":  [{ "hooks": [{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/libexec/room-hook", "args": [] }] }],
-    "PermissionDenied":   [{ "hooks": [{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/libexec/room-hook", "args": [] }] }],
-    "SubagentStart":      [{ "hooks": [{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/libexec/room-hook", "args": [] }] }],
-    "SubagentStop":       [{ "hooks": [{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/libexec/room-hook", "args": [] }] }],
-    "Notification":       [{ "hooks": [{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/libexec/room-hook", "args": [] }] }],
-    "Stop":               [{ "hooks": [{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/libexec/room-hook", "args": [] }] }],
-    "StopFailure":        [{ "hooks": [{ "type": "command", "command": "${CLAUDE_PLUGIN_ROOT}/libexec/room-hook", "args": [] }] }]
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/libexec/room-hook",
+            "args": []
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/libexec/room-hook",
+            "args": []
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/libexec/room-hook",
+            "args": []
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/libexec/room-hook",
+            "args": []
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/libexec/room-hook",
+            "args": []
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/libexec/room-hook",
+            "args": []
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/libexec/room-hook",
+            "args": []
+          }
+        ]
+      }
+    ],
+    "PermissionDenied": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/libexec/room-hook",
+            "args": []
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/libexec/room-hook",
+            "args": []
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/libexec/room-hook",
+            "args": []
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/libexec/room-hook",
+            "args": []
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/libexec/room-hook",
+            "args": []
+          }
+        ]
+      }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/libexec/room-hook",
+            "args": []
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/libexec/room-hook",
+            "args": []
+          }
+        ]
+      }
+    ]
   }
 }

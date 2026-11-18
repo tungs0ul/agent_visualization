@@ -190,6 +190,18 @@ pub fn draw(
                 if let Some(doing) = &session.main_doing {
                     ui.label(egui::RichText::new(truncate(doing, 90)).small().color(DIM));
                 }
+                // How full Claude's context is (the tank on the main platform).
+                if let Some((size, _)) = usage.context(&session.id) {
+                    let window = crate::usage::window(session.model.as_deref());
+                    let percent = (size * 100 / window.max(1)).min(100);
+                    let color = match percent {
+                        81.. => egui::Color32::from_rgb(255, 110, 100),
+                        51.. => AMBER,
+                        _ => GREEN,
+                    };
+                    ui.label(egui::RichText::new(format!("Context {percent} % of {}", crate::usage::short(window))).small().color(color))
+                        .on_hover_text("How full Claude's context is, after the last turn; Claude Code compacts it when full");
+                }
             });
         });
 

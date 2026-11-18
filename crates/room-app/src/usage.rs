@@ -21,6 +21,10 @@ struct Reading {
     offset: u64,
     seen: HashSet<String>,
     tokens: Tokens,
+    /// The context size: everything the latest message sent to the model.
+    context: u64,
+    /// When Claude Code last compacted the conversation (the tank drains).
+    compacted: Option<std::time::Instant>,
 }
 
 #[derive(Resource, Default)]
@@ -31,6 +35,18 @@ pub struct Usage {
 impl Usage {
     pub fn tokens(&self, session: &str) -> Option<Tokens> {
         self.sessions.get(session).map(|reading| reading.tokens).filter(|tokens| tokens.input + tokens.output > 0)
+    }
+
+    /// The context's size (tokens) and when it was last compacted.
+    pub fn context(&self, session: &str) -> Option<(u64, Option<std::time::Instant>)> {
+        self.sessions.get(session).map(|reading| (reading.context, reading.compacted)).filter(|(size, at)| *size > 0 || at.is_some())
+    }
+
+    /// Claude Code compacts the conversation: the context starts small again.
+    pub fn compacted(&mut self, session: &str) {
+        let reading = self.sessions.entry(session.to_owned()).or_default();
+        reading.context = 0;
+        reading.compacted = Some(std::time::Instant::now());
     }
 
     /// Reads what the transcript gained since last time.
@@ -70,8 +86,15 @@ fn count(reading: &mut Reading, line: &str) {
         return;
     }
     let field = |name: &str| usage[name].as_u64().unwrap_or(0);
-    reading.tokens.input += field("input_tokens") + field("cache_creation_input_tokens") + field("cache_read_input_tokens");
+    let sent = field("input_tokens") + field("cache_creation_input_tokens") + field("cache_read_input_tokens");
+    reading.tokens.input += sent;
+    reading.context = sent;
     reading.tokens.output += field("output_tokens");
+}
+
+/// The context window of a model: 1M tokens for the `[1m]` variants, else 200k.
+pub fn window(model: Option<&str>) -> u64 {
+    if model.is_some_and(|model| model.contains("[1m]")) { 1_000_000 } else { 200_000 }
 }
 
 /// "1.2M", "34k", "512".
@@ -109,6 +132,10 @@ mod tests {
         write!(file, "{}{{\"message\":{{\"id\":\"c\"", message("b")).unwrap();
         usage.update("s", path.to_str().unwrap());
         assert_eq!(usage.tokens("s"), Some(Tokens { input: 204, output: 20 }));
+        // The context is what the latest message sent; compaction empties it.
+        assert_eq!(usage.context("s").map(|(size, _)| size), Some(102));
+        usage.compacted("s");
+        assert_eq!(usage.context("s").map(|(size, _)| size), Some(0));
         std::fs::remove_dir_all(&dir).unwrap();
         assert_eq!(short(1_234_567), "1.2M");
         assert_eq!(short(34_000), "34k");

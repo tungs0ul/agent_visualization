@@ -671,6 +671,14 @@ pub fn labels(
                     });
             });
     }
+    // Claude's plan, on a glass board over the main desk while it has work left.
+    if !mode.mini
+        && let Some(session) = model.shown()
+        && session.todos.iter().any(|(_, state)| *state != crate::model::TodoState::Done)
+        && let Ok(spot) = camera.world_to_viewport(camera_at, Location::MainDesk.center() + Vec3::new(0.0, 3.3, -1.0))
+    {
+        plan_board(ctx, spot + offset, &session.todos);
+    }
     // With several sessions, each Claude's label names its project.
     let several = model.live().len() > 1;
     let mut picked = None;
@@ -1339,5 +1347,129 @@ pub fn camera_input(
         if step != 0.0 {
             hand.zoom = (hand.zoom * (1.0 - step)).clamp(ZOOM_RANGE.0, ZOOM_RANGE.1);
         }
+    }
+}
+
+/// Claude's todo list as a holographic board: done items ticked and dimmed, the one
+/// in progress bright, the rest waiting.
+fn plan_board(ctx: &egui::Context, at: Vec2, todos: &[(String, crate::model::TodoState)]) {
+    use crate::model::TodoState;
+    const SHOWN: usize = 7;
+    egui::Area::new("plan-board".into())
+        .fixed_pos(egui::pos2(at.x, at.y))
+        .pivot(egui::Align2::CENTER_BOTTOM)
+        .interactable(false)
+        .order(egui::Order::Background)
+        .show(ctx, |ui| {
+            egui::Frame::new()
+                .fill(egui::Color32::from_rgba_unmultiplied(8, 40, 64, 170))
+                .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(90, 210, 255)))
+                .corner_radius(6.0)
+                .inner_margin(egui::Margin::symmetric(10, 6))
+                .show(ui, |ui| {
+                    ui.set_max_width(260.0);
+                    let done = todos.iter().filter(|(_, state)| *state == TodoState::Done).count();
+                    ui.label(
+                        egui::RichText::new(format!("Plan · {done}/{}", todos.len()))
+                            .small()
+                            .strong()
+                            .color(egui::Color32::from_rgb(90, 210, 255)),
+                    );
+                    // Around the item in progress, so the board shows where Claude is.
+                    let doing = todos.iter().position(|(_, state)| *state == TodoState::Doing).unwrap_or(done);
+                    let first = doing.saturating_sub(2).min(todos.len().saturating_sub(SHOWN));
+                    for (text, state) in todos.iter().skip(first).take(SHOWN) {
+                        let (mark, color) = match state {
+                            TodoState::Done => ("✔", egui::Color32::from_rgb(80, 220, 140).gamma_multiply(0.7)),
+                            TodoState::Doing => ("➡", egui::Color32::WHITE),
+                            TodoState::Pending => ("·", egui::Color32::from_gray(160)),
+                        };
+                        let short = room_proto::describe::truncate(text, 48);
+                        let line = egui::RichText::new(format!("{mark} {short}")).small().color(color);
+                        ui.label(if *state == TodoState::Doing { line.strong() } else { line });
+                    }
+                });
+        });
+}
+
+/// Where the context tank stands: on the main platform, front right of Claude.
+const TANK_AT: Vec3 = Vec3::new(1.45, 0.35, 0.75);
+const TANK_HEIGHT: f32 = 0.9;
+
+/// The tank's parts and the level it shows now (it eases to the real one).
+#[derive(Default)]
+pub struct Tank {
+    parts: Option<(Entity, Handle<StandardMaterial>)>,
+    level: f32,
+    /// The level the fill mesh shows (only touched when it changes).
+    drawn: Option<f32>,
+}
+
+/// A glass tube on the main platform filling with light as Claude's context fills
+/// (green, amber past half, red past 80 %); when Claude Code compacts the
+/// conversation it drains. Read from the transcript once per turn (`usage`).
+#[allow(clippy::too_many_arguments)]
+pub fn context_tank(
+    mut commands: Commands,
+    mut view: ResMut<View3d>,
+    time: Res<Time>,
+    model: Res<Model>,
+    usage: Res<crate::usage::Usage>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut fills: Query<&mut Transform>,
+    mut tank: Local<Tank>,
+) {
+    let (fill, glow) = tank
+        .parts
+        .get_or_insert_with(|| {
+            let glass = materials.add(StandardMaterial {
+                base_color: Color::LinearRgba(LinearRgba::new(0.6, 0.85, 1.0, 0.18)),
+                alpha_mode: AlphaMode::Blend,
+                perceptual_roughness: 0.1,
+                ..default()
+            });
+            commands.spawn((
+                Mesh3d(meshes.add(Cylinder::new(0.14, TANK_HEIGHT))),
+                MeshMaterial3d(glass),
+                Transform::from_translation(TANK_AT + Vec3::Y * TANK_HEIGHT / 2.0),
+            ));
+            let base = materials.add(StandardMaterial { base_color: Color::srgb(0.2, 0.22, 0.28), metallic: 0.8, ..default() });
+            commands.spawn((Mesh3d(meshes.add(Cylinder::new(0.18, 0.05))), MeshMaterial3d(base), Transform::from_translation(TANK_AT)));
+            let glow = materials.add(StandardMaterial { base_color: Color::BLACK, emissive: LinearRgba::rgb(0.4, 3.0, 1.2), ..default() });
+            let fill = commands
+                .spawn((Mesh3d(meshes.add(Cylinder::new(0.11, 1.0))), MeshMaterial3d(glow.clone()), Transform::from_scale(Vec3::ZERO)))
+                .id();
+            (fill, glow)
+        })
+        .clone();
+    let Some(session) = model.shown() else { return };
+    let (size, compacted) = usage.context(&session.id).unwrap_or((0, None));
+    let target = (size as f32 / crate::usage::window(session.model.as_deref()) as f32).clamp(0.0, 1.0);
+    // Just compacted: drain visibly, then show the new level.
+    let draining = compacted.is_some_and(|at| at.elapsed().as_secs_f32() < 1.6);
+    let goal = if draining { 0.0 } else { target };
+    let speed = if draining { 0.9 } else { 0.5 };
+    tank.level += (goal - tank.level).clamp(-speed * time.delta_secs(), speed * time.delta_secs());
+    if (tank.level - goal).abs() > 0.001 {
+        view.moving = true;
+    }
+    if tank.drawn.is_some_and(|drawn| (drawn - tank.level).abs() < 1e-4) {
+        return;
+    }
+    tank.drawn = Some(tank.level);
+    let height = TANK_HEIGHT * tank.level;
+    if let Ok(mut at) = fills.get_mut(fill) {
+        *at = Transform::from_translation(TANK_AT + Vec3::Y * (0.03 + height / 2.0)).with_scale(Vec3::new(1.0, height.max(0.0001), 1.0));
+    }
+    let color = match tank.level {
+        level if level > 0.8 => LinearRgba::rgb(4.0, 0.5, 0.3),
+        level if level > 0.5 => LinearRgba::rgb(3.6, 2.0, 0.2),
+        _ => LinearRgba::rgb(0.4, 3.0, 1.2),
+    };
+    if let Some(mut material) = materials.get_mut(&glow)
+        && material.emissive != color
+    {
+        material.emissive = color;
     }
 }

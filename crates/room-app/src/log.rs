@@ -279,6 +279,7 @@ pub fn summary(kind: &EventKind) -> Option<String> {
             None => "Done".to_owned(),
         },
         EventKind::TurnFailed { error } => format!("Stopped: {}", truncate(error, 80)),
+        EventKind::Compacting => "Compacting the conversation".to_owned(),
         EventKind::Unknown { event } => event.clone(),
     };
     Some(text)
