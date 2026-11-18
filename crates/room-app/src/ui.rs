@@ -822,6 +822,19 @@ fn chat_entry(ui: &mut egui::Ui, entry: &crate::chat::Entry, markdown: &mut Mark
                 },
             );
         }
+        // Not taken by Claude yet: dimmed, as the terminal shows a queued message.
+        Entry::Queued(text) => {
+            egui::Frame::new()
+                .fill(egui::Color32::from_rgb(24, 30, 40))
+                .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(45, 60, 80)))
+                .corner_radius(6.0)
+                .inner_margin(egui::Margin::same(6))
+                .show(ui, |ui| {
+                    ui.add(egui::Label::new(egui::RichText::new(text).color(egui::Color32::from_gray(130)).italics()).wrap());
+                })
+                .response
+                .on_hover_text("Queued: Claude takes it after its current step");
+        }
         Entry::Claude(text) => {
             egui_commonmark::CommonMarkViewer::new().show(ui, &mut markdown.0, text);
         }

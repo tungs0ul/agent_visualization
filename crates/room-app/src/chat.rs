@@ -20,6 +20,9 @@ use crate::server::{Channel, Waker};
 #[derive(Clone, PartialEq, Debug)]
 pub enum Entry {
     You(String),
+    /// Sent, but Claude hasn't taken it yet (it is busy): drawn dimmed, as in the
+    /// terminal. Becomes `You` when Claude takes it, see [`track_pickup`].
+    Queued(String),
     Claude(String),
     /// A tool Claude used: "Read main.rs", and how it went.
     Tool { id: String, label: String, step: Step },
@@ -62,6 +65,8 @@ pub struct ChatSession {
     pub limits: Option<room_proto::limits::Limits>,
     /// The slash commands and skills this session offers (its `init` event), for `/`.
     pub commands: Vec<String>,
+    /// Claude took a message during the running turn (see [`track_pickup`]).
+    taken_this_turn: bool,
     requests: u32,
     child: Child,
     stdin: ChildStdin,
@@ -78,6 +83,8 @@ impl ChatSession {
             .args(["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"])
             // Claude's answer arrives as it is written, not only when it is done.
             .arg("--include-partial-messages")
+            // Echoes each message once Claude takes it, so a queued one can show as such.
+            .arg("--replay-user-messages")
             .current_dir(cwd)
             // Tells room-hook this `-p` session is the user's, not another tool's helper.
             .env("AGENT_ROOM_CHAT", "1")
@@ -123,6 +130,7 @@ impl ChatSession {
             mode: "default",
             limits: None,
             commands: Vec::new(),
+            taken_this_turn: false,
             requests: 0,
             child,
             stdin,
@@ -158,7 +166,7 @@ impl ChatSession {
             return;
         }
         let names: String = images.iter().map(|image| format!("[image: {}]\n", image.name)).collect();
-        self.transcript.push(Entry::You(format!("{names}{text}").trim_end().to_owned()));
+        self.transcript.push(Entry::Queued(format!("{names}{text}").trim_end().to_owned()));
         self.busy = true;
     }
 
@@ -215,6 +223,7 @@ impl ChatSession {
         if !event["parent_tool_use_id"].is_null() {
             return;
         }
+        track_pickup(&mut self.transcript, &mut self.taken_this_turn, event);
         match event["type"].as_str() {
             Some("stream_event") => {
                 let inner = &event["event"];
@@ -621,9 +630,51 @@ pub fn dev_chat(
     }
 }
 
+/// Marks the oldest queued message as taken when Claude takes one. Claude Code echoes
+/// a message (`isReplay`) when it reads it: at once when idle, or mid-turn after the
+/// running tool when busy. Local commands such as `/context` are never echoed, but a
+/// turn always takes at least one message, so a turn that ends without an echo took one.
+fn track_pickup(transcript: &mut [Entry], taken_this_turn: &mut bool, event: &Value) {
+    let taken = match event["type"].as_str() {
+        Some("user") if event["isReplay"] == true => {
+            *taken_this_turn = true;
+            true
+        }
+        Some("result") => !std::mem::take(taken_this_turn),
+        _ => false,
+    };
+    if taken && let Some(entry) = transcript.iter_mut().find(|entry| matches!(entry, Entry::Queued(_))) {
+        let Entry::Queued(text) = entry else { return };
+        *entry = Entry::You(std::mem::take(text));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_message_stays_queued_until_claude_takes_it() {
+        let mut transcript = vec![Entry::Queued("run it".into()), Entry::Queued("also this".into()), Entry::Queued("/context".into())];
+        let mut taken = false;
+        let mut feed = |transcript: &mut Vec<Entry>, event: Value| track_pickup(transcript, &mut taken, &event);
+        let replay = |text: &str| json!({ "type": "user", "isReplay": true, "message": { "content": text } });
+        let tool_result = json!({ "type": "user", "message": { "content": [{ "type": "tool_result", "tool_use_id": "t" }] } });
+        // Order measured from `claude -p --replay-user-messages`: the second message,
+        // sent during a tool call, is echoed right after the tool's result.
+        feed(&mut transcript, replay("run it"));
+        assert_eq!(transcript[0], Entry::You("run it".into()));
+        assert_eq!(transcript[1], Entry::Queued("also this".into()));
+        feed(&mut transcript, tool_result);
+        assert_eq!(transcript[1], Entry::Queued("also this".into()), "a tool result takes nothing");
+        feed(&mut transcript, replay("also this"));
+        feed(&mut transcript, json!({ "type": "result" }));
+        assert_eq!(transcript[1], Entry::You("also this".into()));
+        assert_eq!(transcript[2], Entry::Queued("/context".into()), "a turn that echoed took nothing more at its end");
+        // `/context` runs as its own turn with no echo.
+        feed(&mut transcript, json!({ "type": "result" }));
+        assert_eq!(transcript[2], Entry::You("/context".into()));
+    }
 
     #[test]
     fn first_prompt_skips_wrappers_and_flags_headless() {

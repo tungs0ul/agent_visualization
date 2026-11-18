@@ -1803,3 +1803,11 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   stale pause with no app ran the tool at once. Clippy clean, tests pass. **Not seen on
   screen**: the Mac was locked, so screenshots were black. The user rebuilds, updates
   the plugin to 0.4.0 (`scripts/install-dev.sh`) and tries the buttons on Claude's card.
+- 2026-11-18, Claude Opus 5.5: a chat message Claude hasn't taken yet shows dimmed
+  (`Entry::Queued`, grey italic in a darker bubble), as the terminal shows a queued
+  message. Chats now run with `--replay-user-messages`: Claude Code echoes each message
+  (`isReplay: true`) when it reads it, at once when idle and mid-turn right after the
+  running tool when busy (measured: sent at 2.5 s during a 6 s tool, echoed at 7.9 s).
+  Local commands such as `/context` are never echoed (skills are), so a turn that ends
+  without an echo marks the oldest queued message taken (`chat::track_pickup`, unit
+  test with the measured order). Not seen on screen (Mac locked).
