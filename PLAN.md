@@ -1511,3 +1511,8 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   celebrations for commits and passing tests, trophy shelf of finished turns;
   day/night sky by local time. Measured: dozing 0.0 %, active 21 %. **Next:** the
   user tries pan/zoom/tilt, sounds and terminal jump with a real session.
+- 2026-11-18, Claude Opus 5.5: the user found it laggy; focused now always 30 fps,
+  unfocused walking 10 fps, working/idle 4 fps. Station point lights removed (floor
+  pools). Measured unfocused: dozing 0.1 %, working 25-28 % (was about 21 % with
+  6 fps walking). Focused cost not measured (a script can't focus the window);
+  estimate 50-70 % of a core while something animates at 30 fps, dozing after 30 s.
