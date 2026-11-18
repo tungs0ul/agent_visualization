@@ -95,6 +95,19 @@ impl Toasts {
     }
 }
 
+/// A macOS notification (Notification Center), for what needs the user while the
+/// window is behind other apps. One short `osascript` process; the text is passed as an
+/// argument, never put into the script.
+pub fn system_notification(text: &str) {
+    let text = text.to_owned();
+    std::thread::spawn(move || {
+        let _ = std::process::Command::new("osascript")
+            .args(["-e", "on run argv", "-e", "display notification (item 1 of argv) with title \"Agent Room\"", "-e", "end run"])
+            .arg(text)
+            .status();
+    });
+}
+
 /// Plays a sound file quietly in the background; the process ends with the sound.
 fn play(file: &'static str) {
     std::thread::spawn(move || {

@@ -200,6 +200,7 @@ fn receive_events(
     mut usage: ResMut<usage::Usage>,
     mut wins: ResMut<wins::Wins>,
     mut activity: ResMut<activity::Activity>,
+    window: Single<&Window, With<bevy::window::PrimaryWindow>>,
 ) {
     let now = Instant::now();
     for limits in server.limits.try_iter() {
@@ -227,6 +228,10 @@ fn receive_events(
         if !internal_helper && let Some(session) = model.session(&event.session_id).filter(|session| !session.headless) {
             let project = (model.live().len() > 1).then(|| session.name());
             if let Some((kind, text)) = notify::notice(&event, project.as_deref()) {
+                // Claude waits for the user, who is in another app: tell macOS.
+                if kind == notify::Kind::Waiting && prefs.notify && !window.focused {
+                    notify::system_notification(&text);
+                }
                 toasts.push(kind, text, prefs.sound);
             }
             // Commits and passing tests get a burst of light; finished turns, a trophy.

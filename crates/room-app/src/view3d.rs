@@ -722,14 +722,18 @@ pub fn labels(
     let mut picked = None;
     for (avatar, at) in &avatars {
         let Some(session) = model.session(&avatar.session) else { continue };
-        let (name, doing) = match &avatar.who {
-            Who::Main if several => (format!("Claude · {}", session.name()), &session.main_doing),
-            Who::Main => ("Claude".to_owned(), &session.main_doing),
+        let (mut name, doing, repo) = match &avatar.who {
+            Who::Main if several => (format!("Claude · {}", session.name()), &session.main_doing, session.main_repo.as_ref()),
+            Who::Main => ("Claude".to_owned(), &session.main_doing, session.main_repo.as_ref()),
             Who::Sub(id) => match session.agent(id) {
-                Some(info) => (info.agent_type.clone(), &info.doing),
+                Some(info) => (info.agent_type.clone(), &info.doing, info.repo.as_ref()),
                 None => continue,
             },
         };
+        // Working in a linked git worktree (PLAN.md M20): say which.
+        if let Some(tree) = repo.and_then(|repo| repo.worktree.as_ref().map(|tree| repo.branch.as_ref().unwrap_or(tree))) {
+            name.push_str(&format!(" · ⎇ {tree}"));
+        }
         let lift = if mode.mini { 1.35 } else { 1.05 };
         let head = at.translation() + Vec3::Y * lift * at.scale().y;
         let Ok(screen) = camera.world_to_viewport(camera_at, head) else { continue };

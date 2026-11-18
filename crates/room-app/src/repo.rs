@@ -15,9 +15,8 @@ pub struct Repo {
     pub name: String,
     pub branch: Option<String>,
     pub root: PathBuf,
-}
-
-impl Repo {
+    /// A linked git worktree (`git worktree add`), not the main checkout: its name.
+    pub worktree: Option<String>,
 }
 
 #[derive(Resource, Default)]
@@ -38,6 +37,7 @@ impl RepoCache {
                 name: candidate.file_name().map_or_else(|| "/".to_owned(), |n| n.to_string_lossy().into_owned()),
                 branch: read_branch(&git),
                 root: candidate.to_path_buf(),
+                worktree: worktree_name(&git),
             })
         });
         self.by_dir.insert(dir, found.clone());
@@ -48,6 +48,15 @@ impl RepoCache {
     pub fn for_tool(&mut self, tool: &ToolCall, cwd: Option<&str>) -> Option<Repo> {
         paths_in(tool, cwd).iter().find_map(|path| self.locate(path))
     }
+}
+
+/// A linked worktree's `.git` is a file, `gitdir: <main>/.git/worktrees/<name>`
+/// (a submodule's points into `.git/modules/` instead).
+fn worktree_name(git: &Path) -> Option<String> {
+    let pointer = fs::read_to_string(git).ok()?;
+    let target = pointer.trim().strip_prefix("gitdir:")?.trim();
+    let (_, name) = target.trim_end_matches('/').rsplit_once("/worktrees/")?;
+    (!name.contains('/')).then(|| name.to_owned())
 }
 
 /// `ref: refs/heads/main` ⇒ "main"; a detached HEAD ⇒ its short hash. `.git` may also
@@ -137,5 +146,18 @@ mod tests {
         let root = temp_repo("lib", "0123456789abcdef\n");
         assert_eq!(read_branch(&root.join(".git")).as_deref(), Some("0123456"));
         fs::remove_dir_all(root.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn a_linked_worktree_is_named_and_a_submodule_is_not() {
+        let base = std::env::temp_dir().join(format!("agent-room-worktree-{}", std::process::id()));
+        let tree = base.join("feature");
+        fs::create_dir_all(&tree).unwrap();
+        fs::write(tree.join(".git"), "gitdir: /work/shop/.git/worktrees/feature\n").unwrap();
+        let repo = RepoCache::default().locate(&tree).unwrap();
+        assert_eq!(repo.worktree.as_deref(), Some("feature"));
+        fs::write(tree.join(".git"), "gitdir: ../.git/modules/lib\n").unwrap();
+        assert_eq!(worktree_name(&tree.join(".git")), None);
+        fs::remove_dir_all(&base).unwrap();
     }
 }

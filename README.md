@@ -93,7 +93,18 @@ After pulling new changes, run `scripts/install-dev.sh` again and restart `agent
 - The stations are the controls. Click the **main desk** (or its sign, or press **S**)
   for settings: full screen, always on top, auto-accept, sound, stats, mini view.
   Click the **bookshelf** (**L**) for the history log, and the **research console**
-  (**C**) to chat with Claude. Esc or a click on the floor closes it.
+  (**C**) to chat with Claude. The **writing desk** (**D**) shows what changed in the
+  session's folder (git diff), the **processing lab** (**R**) its recent commands with
+  their output, the **teleporter** (**O**) starts a new session in a folder, and the
+  **wall screen** (**T**) shows today's numbers. Esc or a click on the floor closes it.
+- **Chat:** answers stream in as Claude writes, each tool step shows with ✔ or ✖,
+  **Stop** ends the turn (not the session), and you can switch the model and the
+  permission mode. Resumed sessions show their earlier conversation; several sessions
+  run side by side as tabs.
+- When Claude needs you and the window is behind other apps, macOS shows a
+  notification (Settings, "Notifications"; macOS may ask to allow notifications for
+  Script Editor the first time). A robot working in a linked git worktree says so on
+  its label (⎇ branch).
 - The top-right cards switch between sessions and show who is working; click a robot's
   name for its details.
 - **Permissions:** a card shows the full command. Allow / Deny, or press Y / N for the

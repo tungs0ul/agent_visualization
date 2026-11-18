@@ -918,6 +918,34 @@ any game, film theme when they provide the 3d model for the agent and background
 - When Claude finishes a turn (`Stop.last_assistant_message`), show the answer in a
   centre pop-up (dismissable; compact in mini mode).
 
+### M20: More consoles, the chat as a terminal stand-in, notifications, worktrees (requested 2026-11-18, done 2026-11-18)
+
+User: "do all" (the seven suggestions after M19).
+- Writing desk (D): `diff.rs` runs `git diff [HEAD] --numstat`, the patch and
+  `ls-files --others` in a thread when the console opens or the shown folder
+  changes; files with +/- counts, click one for its coloured patch (400 lines max).
+- Processing lab (R): `activity.rs` keeps 30 Bash commands per session with outcome,
+  duration and the end of their output. room-proto's `ToolFinished` now carries
+  `output` (PostToolUse `tool_response.stdout` + `stderr`, last 4000 bytes).
+- Teleporter (O): pick a folder and start an app session; it opens as a chat tab.
+- Wall screen (T): today's prompts, turns, tool calls by tool, tokens, limits and a
+  24-hour heatmap; in memory, reset at local midnight (`date +%z` read once).
+- Chat (M18 done): `--include-partial-messages` streaming, tool steps (✔/✖ from
+  tool_result), Stop = `control_request` `interrupt`, model and permission-mode
+  pickers (`set_model`, `set_permission_mode`), history from the transcript on resume,
+  tabs (`Chats.sessions` + `active`). Control requests checked live on 2.1.327: each
+  answers `control_response` `success`.
+- Notifications: when a permission or question waits and the window isn't focused,
+  `osascript` posts a macOS notification (Settings switch, `ui.json` `notify`).
+- Worktrees: `Repo.worktree` from a `.git` file pointing into `.git/worktrees/<name>`;
+  labels add "⎇ branch".
+- The final-answer pop-up waits while a console is open.
+- Measured (release, unfocused): idle 8.6 %, dozing 0.0 %, active 21.7 % (M19: 8.7 /
+  0.0 / 22.7). Nothing new runs while its console is closed.
+- Verified by screenshots (each console; a live haiku chat with a tool step) and unit
+  tests. Not verified by hand: clicks, Stop mid-turn, the pickers in the UI, the
+  notification banner, a worktree label on screen.
+
 ### M19: Station consoles instead of the side panel (requested 2026-11-18, done 2026-11-18)
 
 User: "Instead of the logs panel on the side to control everything ... click on main
@@ -1094,7 +1122,8 @@ config file, and can remove both cleanly.
 - [x] M9 Auto-accept mode and centre pop-ups (2026-11-17)
 - [x] M10 Context, 5-hour and weekly limits in the app (2026-11-18; terminal sessions need the status line opt-in)
 - [x] M19 Station consoles instead of the side panel (2026-11-18)
-- [ ] M18 Use the app instead of the terminal (research done 2026-11-18, not started)
+- [x] M18 Use the app instead of the terminal (2026-11-18, in M20)
+- [x] M20 More consoles, chat upgrade, notifications, worktrees (2026-11-18)
 - [x] M12 Hide/show the side panel (2026-11-17; needs a look on screen)
 - [x] M11 Own CPU/RAM/FPS overlay (2026-11-17; needs a look on screen)
 - [x] M13 Permission rules as part of Auto-accept (2026-11-17)
@@ -1595,3 +1624,7 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
 - 2026-11-18, Claude Opus 5.5: M19 done (station consoles; side panel removed).
   Checked by screenshot with each console open; clicks on stations and signs still
   need the user's hands. Power unchanged or slightly lower.
+- 2026-11-18, Claude Opus 5.5: M20 done in three commits (consoles; chat; notifications
+  and worktrees). A subagent started the consoles but was stopped before editing
+  anything: the user's new global rule says one waiting subagent should be the main
+  session's own work instead.

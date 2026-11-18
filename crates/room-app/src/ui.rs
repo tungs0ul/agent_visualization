@@ -309,6 +309,10 @@ fn settings(
         prefs.sound = !prefs.sound;
         prefs.save();
     }
+    if row(ui, "Notifications", "", prefs.notify, "A macOS notification when Claude needs you and this window isn't in front") {
+        prefs.notify = !prefs.notify;
+        prefs.save();
+    }
     if row(ui, "Stats", "I", stats.shown, "This app's CPU, memory and frame rate") {
         stats.toggle();
     }
@@ -687,6 +691,9 @@ pub struct PanelPrefs {
     /// Notification sounds (on by default, the user's choice; off plays nothing).
     #[serde(default = "yes")]
     pub sound: bool,
+    /// A macOS notification when Claude needs you and the window isn't in front.
+    #[serde(default = "yes")]
+    pub notify: bool,
 }
 
 fn yes() -> bool {
@@ -695,7 +702,7 @@ fn yes() -> bool {
 
 impl Default for PanelPrefs {
     fn default() -> Self {
-        Self { sound: true }
+        Self { sound: true, notify: true }
     }
 }
 
