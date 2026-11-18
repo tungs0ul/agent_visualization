@@ -86,6 +86,8 @@ pub(crate) struct Avatar {
     pose: Pose,
     /// A sub-agent that has stopped: it hands its report over, then leaves.
     done: bool,
+    /// Its last tool call failed (red ring and label until something succeeds).
+    pub(crate) failed: bool,
     /// Seconds spent handing a report over in person.
     handing: f32,
     rig: Rig,
@@ -239,6 +241,7 @@ pub fn sync(
         if let Some(role) = role {
             avatar.pose = role.pose;
             avatar.done = role.done;
+            avatar.failed = role.failed;
             seats.insert(entity, role.seat);
         }
         if avatar.presence == Presence::Here {
@@ -363,6 +366,7 @@ pub fn sync(
                     size,
                     pose: role.pose,
                     done: false,
+                    failed: false,
                     handing: 0.0,
                     rig: Rig::Robot,
                     glow,
@@ -697,7 +701,8 @@ pub fn labels(
                         egui::Color32::from_rgb((tint.red * 255.0) as u8, (tint.green * 255.0) as u8, (tint.blue * 255.0) as u8);
                     ui.label(egui::RichText::new(name.as_str()).small().strong().color(color));
                     if let Some(doing) = doing {
-                        ui.label(egui::RichText::new(doing).small());
+                        let text = egui::RichText::new(doing).small();
+                        ui.label(if avatar.failed { text.color(egui::Color32::from_rgb(255, 110, 100)) } else { text });
                     }
                 });
                 // Clicking a robot's label opens its details (`hud`).
@@ -1007,4 +1012,183 @@ mod tests {
         let desk = Location::MainDesk.work_spot(0).0;
         assert_eq!(detour(Vec3::new(-6.0, 0.0, 0.0), desk), desk);
     }
+}
+
+/// A glowing capsule flying a task to a sub-agent, or its report back (V2.md
+/// phase 3).
+#[derive(Component)]
+pub(crate) struct Capsule {
+    from: Vec3,
+    /// A robot to fly to (followed while it moves), or a fixed spot (the inbox).
+    to: Result<Entity, Vec3>,
+    age: f32,
+}
+
+/// How long a capsule flies.
+const CAPSULE_SECS: f32 = 1.2;
+
+/// A mesh and its material.
+type MeshLook = (Handle<Mesh>, Handle<StandardMaterial>);
+
+/// What `links` remembers between frames.
+#[derive(Default)]
+pub struct LinkState {
+    /// Each working sub-agent's line to its Claude.
+    lines: HashMap<Entity, Entity>,
+    /// Red warning rings under failing robots.
+    rings: HashMap<Entity, Entity>,
+    /// Sub-agents that got their task capsule, and robots whose report flew.
+    greeted: Vec<Entity>,
+    reported: Vec<Entity>,
+    look: Option<(MeshLook, MeshLook)>,
+}
+
+/// Who works for whom, made visible: a line from each working sub-agent to its
+/// session's Claude, a task capsule flying to it when it arrives, its report flying
+/// back at hand-over, and a red ring under any robot whose last tool call failed.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+pub fn links(
+    mut commands: Commands,
+    mut view: ResMut<View3d>,
+    time: Res<Time>,
+    assets: Res<AssetServer>,
+    avatars: Query<(Entity, &Avatar, &Transform), (Without<Capsule>, Without<LinkPart>)>,
+    mut capsules: Query<(Entity, &mut Capsule, &mut Transform), (Without<Avatar>, Without<LinkPart>)>,
+    mut parts: Query<&mut Transform, (With<LinkPart>, Without<Avatar>, Without<Capsule>)>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut state: Local<LinkState>,
+) {
+    let ((line_mesh, line_glow), (ring_mesh, ring_glow)) = state
+        .look
+        .get_or_insert_with(|| {
+            (
+                (
+                    meshes.add(Cuboid::new(1.0, 1.0, 1.0)),
+                    materials.add(StandardMaterial {
+                        base_color: Color::LinearRgba(LinearRgba::new(0.3, 0.9, 1.0, 0.6)),
+                        emissive: LinearRgba::rgb(1.0, 3.6, 6.0),
+                        alpha_mode: AlphaMode::Add,
+                        ..default()
+                    }),
+                ),
+                (
+                    meshes.add(Torus::new(0.42, 0.5)),
+                    materials.add(StandardMaterial { base_color: Color::BLACK, emissive: LinearRgba::rgb(6.0, 0.5, 0.3), ..default() }),
+                ),
+            )
+        })
+        .clone();
+    let claude_of = |session: &str| {
+        avatars.iter().find(|(_, avatar, _)| avatar.who == Who::Main && avatar.session == session && avatar.presence == Presence::Here)
+    };
+    let waist = |at: &Transform| at.translation + Vec3::Y * 0.5 * at.scale.y;
+
+    for (robot, avatar, at) in &avatars {
+        let is_sub = avatar.who != Who::Main;
+        let claude = if is_sub { claude_of(&avatar.session) } else { None };
+        // The line, while the sub-agent works for its Claude.
+        let working = is_sub && avatar.presence == Presence::Here && !avatar.done;
+        match (working, claude, state.lines.get(&robot).copied()) {
+            (true, Some((_, _, claude_at)), line) => {
+                let line = line.unwrap_or_else(|| {
+                    let line = commands
+                        .spawn((LinkPart, Mesh3d(line_mesh.clone()), MeshMaterial3d(line_glow.clone()), Transform::default()))
+                        .id();
+                    state.lines.insert(robot, line);
+                    line
+                });
+                let (a, b) = (waist(at), waist(claude_at));
+                if let Ok(mut transform) = parts.get_mut(line) {
+                    let length = a.distance(b).max(0.01);
+                    *transform = Transform::from_translation((a + b) / 2.0)
+                        .looking_at(b, Vec3::Y)
+                        .with_scale(Vec3::new(0.04, 0.04, length));
+                }
+            }
+            (_, _, Some(line)) => {
+                commands.entity(line).despawn();
+                state.lines.remove(&robot);
+            }
+            _ => {}
+        }
+        // Its task flies over from Claude once it has arrived.
+        if working && !state.greeted.contains(&robot) && let Some((_, _, claude_at)) = claude {
+            state.greeted.push(robot);
+            spawn_capsule(&mut commands, &assets, waist(claude_at), Ok(robot));
+        }
+        // Its report flies back: to Claude, or to the inbox when Claude is away.
+        if is_sub && avatar.reported && !state.reported.contains(&robot) {
+            state.reported.push(robot);
+            let to = match claude {
+                Some((claude, _, _)) if avatar.handing > 0.0 => Ok(claude),
+                _ => Err(INBOX),
+            };
+            spawn_capsule(&mut commands, &assets, waist(at), to);
+        }
+        // The warning ring.
+        match (avatar.failed && avatar.presence == Presence::Here, state.rings.get(&robot).copied()) {
+            (true, ring) => {
+                let ring = ring.unwrap_or_else(|| {
+                    let ring = commands
+                        .spawn((LinkPart, Mesh3d(ring_mesh.clone()), MeshMaterial3d(ring_glow.clone()), Transform::default()))
+                        .id();
+                    state.rings.insert(robot, ring);
+                    ring
+                });
+                if let Ok(mut transform) = parts.get_mut(ring) {
+                    *transform = Transform::from_translation(at.translation + Vec3::Y * 0.03)
+                        .with_scale(Vec3::new(at.scale.x, 0.3, at.scale.x));
+                }
+            }
+            (false, Some(ring)) => {
+                commands.entity(ring).despawn();
+                state.rings.remove(&robot);
+            }
+            _ => {}
+        }
+    }
+    // Robots that left: drop what was theirs.
+    let gone: Vec<Entity> = state.lines.keys().chain(state.rings.keys()).copied().filter(|robot| avatars.get(*robot).is_err()).collect();
+    for robot in gone {
+        for part in [state.lines.remove(&robot), state.rings.remove(&robot)].into_iter().flatten() {
+            commands.entity(part).despawn();
+        }
+    }
+    state.greeted.retain(|robot| avatars.get(*robot).is_ok());
+    state.reported.retain(|robot| avatars.get(*robot).is_ok_and(|(_, avatar, _)| avatar.reported));
+
+    // Capsules fly on a low arc, then vanish into whoever gets them.
+    let dt = time.delta_secs();
+    for (entity, mut capsule, mut transform) in &mut capsules {
+        capsule.age += dt;
+        let target = match capsule.to {
+            Ok(robot) => avatars.get(robot).map(|(_, _, at)| waist(at)).unwrap_or(capsule.from),
+            Err(spot) => spot,
+        };
+        let k = (capsule.age / CAPSULE_SECS).min(1.0);
+        if k >= 1.0 {
+            commands.entity(entity).despawn();
+            continue;
+        }
+        let lift = (k * std::f32::consts::PI).sin() * 1.2;
+        transform.translation = capsule.from.lerp(target, k) + Vec3::Y * lift;
+        transform.rotation = Quat::from_rotation_y(capsule.age * 6.0);
+        transform.scale = Vec3::splat(1.6 * (k * std::f32::consts::PI).sin().max(0.2));
+        view.moving = true;
+    }
+}
+
+/// A line or ring that `links` owns.
+#[derive(Component)]
+pub(crate) struct LinkPart;
+
+fn spawn_capsule(commands: &mut Commands, assets: &AssetServer, from: Vec3, to: Result<Entity, Vec3>) {
+    commands
+        .spawn((
+            Capsule { from, to, age: 0.0 },
+            WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset("models/stations/holo_capsule.glb"))),
+            Transform::from_translation(from).with_scale(Vec3::splat(0.3)),
+        ))
+        .observe(brighten_holo);
 }

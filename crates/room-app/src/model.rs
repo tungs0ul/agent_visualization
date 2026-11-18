@@ -88,6 +88,8 @@ pub struct AgentInfo {
     pub report: Option<String>,
     /// The repository its latest tool call worked in.
     pub repo: Option<Repo>,
+    /// Its last tool call or turn failed, and nothing has succeeded since.
+    pub failed: bool,
     reported: bool,
 }
 
@@ -102,6 +104,8 @@ pub struct SessionState {
     pub home_repo: Option<Repo>,
     /// The repository Claude's latest tool call worked in.
     pub main_repo: Option<Repo>,
+    /// Claude's last tool call or turn failed, and nothing has succeeded since.
+    pub main_failed: bool,
     /// Sub-agents in the order they joined, finished ones included.
     pub agents: Vec<(String, AgentInfo)>,
     pub ended: bool,
@@ -299,6 +303,9 @@ fn update_session(session: &mut SessionState, event: &RoomEvent, changes: &mut V
                 }
                 _ => {}
             }
+            if let Some(failed) = failure(&event.kind) {
+                session.main_failed = failed;
+            }
             let (pose, line) = react(&event.kind, session.main_pose, session);
             if let Some(pose) = pose {
                 session.main_pose = pose;
@@ -354,6 +361,7 @@ fn update_sub(session: &mut SessionState, id: &str, agent_type: &str, kind: &Eve
                 doing: None,
                 report: None,
                 repo: None,
+                failed: false,
                 reported: false,
             },
         ));
@@ -365,6 +373,9 @@ fn update_sub(session: &mut SessionState, id: &str, agent_type: &str, kind: &Eve
     let Some(info) = session.agent_mut(id) else { return };
     if info.status == Status::Done {
         return;
+    }
+    if let Some(failed) = failure(kind) {
+        info.failed = failed;
     }
     if let Some(pose) = pose {
         info.pose = pose;
@@ -379,6 +390,16 @@ fn update_sub(session: &mut SessionState, id: &str, agent_type: &str, kind: &Eve
         info.reported = true;
         info.report = Some(message.clone());
         changes.push(Change::Deliver { id: id.to_owned() });
+    }
+}
+
+/// Whether an event marks the agent as failing (a tool call or the turn failed) or
+/// clears it (a tool call succeeded, a new prompt); `None` leaves it as it is.
+fn failure(kind: &EventKind) -> Option<bool> {
+    match kind {
+        EventKind::ToolFailed { interrupted: false, .. } | EventKind::TurnFailed { .. } => Some(true),
+        EventKind::ToolFinished { .. } | EventKind::UserPrompt { .. } => Some(false),
+        _ => None,
     }
 }
 

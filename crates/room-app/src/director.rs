@@ -49,6 +49,8 @@ pub struct Role {
     pub accent: Color,
     /// A sub-agent that has stopped: it brings its report over, then leaves.
     pub done: bool,
+    /// Its last tool call failed: a warning until something succeeds.
+    pub failed: bool,
 }
 
 /// Everyone in the HQ: every live session's Claude and sub-agents (V2.md phase
@@ -64,8 +66,15 @@ pub fn cast_all(model: &Model) -> Vec<Role> {
 /// Everyone in one session: Claude first, then the sub-agents in the order they
 /// joined (finished ones included, so a robot can finish its hand-over).
 pub fn cast(session: &SessionState, seat: usize) -> Vec<Role> {
-    let role = |who, pose, accent, done| Role { session: session.id.clone(), seat, who, pose, accent, done };
-    let main = role(Who::Main, session.main_pose, MAIN_ACCENT, false);
+    let main = Role {
+        session: session.id.clone(),
+        seat,
+        who: Who::Main,
+        pose: session.main_pose,
+        accent: MAIN_ACCENT,
+        done: false,
+        failed: session.main_failed,
+    };
     let subs = session.agents.iter().map(|(id, info)| Role {
         session: session.id.clone(),
         seat,
@@ -73,23 +82,26 @@ pub fn cast(session: &SessionState, seat: usize) -> Vec<Role> {
         pose: info.pose,
         accent: accent_for(&info.agent_type),
         done: info.status == Status::Done,
+        failed: info.failed,
     });
     std::iter::once(main).chain(subs).collect()
 }
 
 /// Where a robot goes for what it is doing (PLAN.md M17), given where it is now.
-/// Claude thinks or waits where it stands (a new message no longer sends it back to
-/// the centre; it says "On it!" on the spot) and goes home only when the turn ends.
-/// Sub-agents waiting, getting their task or bringing a report go to the main desk
-/// (to its visitor spots).
+/// Every robot thinks or waits where it stands (a new message no longer sends Claude
+/// back to the centre; it says "On it!" on the spot, and a sub-agent thinking between
+/// tool calls doesn't walk over to Claude). Claude goes home when the turn ends;
+/// sub-agents getting their task or bringing a report come to the main desk (to its
+/// visitor spots).
 pub fn location_for(pose: Pose, is_main: bool, now: Location) -> Location {
     match pose {
         Pose::Reading => Location::Bookshelf,
         Pose::Web => Location::Research,
         Pose::Typing => Location::WritingDesk,
         Pose::Terminal => Location::Lab,
-        Pose::Thinking | Pose::Waiting if is_main => now,
-        Pose::Idle | Pose::Thinking | Pose::Delegating | Pose::Waiting | Pose::Reporting => Location::MainDesk,
+        Pose::Thinking | Pose::Waiting => now,
+        Pose::Idle if !is_main => now,
+        Pose::Idle | Pose::Delegating | Pose::Reporting => Location::MainDesk,
     }
 }
 
@@ -176,12 +188,30 @@ mod tests {
     }
 
     #[test]
+    fn a_failed_tool_warns_until_something_succeeds() {
+        let mut model = Model::default();
+        let failed = |model: &Model| cast(model.shown().unwrap(), 0)[0].failed;
+        model.apply(&event(None, json!({ "hook_event_name": "UserPromptSubmit", "prompt": "go" })));
+        model.apply(&event(
+            None,
+            json!({ "hook_event_name": "PostToolUseFailure", "tool_name": "Bash", "tool_use_id": "t", "error": "exit 1", "is_interrupt": false }),
+        ));
+        assert!(failed(&model));
+        // Thinking it over doesn't clear it; the next tool call that works does.
+        model.apply(&tool(None, "Bash", json!({ "command": "ls" })));
+        assert!(failed(&model));
+        model.apply(&event(None, json!({ "hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_use_id": "t2" })));
+        assert!(!failed(&model));
+    }
+
+    #[test]
     fn claude_takes_a_new_message_where_it_stands() {
         assert_eq!(location_for(Pose::Thinking, true, Location::Lab), Location::Lab);
         assert_eq!(location_for(Pose::Waiting, true, Location::Lab), Location::Lab);
         assert_eq!(location_for(Pose::Idle, true, Location::Lab), Location::MainDesk);
-        // A sub-agent waiting still comes to the main desk.
-        assert_eq!(location_for(Pose::Waiting, false, Location::Lab), Location::MainDesk);
+        // Sub-agents think and wait where they are too; a report brings them over.
+        assert_eq!(location_for(Pose::Thinking, false, Location::Lab), Location::Lab);
+        assert_eq!(location_for(Pose::Reporting, false, Location::Lab), Location::MainDesk);
     }
 
     #[test]

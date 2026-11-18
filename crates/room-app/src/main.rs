@@ -126,7 +126,7 @@ fn main() -> AppExit {
                 (receive_events, chat::dev_chat, chat::read_chats),
                 settle_permissions,
                 stats::measure,
-                (view3d::sync, view3d::teleporter, view3d::deliver, view3d::activity_holograms, view3d::light_trails, hud::trace, view3d::frame).chain(),
+                (view3d::sync, view3d::teleporter, view3d::deliver, view3d::links, view3d::activity_holograms, view3d::light_trails, hud::trace, view3d::frame).chain(),
                 pace_updates,
                 log_frame_rate.run_if(|| std::env::var_os("AGENT_ROOM_FPS_LOG").is_some()),
                 window::take_screenshots,

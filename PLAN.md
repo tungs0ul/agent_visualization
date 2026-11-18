@@ -1489,3 +1489,8 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   Labels show the real text again; activity screens glow with abstract writing
   lines. Mini mode re-checked: follows Claude, screens and labels fine. **Next:**
   phase 3 rest (task capsules, connection lines, error ring).
+- 2026-11-18, Claude Opus 5.5: answer window bounded (wide tables scroll; title-bar
+  close, Esc); window no longer transparent and the AppKit glass view removed (it
+  pushed the title over the traffic lights); Bevy audio plugin off. V2 phase 3 done
+  (lines, task and report capsules, failure ring; thinking in place). target/prof
+  deleted. **Next:** phase 4 (event timeline, notifications, minimap, sound).
