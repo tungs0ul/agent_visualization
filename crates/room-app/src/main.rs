@@ -36,16 +36,34 @@ use crate::model::{Model, Who};
 use crate::server::{Incoming, Server};
 use crate::window::{NeedsCornerPlacement, SavedWindow, ScreenshotMode};
 
-/// Redraw rate while robots work or move (about 30 fps: smooth enough, half the power of 60).
-const FRAME: Duration = Duration::from_millis(33);
-/// Redraw rate for animations while the window is not focused.
-const UNFOCUSED_FRAME: Duration = Duration::from_millis(100);
-/// Redraw rate in 3D while nothing moves: the robots' idle clip plays at about 4 fps,
-/// so the HQ looks alive for little power (the user's choice, V2.md section 8).
-const IDLE_3D_FRAME: Duration = Duration::from_millis(250);
-/// After this long without activity the robots doze: the 3D view stops redrawing
-/// until input or a hook event arrives. A frame costs about 20 ms of CPU, so even
-/// 4 fps idle is about 8 % of a core (measured, V2.md phase 0).
+/// How often to redraw (focused, unfocused), from busiest to quietest. The app is a
+/// widget beside the terminal: it redraws fast only while something moves, and a
+/// 3D frame costs about 20 ms of CPU, so every frame saved counts (V2.md phase 0).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Pace {
+    /// A robot walks or beams, the camera glides: smooth.
+    Moving,
+    /// Robots work in place (their clips play): a few frames are enough.
+    Working,
+    /// Nothing happens: the idle clip at about 4 fps (the user's choice).
+    Idle,
+    /// Nothing happened for a while: no redraws until input or an event.
+    Dozing,
+}
+
+impl Pace {
+    fn every(self) -> Option<(Duration, Duration)> {
+        let ms = Duration::from_millis;
+        match self {
+            Pace::Moving => Some((ms(33), ms(160))),
+            Pace::Working => Some((ms(125), ms(250))),
+            Pace::Idle => Some((ms(250), ms(250))),
+            Pace::Dozing => None,
+        }
+    }
+}
+
+/// After this long without activity the robots doze.
 const IDLE_3D_FOR: Duration = Duration::from_secs(30);
 /// Redraw rate while only a permission countdown changes.
 const COUNTDOWN_TICK: Duration = Duration::from_millis(250);
@@ -318,41 +336,48 @@ fn pace_updates(
     view: Res<view3d::View3d>,
     stats: Res<stats::Stats>,
     screenshots: Option<Res<ScreenshotMode>>,
-    mut current: Local<Option<Duration>>,
+    mut current: Local<Option<(Duration, Duration)>>,
     mut last_busy: Local<Option<std::time::Instant>>,
     mut settings: ResMut<WinitSettings>,
 ) {
     if screenshots.is_some() {
         return;
     }
-    // Someone works (their clip plays) or something in the HQ moves.
-    let busy = model.live().iter().any(|session| session.is_busy()) || view.moving;
+    let working = model.live().iter().any(|session| session.is_busy());
     let now = std::time::Instant::now();
-    if busy || last_busy.is_none() {
+    if working || view.moving || last_busy.is_none() {
         *last_busy = Some(now);
     }
-    let dozing = last_busy.is_some_and(|at| now - at >= IDLE_3D_FOR);
-    let wanted = if busy {
-        Some(FRAME)
-    } else if !log.pending.is_empty() || !log.questions.is_empty() {
+    let pace = if view.moving {
+        Pace::Moving
+    } else if working {
+        Pace::Working
+    } else if last_busy.is_some_and(|at| now - at < IDLE_3D_FOR) {
+        Pace::Idle
+    } else {
+        Pace::Dozing
+    };
+    // Countdowns and the stats overlay need their own ticks even when all is still.
+    let tick = if !log.pending.is_empty() || !log.questions.is_empty() {
         Some(COUNTDOWN_TICK)
-    } else if !dozing {
-        Some(IDLE_3D_FRAME)
     } else if stats.shown {
         Some(stats::REFRESH)
     } else {
         None
+    };
+    let wanted = match (pace.every(), tick) {
+        (Some((focused, unfocused)), Some(tick)) => Some((focused.min(tick), unfocused.min(tick))),
+        (None, Some(tick)) => Some((tick, tick)),
+        (every, None) => every,
     };
     if wanted == *current {
         return;
     }
     *current = wanted;
     *settings = match wanted {
-        Some(every) => WinitSettings {
-            focused_mode: UpdateMode::reactive(every),
-            // Mostly the app sits beside the terminal, unfocused: 10 fps is enough to
-            // see what happens and costs a third of 30 fps (the Mac ran hot).
-            unfocused_mode: UpdateMode::reactive_low_power(every.max(UNFOCUSED_FRAME)),
+        Some((focused, unfocused)) => WinitSettings {
+            focused_mode: UpdateMode::reactive(focused),
+            unfocused_mode: UpdateMode::reactive_low_power(unfocused),
         },
         None => WinitSettings::desktop_app(),
     };

@@ -97,8 +97,9 @@ pub(crate) struct Avatar {
     playing: Option<Act>,
     /// Its current report has been handed over or left on the desk.
     reported: bool,
-    /// The location it is at or walking to.
+    /// The location it is at or walking to, and since when (seconds of app time).
     at: Location,
+    since: f32,
 }
 
 
@@ -241,7 +242,10 @@ pub fn sync(
             seats.insert(entity, role.seat);
         }
         if avatar.presence == Presence::Here {
+            // Newest wins, but a robot stays a moment where it is before walking on:
+            // quick tool calls one after another don't send it running back and forth.
             let place = director::location_for(avatar.pose, avatar.who == Who::Main, avatar.at);
+            let place = if place != avatar.at && time.elapsed_secs() - avatar.since < DWELL_SECS { avatar.at } else { place };
             wanted.push((entity, place));
         }
     }
@@ -279,7 +283,10 @@ pub fn sync(
             }
             Presence::Here => {
                 let Some(&(location, slot)) = slots.get(&avatar_entity) else { continue };
-                avatar.at = location;
+                if avatar.at != location {
+                    avatar.at = location;
+                    avatar.since = time.elapsed_secs();
+                }
                 // Each session's Claude has its own seat at the main desk; sub-agents
                 // there stand in front of the platform, facing it.
                 match location {
@@ -364,6 +371,7 @@ pub fn sync(
                     playing: None,
                     reported: false,
                     at: Location::MainDesk,
+                    since: 0.0,
                 },
                 Transform::from_translation(deck).with_scale(Vec3::splat(0.001)),
                 Visibility::default(),
@@ -477,6 +485,9 @@ pub fn teleporter(
         at.rotate_y(2.4 * dt);
     }
 }
+
+/// How long a robot stays at a station before it walks on to the next.
+const DWELL_SECS: f32 = 2.5;
 
 /// A robot's walking pace (metres per second).
 const WALK_SPEED: f32 = 1.8;
@@ -617,16 +628,12 @@ fn prepare_avatar(
 }
 
 /// Station signs, and names with what each one is doing above the robots.
-#[allow(clippy::too_many_arguments)]
 pub fn labels(
     mut contexts: EguiContexts,
     mode: Res<crate::mini::ViewMode>,
     mut model: ResMut<Model>,
-    time: Res<Time>,
     camera: Query<(&Camera, &GlobalTransform), With<RoomCamera3d>>,
-    avatars: Query<(Entity, &Avatar, &GlobalTransform)>,
-    holos: Query<(&ActivityHolo, &GlobalTransform)>,
-    mut typed: Local<HashMap<Entity, (String, f32)>>,
+    avatars: Query<(&Avatar, &GlobalTransform)>,
     mut selected: ResMut<crate::hud::Selected>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
@@ -663,9 +670,7 @@ pub fn labels(
     // With several sessions, each Claude's label names its project.
     let several = model.live().len() > 1;
     let mut picked = None;
-    let now = time.elapsed_secs();
-    typed.retain(|robot, _| holos.iter().any(|(holo, _)| holo.of == *robot));
-    for (robot, avatar, at) in &avatars {
+    for (avatar, at) in &avatars {
         let Some(session) = model.session(&avatar.session) else { continue };
         let (name, doing) = match &avatar.who {
             Who::Main if several => (format!("Claude · {}", session.name()), &session.main_doing),
@@ -675,42 +680,6 @@ pub fn labels(
                 None => continue,
             },
         };
-        // While it works at its activity screen, what it does is typed out on the
-        // screen; the label above its head then only names it.
-        let screen_text = holos.iter().find(|(holo, _)| holo.of == robot).filter(|_| !mode.mini);
-        if let (Some((holo, holo_at)), Some(text)) = (screen_text, doing) {
-            let started = typed.entry(robot).or_insert_with(|| (text.clone(), now));
-            if started.0 != *text {
-                *started = (text.clone(), now);
-            }
-            let shown = (((now - started.1) * TYPE_SPEED) as usize).min(text.chars().count());
-            let cursor = if shown < text.chars().count() || ((now * 2.0) as u32).is_multiple_of(2) { "_" } else { " " };
-            let typed_text: String = text.chars().take(shown).collect::<String>() + cursor;
-            // (World up: a screen still growing in has scale 0, and no direction.)
-            let middle = holo_at.translation() + Vec3::Y * 0.3 * holo_at.scale().y;
-            let fresh = (holo.age / 0.35).min(1.0);
-            if let Ok(spot) = camera.world_to_viewport(camera_at, middle) {
-                let spot = spot + offset;
-                egui::Area::new(egui::Id::new(("holo-text", &avatar.session, &avatar.who)))
-                    .fixed_pos(egui::pos2(spot.x, spot.y))
-                    .pivot(egui::Align2::CENTER_CENTER)
-                    .interactable(false)
-                    .order(egui::Order::Background)
-                    .show(ctx, |ui| {
-                        egui::Frame::new()
-                            .fill(egui::Color32::from_rgba_unmultiplied(10, 60, 90, (90.0 * fresh) as u8))
-                            .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(120, 230, 255, (200.0 * fresh) as u8)))
-                            .corner_radius(4.0)
-                            .inner_margin(egui::Margin::symmetric(6, 3))
-                            .show(ui, |ui| {
-                                ui.set_max_width(170.0);
-                                let glow = egui::Color32::from_rgba_unmultiplied(170, 240, 255, (255.0 * fresh) as u8);
-                                ui.label(egui::RichText::new(typed_text).monospace().size(10.0).color(glow));
-                            });
-                    });
-            }
-        }
-        let doing = doing.as_ref().filter(|_| screen_text.is_none());
         let lift = if mode.mini { 1.35 } else { 1.05 };
         let head = at.translation() + Vec3::Y * lift * at.scale().y;
         let Ok(screen) = camera.world_to_viewport(camera_at, head) else { continue };
@@ -802,14 +771,26 @@ fn holo_for(pose: Pose) -> Option<&'static str> {
 
 /// Shows, swaps and moves the activity holograms; they appear once a robot has
 /// arrived where it works, beside its head, turned a little towards the camera.
-#[allow(clippy::type_complexity)]
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn activity_holograms(
     mut commands: Commands,
     time: Res<Time>,
     assets: Res<AssetServer>,
     avatars: Query<(Entity, &Avatar, &Transform), Without<ActivityHolo>>,
     mut holos: Query<(Entity, &mut ActivityHolo, &mut Transform)>,
+    mut lines: Query<(&HoloLine, &ChildOf, &mut Transform), (Without<ActivityHolo>, Without<Avatar>)>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut look: Local<Option<(Handle<Mesh>, Handle<StandardMaterial>)>>,
 ) {
+    let (line_mesh, line_glow) = look
+        .get_or_insert_with(|| {
+            (
+                meshes.add(Cuboid::new(1.0, 0.022, 0.004)),
+                materials.add(StandardMaterial { base_color: Color::BLACK, emissive: LinearRgba::rgb(1.2, 4.0, 6.0), ..default() }),
+            )
+        })
+        .clone();
     let mut shown: HashMap<Entity, Pose> = HashMap::new();
     for (entity, mut holo, mut at) in &mut holos {
         let robot = avatars.get(holo.of).ok();
@@ -836,18 +817,52 @@ pub fn activity_holograms(
             continue;
         }
         let Some(file) = holo_for(avatar.pose) else { continue };
-        commands
+        let holo = commands
             .spawn((
                 ActivityHolo { of: robot, pose: avatar.pose, age: 0.0 },
                 WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(file))),
                 Transform::from_scale(Vec3::ZERO),
             ))
-            .observe(brighten_holo);
+            .observe(brighten_holo)
+            .id();
+        // Flat screens get lines of "text" writing themselves (not the real text,
+        // which the label above the head shows).
+        if matches!(avatar.pose, Pose::Reading | Pose::Typing | Pose::Terminal | Pose::Web) {
+            for index in 0..HOLO_LINES {
+                commands.spawn((
+                    HoloLine { index },
+                    Mesh3d(line_mesh.clone()),
+                    MeshMaterial3d(line_glow.clone()),
+                    Transform::from_scale(Vec3::new(0.0, 1.0, 1.0)),
+                    ChildOf(holo),
+                ));
+            }
+        }
+    }
+    // The lines write left to right one after another, hold, then start over.
+    let t = time.elapsed_secs();
+    for (line, parent, mut at) in &mut lines {
+        let Ok((_, holo, _)) = holos.get(parent.parent()) else { continue };
+        let seed = (holo.of.to_bits() % 7) as f32;
+        let cycle = (t + seed) % LINE_CYCLE;
+        let start = line.index as f32 * 0.55;
+        let written = ((cycle - start) / 0.5).clamp(0.0, 1.0);
+        let width = 0.32 + 0.22 * ((line.index as f32 * 2.3 + seed).sin() * 0.5 + 0.5);
+        let length = width * written;
+        at.scale = Vec3::new(length.max(0.0001), 1.0, 1.0);
+        at.translation = Vec3::new(-0.3 + length / 2.0, 0.42 - 0.075 * line.index as f32, 0.03);
     }
 }
 
-/// How fast an activity screen types its text (characters per second).
-const TYPE_SPEED: f32 = 40.0;
+/// A line of glowing "text" on an activity screen.
+#[derive(Component)]
+pub(crate) struct HoloLine {
+    index: usize,
+}
+
+const HOLO_LINES: usize = 4;
+/// Seconds for all lines to write, hold and clear.
+const LINE_CYCLE: f32 = 4.0;
 
 /// Where the activity screen floats, in robot heights (`HOLO_LIFT` up to its bottom
 /// edge, `HOLO_FRONT` out in front), and its size.

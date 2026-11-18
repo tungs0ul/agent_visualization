@@ -3,12 +3,14 @@
 #
 #   scripts/measure.sh
 #   MEASURE_SECONDS=10 scripts/measure.sh    # shorter samples
+#   MEASURE_SPEED=4 scripts/measure.sh       # replay 4x faster
 #
 # Builds the release app, starts it with a throwaway AGENT_ROOM_DIR, hands focus to
 # Finder (the app usually sits unfocused beside the terminal), then samples `top`:
 #   idle    no Claude activity (3D: robots' idle clip at about 4 fps)
 #   dozing  no activity for over 30 s (3D stops redrawing)
-#   active  while the spike log replays at 4x
+#   active  while the spike log replays at real speed (MEASURE_SPEED=4: faster,
+#           so robots walk nearly all the time: the worst case)
 # Prints mean CPU (% of one core) and peak memory per state, and kills everything it
 # started on exit.
 set -euo pipefail
@@ -57,7 +59,7 @@ read -r doze_cpu doze_mem < <(sample)
 
 active_cpu="-"; active_mem="-"
 if [[ -f "$LOG" ]]; then
-    AGENT_ROOM_DIR="$DIR" python3 "$ROOT/scripts/replay.py" "$LOG" --speed 4 \
+    AGENT_ROOM_DIR="$DIR" python3 "$ROOT/scripts/replay.py" "$LOG" --speed "${MEASURE_SPEED:-1}" \
         --hook "$ROOT/target/release/room-hook" >/dev/null 2>&1 &
     REPLAY_PID=$!
     sleep 3
