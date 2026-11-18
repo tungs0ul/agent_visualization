@@ -1450,3 +1450,12 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   budget, an honest data map (no invented progress), the engine decision (stay on
   Bevy, not React Three Fiber, for power) and open questions. **Next:** V2 phase 0
   (3D sleeps when idle) and `scripts/measure.sh`.
+- 2026-11-18, Claude Opus 5.5 (V2 phase 0): the user answered V2's questions (idle
+  animation at a few fps, every session in one HQ, sound on with mute/off) and asked
+  to remove 2D, add a teleporter (brief and reference image recorded in V2.md
+  phase 3) and keep Claude where it is when a new message arrives (fixed). Built
+  `scripts/measure.sh` and `AGENT_ROOM_FPS_LOG`. 3D now plays the idle clip at 4 fps
+  for 30 s, then dozes: idle 21.7 % to 0.3 % after 30 s; three task threads took
+  active from 35 % to 22 %. Active unfocused is still over the 10 % budget; the next
+  lever is deleting 2D (phase 1). A subagent is making the teleporter model
+  (`tools/blender/teleporter.py`). **Next:** phase 1 (Director, delete 2D).

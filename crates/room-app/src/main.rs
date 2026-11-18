@@ -46,6 +46,13 @@ use crate::window::{NeedsCornerPlacement, SavedWindow, ScreenshotMode};
 const FRAME: Duration = Duration::from_millis(33);
 /// Redraw rate for animations while the window is not focused.
 const UNFOCUSED_FRAME: Duration = Duration::from_millis(100);
+/// Redraw rate in 3D while nothing moves: the robots' idle clip plays at about 4 fps,
+/// so the HQ looks alive for little power (the user's choice, V2.md section 8).
+const IDLE_3D_FRAME: Duration = Duration::from_millis(250);
+/// After this long without activity the robots doze: the 3D view stops redrawing
+/// until input or a hook event arrives. A frame costs about 20 ms of CPU, so even
+/// 4 fps idle is about 8 % of a core (measured, V2.md phase 0).
+const IDLE_3D_FOR: Duration = Duration::from_secs(30);
 /// Redraw rate while only a permission countdown changes.
 const COUNTDOWN_TICK: Duration = Duration::from_millis(250);
 
@@ -72,6 +79,9 @@ fn main() -> AppExit {
             DefaultPlugins
                 .set(WindowPlugin { primary_window: Some(window::initial_window(saved)), ..default() })
                 // The 3D models (PLAN.md M15) live in the checkout's `assets/`.
+                // Three threads, not one per core: waking a big pool every frame cost more
+                // than the work (V2.md phase 0: about 35 % to 22 % of a core while active).
+                .set(TaskPoolPlugin { task_pool_options: TaskPoolOptions::with_num_threads(3) })
                 .set(AssetPlugin { file_path: concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets").to_owned(), ..default() }),
         )
         .add_plugins((EguiPlugin::default(), ShapePlugin))
@@ -121,6 +131,7 @@ fn main() -> AppExit {
                 (theme::switch, theme::recolor, theme::stars).chain(),
                 (view3d::toggle, view3d::build, view3d::sync, view3d::deliver, view3d::activity_holograms, view3d::light_trails, hud::trace, view3d::frame, view3d::cameras).chain(),
                 pace_updates,
+                log_frame_rate.run_if(|| std::env::var_os("AGENT_ROOM_FPS_LOG").is_some()),
                 window::take_screenshots,
             )
                 .chain(),
@@ -301,22 +312,58 @@ fn settle_permissions(mut log: ResMut<RoomLog>) {
     }
 }
 
+/// `AGENT_ROOM_FPS_LOG=1`: prints frames drawn per second every 5 s, and why
+/// (for `scripts/measure.sh` and power work).
+fn log_frame_rate(
+    animating: Res<Animating>,
+    view: Res<view3d::View3d>,
+    log: Res<RoomLog>,
+    mut window: Local<Option<(std::time::Instant, u32, u32, u32)>>,
+) {
+    let now = std::time::Instant::now();
+    let (start, frames, busy, moving) = window.get_or_insert((now, 0, 0, 0));
+    *frames += 1;
+    *busy += animating.0 as u32;
+    *moving += view.moving as u32;
+    let elapsed = now - *start;
+    if elapsed >= Duration::from_secs(5) {
+        let secs = elapsed.as_secs_f32();
+        eprintln!(
+            "fps {:.1} (animating {busy}, 3d moving {moving}, pending {})",
+            *frames as f32 / secs,
+            log.pending.len() + log.questions.len()
+        );
+        *window = None;
+    }
+}
+
 /// Redraw only while something on screen changes by itself; sleep otherwise.
+#[allow(clippy::too_many_arguments)]
 fn pace_updates(
     log: Res<RoomLog>,
     animating: Res<Animating>,
+    view: Res<view3d::View3d>,
     stats: Res<stats::Stats>,
     screenshots: Option<Res<ScreenshotMode>>,
     mut current: Local<Option<Duration>>,
+    mut last_busy: Local<Option<std::time::Instant>>,
     mut settings: ResMut<WinitSettings>,
 ) {
     if screenshots.is_some() {
         return;
     }
-    let wanted = if animating.0 {
+    let busy = animating.0 || (view.on && view.moving);
+    let now = std::time::Instant::now();
+    if busy || last_busy.is_none() {
+        *last_busy = Some(now);
+    }
+    let dozing = last_busy.is_some_and(|at| now - at >= IDLE_3D_FOR);
+    let wanted = if busy {
         Some(FRAME)
     } else if !log.pending.is_empty() || !log.questions.is_empty() {
         Some(COUNTDOWN_TICK)
+    } else if view.on && !dozing {
+        Some(IDLE_3D_FRAME)
     } else if stats.shown {
         Some(stats::REFRESH)
     } else {

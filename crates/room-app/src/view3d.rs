@@ -18,7 +18,7 @@ use bevy::prelude::*;
 use bevy::world_serialization::{WorldAssetRoot, WorldInstanceReady};
 use bevy_egui::{EguiContexts, egui};
 
-use crate::anim::{Accent, Animating};
+use crate::anim::Accent;
 use crate::model::{Model, Pose, Who};
 use crate::scene::{Agent, Roster, WorldCamera};
 use crate::world3d::{INBOX, Location};
@@ -45,12 +45,15 @@ enum Act {
 pub struct View3d {
     pub on: bool,
     built: bool,
+    /// Something in 3D moves this frame (a robot walks, the camera glides, a trail
+    /// fades): redraw at full rate. Otherwise only the idle clip plays, slowly.
+    pub moving: bool,
 }
 
 impl View3d {
     /// 3D is the default view (PLAN.md M17); `AGENT_ROOM_VIEW3D=0` starts in 2D.
     pub fn from_env() -> Self {
-        Self { on: std::env::var("AGENT_ROOM_VIEW3D").map_or(true, |v| v != "0"), built: false }
+        Self { on: std::env::var("AGENT_ROOM_VIEW3D").map_or(true, |v| v != "0"), built: false, moving: false }
     }
 }
 
@@ -80,6 +83,8 @@ pub(crate) struct Avatar {
     playing: Option<Act>,
     /// Its current report has been handed over or left on the desk.
     reported: bool,
+    /// The location it is at or walking to.
+    at: Location,
 }
 
 
@@ -120,9 +125,12 @@ pub fn toggle(
     mut view: ResMut<View3d>,
 ) {
     let key = keys.just_pressed(KeyCode::Digit3) && !egui_input.wants_any_keyboard_input();
-    if key || requests.read().count() % 2 == 1 {
+    let switch = key || requests.read().count() % 2 == 1;
+    if switch {
         view.on = !view.on;
     }
+    // The systems after this one report movement afresh every frame.
+    view.moving = switch;
 }
 
 /// Builds the 3D room the first time the view is switched on.
@@ -185,7 +193,6 @@ pub fn cameras(
     view: Res<View3d>,
     mut flat: Query<&mut Camera, (With<WorldCamera>, Without<RoomCamera3d>)>,
     mut deep: Query<&mut Camera, (With<RoomCamera3d>, Without<WorldCamera>)>,
-    mut animating: ResMut<Animating>,
 ) {
     let Ok(mut flat) = flat.single_mut() else { return };
     if flat.is_active == view.on {
@@ -204,10 +211,6 @@ pub fn cameras(
             deep.viewport = flat.viewport.clone();
         }
     }
-    // The characters are always animated in 3D.
-    if view.on {
-        animating.0 = true;
-    }
 }
 
 type Characters<'w, 's> = Query<'w, 's, (Entity, &'static Accent, &'static Pose), (With<Agent>, Without<Avatar>)>;
@@ -217,7 +220,7 @@ type Avatars<'w, 's> = Query<'w, 's, (Entity, &'static mut Avatar, &'static mut 
 #[allow(clippy::too_many_arguments)]
 pub fn sync(
     mut commands: Commands,
-    view: Res<View3d>,
+    mut view: ResMut<View3d>,
     time: Res<Time>,
     assets: Res<AssetServer>,
     roster: Res<Roster>,
@@ -235,7 +238,7 @@ pub fn sync(
         .iter()
         .filter_map(|(entity, avatar, _)| {
             let (_, _, pose) = characters.get(avatar.of).ok()?;
-            Some((entity, location_for(*pose)))
+            Some((entity, location_for(*pose, Some(avatar.of) == main, avatar.at)))
         })
         .collect();
     wanted.sort_by_key(|(entity, location)| (*location as u8, entity.to_bits()));
@@ -254,6 +257,7 @@ pub fn sync(
         };
         have.insert(avatar.of, ());
         let Some(&(location, slot)) = slots.get(&avatar_entity) else { continue };
+        avatar.at = location;
         // Claude has its own spot at the main desk; sub-agents there stand in front of
         // the platform, facing it.
         let is_main = Some(avatar.of) == main;
@@ -267,6 +271,7 @@ pub fn sync(
         let to = target - here;
         let flat = Vec3::new(to.x, 0.0, to.z);
         let walking = flat.length() > 0.05;
+        view.moving |= walking;
         if walking {
             // Around the main platform, not across it.
             let goal = detour(here, target) - here;
@@ -312,7 +317,7 @@ pub fn sync(
         let start = if is_main { Location::MainDesk.work_spot(0).0 } else { visitor_spot(0) };
         let avatar = commands
             .spawn((
-                Avatar { of: entity, rig: Rig::Robot, glow, accent: accent.0, player: None, playing: None, reported: false },
+                Avatar { of: entity, rig: Rig::Robot, glow, accent: accent.0, player: None, playing: None, reported: false, at: Location::MainDesk },
                 Transform::from_translation(start).with_scale(Vec3::splat(scale)),
                 Visibility::default(),
             ))
@@ -325,14 +330,18 @@ pub fn sync(
 /// A robot's walking pace (metres per second).
 const WALK_SPEED: f32 = 1.8;
 
-/// Where a robot goes for what it is doing (PLAN.md M17). Sub-agents waiting, getting
-/// their task or bringing a report go to the main desk too (to its visitor spots).
-fn location_for(pose: Pose) -> Location {
+/// Where a robot goes for what it is doing (PLAN.md M17), given where it is now.
+/// Claude thinks or waits where it stands (a new message no longer sends it back to
+/// the centre; it says "On it!" on the spot) and goes home only when the turn ends.
+/// Sub-agents waiting, getting their task or bringing a report go to the main desk
+/// (to its visitor spots).
+fn location_for(pose: Pose, is_main: bool, now: Location) -> Location {
     match pose {
         Pose::Reading => Location::FileReading,
         Pose::Web => Location::Bookshelf,
         Pose::Typing => Location::WritingDesk,
         Pose::Terminal => Location::Lab,
+        Pose::Thinking | Pose::Waiting if is_main => now,
         Pose::Idle | Pose::Thinking | Pose::Delegating | Pose::Waiting | Pose::Reporting => Location::MainDesk,
     }
 }
@@ -564,7 +573,7 @@ pub fn labels(
 /// The full view shows the whole workspace; the mini widget follows Claude's robot
 /// up close, since the whole station would be too small to read there.
 pub fn frame(
-    view: Res<View3d>,
+    mut view: ResMut<View3d>,
     mode: Res<crate::mini::ViewMode>,
     time: Res<Time>,
     roster: Res<Roster>,
@@ -583,6 +592,7 @@ pub fn frame(
     let wanted = Transform::from_translation(eye).looking_at(look, Vec3::Y);
     let blend = (time.delta_secs() * 4.0).min(1.0);
     if camera.translation.distance(wanted.translation) > 0.001 {
+        view.moving = true;
         camera.translation = camera.translation.lerp(wanted.translation, blend);
         camera.rotation = camera.rotation.slerp(wanted.rotation, blend);
     }
@@ -678,7 +688,7 @@ const TRAIL_EVERY: f32 = 0.09;
 #[allow(clippy::too_many_arguments)]
 pub fn light_trails(
     mut commands: Commands,
-    view: Res<View3d>,
+    mut view: ResMut<View3d>,
     time: Res<Time>,
     avatars: Query<(&Avatar, &Transform), Without<TrailDot>>,
     mut dots: Query<(Entity, &mut TrailDot, &mut Transform)>,
@@ -691,6 +701,7 @@ pub fn light_trails(
         return;
     }
     let dt = time.delta_secs();
+    view.moving |= !dots.is_empty();
     for (entity, mut dot, mut at) in &mut dots {
         dot.age += dt;
         let left = 1.0 - dot.age / TRAIL_LIFE;
@@ -768,5 +779,16 @@ mod tests {
         // Going onto the platform (Claude's own desk): straight in.
         let desk = Location::MainDesk.work_spot(0).0;
         assert_eq!(detour(Vec3::new(-6.0, 0.0, 0.0), desk), desk);
+    }
+
+    #[test]
+    fn claude_takes_a_new_message_where_it_stands() {
+        // A new prompt (Thinking) or a permission wait keeps Claude at the lab.
+        assert_eq!(location_for(Pose::Thinking, true, Location::Lab), Location::Lab);
+        assert_eq!(location_for(Pose::Waiting, true, Location::Lab), Location::Lab);
+        // The turn is over: home to the main desk.
+        assert_eq!(location_for(Pose::Idle, true, Location::Lab), Location::MainDesk);
+        // A sub-agent waiting still comes to the main desk.
+        assert_eq!(location_for(Pose::Waiting, false, Location::Lab), Location::MainDesk);
     }
 }
