@@ -1,10 +1,10 @@
 //! The 3D view's heads-up display (PLAN.md M17, phase 5), over the workspace in the
-//! style of the user's reference: a title card, the main agent's card, agent counts,
-//! the execution timeline of the current turn, and a robot's details on click.
+//! style of the user's reference: a title card, the main agent's card, agent counts
+//! with the turn's time, and a robot's details on click.
 //!
 //! Everything is derived from what the app already knows (the model, the log), so
-//! there is no second source of truth; the turn trace only remembers which stages
-//! the current turn has passed through.
+//! there is no second source of truth; the turn trace only remembers when the
+//! current turn started.
 
 use std::time::Instant;
 
@@ -17,44 +17,11 @@ use crate::log::{RoomLog, agent_label};
 use crate::model::{Model, Pose, Status, Who};
 use crate::view3d::RoomCamera3d;
 
-/// The stages a turn goes through, as the bottom timeline shows them.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Stage {
-    Reading,
-    Research,
-    Processing,
-    Writing,
-}
-
-impl Stage {
-    const ALL: [Stage; 4] = [Stage::Reading, Stage::Research, Stage::Processing, Stage::Writing];
-
-    fn of(pose: Pose) -> Option<Stage> {
-        match pose {
-            Pose::Reading => Some(Stage::Reading),
-            Pose::Web => Some(Stage::Research),
-            Pose::Terminal => Some(Stage::Processing),
-            Pose::Typing => Some(Stage::Writing),
-            _ => None,
-        }
-    }
-
-    fn label(self) -> &'static str {
-        match self {
-            Stage::Reading => "📄 Reading",
-            Stage::Research => "🔎 Research",
-            Stage::Processing => "⚙ Processing",
-            Stage::Writing => "✏ Writing",
-        }
-    }
-}
-
-/// What the current turn has done so far.
+/// When the current turn started.
 #[derive(Resource, Default)]
 pub struct Trace {
     session: Option<String>,
     started: Option<Instant>,
-    used: Vec<Stage>,
     busy: bool,
 }
 
@@ -70,20 +37,15 @@ fn poses(session: &crate::model::SessionState) -> Vec<Pose> {
 }
 
 /// Follows the shown session: a turn starts when someone gets busy after everyone
-/// was idle; every stage anyone works in is remembered until the next turn.
+/// was idle.
 pub fn trace(model: Res<Model>, mut trace: ResMut<Trace>) {
     let Some(session) = model.shown() else { return };
     let poses = poses(session);
     let busy = poses.iter().any(|pose| *pose != Pose::Idle);
     if trace.session.as_deref() != Some(session.id.as_str()) || (busy && !trace.busy) {
-        *trace = Trace { session: Some(session.id.clone()), started: busy.then(Instant::now), used: Vec::new(), busy };
+        *trace = Trace { session: Some(session.id.clone()), started: busy.then(Instant::now), busy };
     }
     trace.busy = busy;
-    for stage in poses.into_iter().filter_map(Stage::of) {
-        if !trace.used.contains(&stage) {
-            trace.used.push(stage);
-        }
-    }
 }
 
 const GLASS: egui::Color32 = egui::Color32::from_rgba_premultiplied(10, 14, 32, 225);
@@ -223,35 +185,6 @@ pub fn draw(
                     ui.label(egui::RichText::new(format!("✔ {active} active")).color(GREEN));
                     if let Some(started) = trace.started {
                         ui.label(egui::RichText::new(format!("⏱ {}", elapsed(started))).color(DIM));
-                    }
-                });
-            });
-        });
-
-    // The turn's stages, bottom left: done, running or pending.
-    let running: Vec<Stage> = poses.into_iter().filter_map(Stage::of).collect();
-    egui::Area::new("hud-timeline".into())
-        .fixed_pos(egui::pos2(area.min.x + 8.0, area.max.y - 8.0))
-        .pivot(egui::Align2::LEFT_BOTTOM)
-        .interactable(false)
-        .show(ctx, |ui| {
-            card().show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    for (i, stage) in Stage::ALL.into_iter().enumerate() {
-                        if i > 0 {
-                            ui.label(egui::RichText::new("➡").color(DIM));
-                        }
-                        let (state, color) = if running.contains(&stage) {
-                            ("⟳ Running", CYAN)
-                        } else if trace.used.contains(&stage) {
-                            ("✔ Done", GREEN)
-                        } else {
-                            ("⌛ Pending", DIM)
-                        };
-                        ui.vertical(|ui| {
-                            ui.label(egui::RichText::new(stage.label()).strong().color(WHITE));
-                            ui.label(egui::RichText::new(state).small().color(color));
-                        });
                     }
                 });
             });
