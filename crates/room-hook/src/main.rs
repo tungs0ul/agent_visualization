@@ -82,6 +82,9 @@ fn status(raw: &str) -> Result<(), String> {
 /// Sends the event to the app; for permission requests prints the user's answer.
 fn forward(raw: &str) -> Result<(), String> {
     let mut hook: serde_json::Value = serde_json::from_str(raw).map_err(|e| format!("hook JSON: {e}"))?;
+    if let Some(output) = hold(&hook) {
+        return writeln!(io::stdout().lock(), "{output}").map_err(|e| format!("stdout: {e}"));
+    }
     mark_session(&mut hook);
     let envelope = HookEnvelope::new(hook);
 
@@ -114,6 +117,73 @@ fn forward(raw: &str) -> Result<(), String> {
     let reply: PermissionReply = serde_json::from_str(reply.trim()).map_err(|e| format!("reply JSON: {e}"))?;
     let mut stdout = io::stdout().lock();
     writeln!(stdout, "{}", reply.hook_output(&envelope.hook)).map_err(|e| format!("stdout: {e}"))
+}
+
+/// How often a paused hook looks at its hold file, and checks that the app still runs.
+const HOLD_POLL: Duration = Duration::from_millis(250);
+const APP_CHECK: Duration = Duration::from_secs(2);
+
+/// Pause and stop from the app (`room_proto::hold`). Before a tool runs: wait while the
+/// session is paused, and once it is stopped deny the tool and end the turn. Alone,
+/// `continue: false` lets the tool run first, and no `Stop` hook follows, so the app is
+/// told the turn ended here. The tool event reaches the app only when the tool really
+/// goes ahead. A new prompt clears a stop, so it never ends a later turn. A paused hook
+/// lets go when the app is gone, so Claude never waits on nobody.
+fn hold(hook: &serde_json::Value) -> Option<serde_json::Value> {
+    let output = held(hook)?;
+    let mut ended = serde_json::json!({ "hook_event_name": "Stop", "last_assistant_message": room_proto::hold::STOP_REASON });
+    for key in ["session_id", "transcript_path", "cwd"] {
+        if let Some(value) = hook.get(key) {
+            ended[key] = value.clone();
+        }
+    }
+    if let Ok(mut stream) = UnixStream::connect(state_dir().ok()?.join(SOCKET_NAME))
+        && let Ok(mut line) = serde_json::to_string(&HookEnvelope::new(ended))
+    {
+        line.push('\n');
+        let _ = stream.set_write_timeout(Some(WRITE_TIMEOUT));
+        let _ = stream.write_all(line.as_bytes());
+    }
+    Some(output)
+}
+
+fn held(hook: &serde_json::Value) -> Option<serde_json::Value> {
+    use room_proto::hold::{self, Hold};
+    let session = hook.get("session_id")?.as_str()?;
+    match hook.get("hook_event_name")?.as_str()? {
+        "UserPromptSubmit" => {
+            if hold::read(session) == Some(Hold::Stop) {
+                let _ = hold::write(session, None);
+            }
+            None
+        }
+        "PreToolUse" => {
+            let mut checked: Option<std::time::Instant> = None;
+            loop {
+                let held = hold::read(session)?;
+                // A hold left by an app that is gone means nothing.
+                if checked.is_none_or(|at| at.elapsed() >= APP_CHECK) {
+                    UnixStream::connect(state_dir().ok()?.join(SOCKET_NAME)).ok()?;
+                    checked = Some(std::time::Instant::now());
+                }
+                match held {
+                    Hold::Stop => {
+                        return Some(serde_json::json!({
+                            "continue": false,
+                            "stopReason": hold::STOP_REASON,
+                            "hookSpecificOutput": {
+                                "hookEventName": "PreToolUse",
+                                "permissionDecision": "deny",
+                                "permissionDecisionReason": hold::STOP_REASON,
+                            },
+                        }));
+                    }
+                    Hold::Pause => std::thread::sleep(HOLD_POLL),
+                }
+            }
+        }
+        _ => None,
+    }
 }
 
 /// Sessions started with `claude -p` by other tools (e.g. another plugin's Stop hook

@@ -87,6 +87,8 @@ fn main() -> AppExit {
             return AppExit::error();
         }
     };
+    // Pauses and stops from an earlier run must not hold today's sessions.
+    room_proto::hold::clear_all();
     let saved = SavedWindow::load();
 
     let mut app = App::new();

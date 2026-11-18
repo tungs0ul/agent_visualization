@@ -40,7 +40,8 @@
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/libexec/room-hook",
-            "args": []
+            "args": [],
+            "timeout": 86400
           }
         ]
       }

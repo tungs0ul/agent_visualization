@@ -119,6 +119,10 @@ After pulling new changes, run `scripts/install-dev.sh` again and restart `agent
   oldest card. You can type a reason before denying; Claude gets it. If you don't answer
   within 60 seconds (`AGENT_ROOM_PERMISSION_TIMEOUT`), Claude Code asks in the terminal
   as usual. Agent Room never answers on its own.
+- **Pause, resume, stop:** Claude's card at the top has Pause and Stop while it works.
+  Pause makes Claude (and its sub-agents) wait before the next tool call until you press
+  Resume; Stop ends the turn there, and the session stays. Works for terminal sessions
+  too. If Agent Room quits, a paused session goes on by itself.
 - **Usage limits** (claude.ai subscriptions): the top-right card shows how much of the
   5-hour and the weekly limit you have used. Sessions you start from the app's Chat
   report them on their own. For terminal sessions, Claude Code gives them only to a

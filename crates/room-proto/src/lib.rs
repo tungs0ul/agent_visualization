@@ -5,9 +5,11 @@
 //! - [`event`]: raw Claude Code hook JSON parsed into typed [`event::RoomEvent`]s.
 //! - [`describe`]: short human text for a tool call, used for speech bubbles.
 //! - [`limits`]: the account's 5-hour and 7-day usage, for the app's header.
+//! - [`hold`]: pause, resume and stop a session from the app.
 
 pub mod describe;
 pub mod event;
+pub mod hold;
 pub mod limits;
 
 use std::path::PathBuf;

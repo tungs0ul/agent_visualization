@@ -138,7 +138,11 @@ pub fn draw(
                     ui.label(egui::RichText::new(format!("{} Claude sessions", live.len())).small().color(DIM));
                     for (id, name, busy) in &live {
                         let current = shown_id.as_deref() == Some(id.as_str());
-                        let dot = if *busy { "⚡" } else { "⏸" };
+                        let dot = match room_proto::hold::read(id) {
+                            Some(room_proto::hold::Hold::Pause) => "⏸",
+                            _ if *busy => "⚡",
+                            _ => "·",
+                        };
                         let text = egui::RichText::new(format!("{dot} {}", truncate(name, 24)))
                             .color(if current { CYAN } else { egui::Color32::from_gray(210) });
                         if ui.selectable_label(current, text).on_hover_text("Show this session's room").clicked() && !current {
@@ -171,19 +175,47 @@ pub fn draw(
         .rev()
         .find(|line| line.session == session.id && line.agent == "Claude" && line.text.starts_with("You: "))
         .map(|line| line.text.trim_start_matches("You: ").to_owned());
+    // Pause, resume and stop (PLAN.md M25): the hold file is the only state.
+    use room_proto::hold::{self, Hold};
+    let held = hold::read(&session.id);
+    let mut set_hold = None;
     egui::Area::new("hud-main".into())
         .fixed_pos(egui::pos2(area.center().x, area.min.y + 8.0))
         .pivot(egui::Align2::CENTER_TOP)
-        .interactable(false)
         .show(ctx, |ui| {
             card().show(ui, |ui| {
                 ui.set_max_width(420.0);
                 ui.horizontal(|ui| {
-                    let (dot, state) = if trace.busy { (GREEN, "working") } else { (DIM, "idle") };
+                    let (dot, state) = match held {
+                        Some(Hold::Pause) => (AMBER, "paused"),
+                        _ if trace.busy => (GREEN, "working"),
+                        _ => (DIM, "idle"),
+                    };
                     ui.label(egui::RichText::new("⚡").color(dot));
                     ui.label(egui::RichText::new("Claude").strong().color(WHITE));
                     let model = session.model.as_deref().map(|m| format!(" · {}", crate::log::short_model(m))).unwrap_or_default();
                     ui.label(egui::RichText::new(format!("· main agent{model} · {state}")).color(DIM));
+                    if session.ended {
+                        return;
+                    }
+                    if held == Some(Hold::Pause) {
+                        if ui.small_button("▶ Resume").on_hover_text("Let Claude go on").clicked() {
+                            set_hold = Some(None);
+                        }
+                    } else if trace.busy
+                        && ui.small_button("⏸ Pause").on_hover_text("Claude waits before its next tool call, sub-agents too, until you resume").clicked()
+                    {
+                        set_hold = Some(Some(Hold::Pause));
+                    }
+                    if (trace.busy || held == Some(Hold::Pause))
+                        && held != Some(Hold::Stop)
+                        && ui.small_button("⏹ Stop").on_hover_text("End this turn before Claude's next tool call (the session stays)").clicked()
+                    {
+                        set_hold = Some(Some(Hold::Stop));
+                    }
+                    if held == Some(Hold::Stop) && trace.busy {
+                        ui.label(egui::RichText::new("stopping…").small().color(AMBER));
+                    }
                 });
                 if let Some(prompt) = &prompt {
                     ui.label(egui::RichText::new(format!("Working on: {}", truncate(prompt, 80))).color(CYAN));
@@ -207,6 +239,12 @@ pub fn draw(
                 }
             });
         });
+
+    if let Some(hold) = set_hold
+        && let Err(err) = hold::write(&session.id, hold)
+    {
+        bevy::log::warn!("hold not saved: {err}");
+    }
 
     // Agent counts and the turn's time, top right.
     let poses = poses(session);

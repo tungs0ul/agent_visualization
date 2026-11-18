@@ -918,6 +918,34 @@ any game, film theme when they provide the 3d model for the agent and background
 - When Claude finishes a turn (`Stop.last_assistant_message`), show the answer in a
   centre pop-up (dismissable; compact in mini mode).
 
+### M25: Pause, resume and stop a session (requested 2026-11-18, done 2026-11-18)
+
+User: "there is no way to stop or pause an agent, maybe we want to have feature that we
+can stop, pause or resume?" Only chats started from the app could stop (stream-json
+`interrupt`); terminal sessions had no control, and nothing could pause.
+
+- One mechanism for every session, terminal or chat: the app writes
+  `~/.agent-room/hold/<session_id>` with `pause` or `stop` (`room_proto::hold`), and
+  `room-hook` reads it on each `PreToolUse` before forwarding the event. No file means
+  run; it costs one failed open per tool call.
+- Pause: the hook waits (polls every 250 ms) until the file goes, so the tool does not
+  run. Sub-agents share the session id, so they wait too. Claude's text between tools
+  still streams: the pause takes effect at the next tool call. `PreToolUse` gets
+  `"timeout": 86400` in `hooks.json` (Claude Code's default of 600 s would let the tool
+  run after 10 minutes). Plugin 0.4.0.
+- Stop: the hook prints `continue: false` **and** `permissionDecision: "deny"`. Checked
+  live with Haiku: `continue: false` alone ends the turn only after the tool ran, and no
+  `Stop` hook follows either way, so `room-hook` sends the app a `Stop` event itself
+  ("Stopped from Agent Room"). `UserPromptSubmit` clears a stop, so a stop set while
+  idle never ends a later turn.
+- Fail open: a hold only counts while the app's socket answers (checked at once, then
+  every 2 s while paused), and the app clears the folder at start. A quit or crashed
+  app never leaves Claude waiting.
+- UI: Claude's card at the top shows "paused" and Pause / Resume / Stop; the session
+  list shows ⏸ for paused (idle is now ·). The chat console keeps its own Stop
+  (immediate `interrupt`).
+- Not done: pausing a single sub-agent (the hook has `agent_id`; the file would key on it).
+
 ### M21-M24: from the research on similar apps and new hooks (requested 2026-11-18, done 2026-11-18)
 
 User: "Do 1 2 3 4" (the top four from the research: Claude Code 2.1.327 hooks reference,
@@ -1194,6 +1222,7 @@ config file, and can remove both cleanly.
 - [x] M23 StopFailure reasons, PostCompact, PostModelSwitch, notices (2026-11-18; plugin 0.3.0)
 - [x] M24 Chat @ mentions and dropped images (2026-11-18; not yet seen on screen)
 - [x] M7 Distribution, code side (2026-11-17); publishing left to the user
+- [x] M25 Pause, resume and stop any session (2026-11-18; plugin 0.4.0; buttons not yet seen on screen)
 
 ## 12. Handoff log
 
@@ -1704,3 +1733,10 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   other floor discs 0.08 m). The teleporter and wall screen keep the old reach.
   Clippy clean, tests pass; **not yet clicked on screen** (a script can't click the
   user's window): the user tries it after a rebuild.
+- 2026-11-18, Claude Opus 5.5: M25 pause, resume and stop for every session, through
+  hold files read by `room-hook` on `PreToolUse` (see M25). Checked live with Haiku
+  sessions, a fake app socket and the dev hook: pause held the tool until the file went
+  (8 s), stop while paused denied the tool (its `touch` never ran) and sent `Stop`, and a
+  stale pause with no app ran the tool at once. Clippy clean, tests pass. **Not seen on
+  screen**: the Mac was locked, so screenshots were black. The user rebuilds, updates
+  the plugin to 0.4.0 (`scripts/install-dev.sh`) and tries the buttons on Claude's card.
