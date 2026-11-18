@@ -739,7 +739,7 @@ pub fn frame(
         _ => {
             // The user's pan and zoom (`camera_input`).
             let look = FULL_LOOK + Vec3::new(hand.pan.x, 0.0, hand.pan.y);
-            (look + (FULL_EYE - FULL_LOOK) * hand.zoom, look)
+            (look + Quat::from_rotation_y(hand.turn) * (FULL_EYE - FULL_LOOK) * hand.zoom, look)
         }
     };
     let wanted = Transform::from_translation(eye).looking_at(look, Vec3::Y);
@@ -1199,25 +1199,30 @@ fn spawn_capsule(commands: &mut Commands, assets: &AssetServer, from: Vec3, to: 
         .observe(brighten_holo);
 }
 
-/// The user's view of the HQ: panned (metres on the floor) and zoomed (1 is the
-/// whole HQ, smaller is closer).
+/// The user's view of the HQ: panned (metres on the floor), zoomed (1 is the whole
+/// HQ, smaller is closer) and turned round the point looked at (radians).
 #[derive(Resource)]
 pub struct CameraView {
     pan: Vec2,
     zoom: f32,
+    turn: f32,
 }
 
 impl Default for CameraView {
     fn default() -> Self {
-        Self { pan: Vec2::ZERO, zoom: 1.0 }
+        Self { pan: Vec2::ZERO, zoom: 1.0, turn: 0.0 }
     }
 }
+
+/// How far the view turns either way: further, the back wall hides the HQ.
+const TURN_LIMIT: f32 = 1.05;
 
 /// How far the view may pan (metres from the centre) and zoom.
 const PAN_LIMIT: Vec2 = Vec2::new(8.0, 6.0);
 const ZOOM_RANGE: (f32, f32) = (0.3, 1.25);
 
-/// Full view only: drag to pan, scroll or pinch to zoom, double-click to reset. Only
+/// Full view only: drag to pan, right-drag (or Option-drag, or a two-finger twist)
+/// to turn, scroll or pinch to zoom, double-click to reset. Only
 /// over the HQ itself, never when the pointer is on a panel (its scrolling must not
 /// move the room).
 #[allow(clippy::too_many_arguments)]
@@ -1230,35 +1235,54 @@ pub fn camera_input(
     motion: Res<bevy::input::mouse::AccumulatedMouseMotion>,
     scroll: Res<bevy::input::mouse::AccumulatedMouseScroll>,
     mut pinch: MessageReader<bevy::input::gestures::PinchGesture>,
+    mut twist: MessageReader<bevy::input::gestures::RotationGesture>,
+    keys: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
     mut hand: ResMut<CameraView>,
-    mut dragging: Local<bool>,
+    mut dragging: Local<Option<MouseButton>>,
     mut last_click: Local<f32>,
 ) {
     let pinched: f32 = pinch.read().map(|gesture| gesture.0).sum();
+    let twisted: f32 = twist.read().map(|gesture| gesture.0).sum();
     if mode.mini {
-        *dragging = false;
+        *dragging = None;
         return;
     }
     let over = window.cursor_position().is_some_and(|cursor| {
         camera.single().ok().and_then(|camera| camera.logical_viewport_rect()).is_some_and(|rect| rect.contains(cursor))
     }) && !egui_input.wants_any_pointer_input();
+    let option = keys.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]);
     if buttons.just_pressed(MouseButton::Left) && over {
         let now = time.elapsed_secs();
         if now - *last_click < 0.35 {
             *hand = CameraView::default();
         }
         *last_click = now;
-        *dragging = true;
+        *dragging = Some(if option { MouseButton::Right } else { MouseButton::Left });
     }
-    if !buttons.pressed(MouseButton::Left) {
-        *dragging = false;
+    if buttons.just_pressed(MouseButton::Right) && over {
+        *dragging = Some(MouseButton::Right);
     }
-    if *dragging && motion.delta != Vec2::ZERO {
-        // A pixel moves the floor more when zoomed out.
-        let metres = 0.018 * hand.zoom;
-        let pan = (hand.pan - motion.delta * metres).clamp(-PAN_LIMIT, PAN_LIMIT);
-        hand.pan = pan;
+    if !buttons.any_pressed([MouseButton::Left, MouseButton::Right]) {
+        *dragging = None;
+    }
+    if motion.delta != Vec2::ZERO {
+        match *dragging {
+            // Turn: sideways moves round the HQ.
+            Some(MouseButton::Right) => {
+                hand.turn = (hand.turn - motion.delta.x * 0.006).clamp(-TURN_LIMIT, TURN_LIMIT);
+            }
+            // Pan: the floor follows the hand, in the direction the camera faces.
+            Some(_) => {
+                let metres = 0.018 * hand.zoom;
+                let moved = Vec2::from_angle(-hand.turn).rotate(motion.delta * metres);
+                hand.pan = (hand.pan - moved).clamp(-PAN_LIMIT, PAN_LIMIT);
+            }
+            None => {}
+        }
+    }
+    if over && twisted != 0.0 {
+        hand.turn = (hand.turn + twisted).clamp(-TURN_LIMIT, TURN_LIMIT);
     }
     if over {
         let lines = match scroll.unit {
