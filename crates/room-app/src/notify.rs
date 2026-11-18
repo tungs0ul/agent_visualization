@@ -49,6 +49,7 @@ pub fn notice(event: &RoomEvent, project: Option<&str>) -> Option<(Kind, String)
         }
         EventKind::ToolFailed { tool_name, interrupted: false, .. } => (Kind::Failed, format!("{who}: {tool_name} failed")),
         EventKind::TurnFailed { .. } => (Kind::Failed, format!("{who}: the turn failed")),
+        EventKind::PermissionAsked { tool } if tool.name == room_proto::PLAN_TOOL => (Kind::Waiting, format!("{who} has a plan for you")),
         EventKind::PermissionAsked { tool } => (Kind::Waiting, format!("{who} needs your OK: {}", tool.name)),
         EventKind::ToolStarted { tool, .. } if tool.name == room_proto::QUESTION_TOOL => {
             (Kind::Waiting, format!("{who} has a question"))

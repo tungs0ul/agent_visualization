@@ -348,6 +348,7 @@ pub fn needs_you(model: &Model, log: &RoomLog) -> Vec<String> {
         .filter(|session| {
             log.pending.iter().any(|card| card.session == session.id)
                 || log.questions.iter().any(|card| card.session == session.id)
+                || log.plans.iter().any(|card| card.session == session.id)
                 || session.main_pose == Pose::Waiting
                 || session.agents.iter().any(|(_, info)| info.status == Status::Waiting)
         })

@@ -37,7 +37,7 @@ use bevy::winit::{EventLoopProxyWrapper, UpdateMode, WinitSettings, WinitUserEve
 use bevy_egui::{EguiGlobalSettings, EguiPlugin, EguiPrimaryContextPass, PrimaryEguiContext};
 use room_proto::event::{AgentRef, EventKind};
 
-use crate::log::{AutoAccept, FinalAnswer, PendingPermission, PendingQuestion, RoomLog, agent_label, always_asks, parse_questions};
+use crate::log::{AutoAccept, FinalAnswer, PendingPermission, PendingPlan, PendingQuestion, RoomLog, agent_label, always_asks, parse_questions};
 use room_proto::{Decision, PermissionReply};
 use crate::model::{Model, Who};
 use crate::server::{Incoming, Server};
@@ -276,8 +276,12 @@ fn receive_events(
         }
         let agent = agent_label(&event.agent);
         match (reply, &event.kind) {
+            // A plan is never auto-approved: reading it is the point (PLAN.md M22).
+            (Some(reply), EventKind::PermissionAsked { tool }) if tool.name == room_proto::PLAN_TOOL => {
+                log.plans.push(PendingPlan::new(event.session_id.clone(), agent, tool, reply, now));
+            }
             (Some(reply), EventKind::PermissionAsked { tool }) if auto.0 && !always_asks(tool, event.cwd.as_deref()) => {
-                reply.send(&PermissionReply { decision: Decision::Allow, message: None, answers: None });
+                reply.send(&PermissionReply { decision: Decision::Allow, message: None, answers: None, mode: None });
                 log.note(&event.session_id, agent, format!("Auto-allowed {}", tool.describe().1));
             }
             (Some(reply), EventKind::PermissionAsked { tool }) => log.pending.push(PendingPermission {
@@ -346,6 +350,17 @@ fn settle_permissions(mut log: ResMut<RoomLog>) {
             log.note(&session, agent, "Question: answered in the terminal".to_owned());
         }
     }
+    let mut gone = Vec::new();
+    log.plans.retain(|card| {
+        let keep = card.expires_at > now && !card.reply.is_closed();
+        if !keep {
+            gone.push((card.session.clone(), card.agent.clone()));
+        }
+        keep
+    });
+    for (session, agent) in gone {
+        log.note(&session, agent, "Plan: answered in the terminal".to_owned());
+    }
     if log.pending.is_empty() {
         return;
     }
@@ -387,7 +402,7 @@ fn log_frame_rate(
         eprintln!(
             "fps {:.1} (busy {busy}, moving {moving}, pending {})",
             *frames as f32 / secs,
-            log.pending.len() + log.questions.len()
+            log.pending.len() + log.questions.len() + log.plans.len()
         );
         *window = None;
     }
@@ -424,7 +439,7 @@ fn pace_updates(
         Pace::Dozing
     };
     // Countdowns and the stats overlay need their own ticks even when all is still.
-    let tick = if !log.pending.is_empty() || !log.questions.is_empty() || toasts.tidy() {
+    let tick = if !log.pending.is_empty() || !log.questions.is_empty() || !log.plans.is_empty() || toasts.tidy() {
         Some(COUNTDOWN_TICK)
     } else if stats.shown {
         Some(stats::REFRESH)

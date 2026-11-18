@@ -55,9 +55,46 @@ pub struct RoomLog {
     pub pending: Vec<PendingPermission>,
     /// Claude's multiple-choice questions waiting for an answer (centre pop-up).
     pub questions: Vec<PendingQuestion>,
+    /// Plans waiting for approval (`ExitPlanMode`, centre board; PLAN.md M22).
+    pub plans: Vec<PendingPlan>,
     /// Claude's last answer in the shown session. Shown until closed or the next prompt
     /// in that same session; kept so the "Last answer" button can open it again.
     pub final_answer: Option<FinalAnswer>,
+}
+
+/// Claude's plan, asking to leave plan mode. Approving picks the mode it works in next;
+/// "Keep planning" sends the feedback back and Claude stays in plan mode.
+pub struct PendingPlan {
+    pub session: String,
+    pub agent: String,
+    /// Markdown, injected by Claude Code from the plan file.
+    pub plan: String,
+    pub path: Option<String>,
+    pub shown_at: Instant,
+    pub expires_at: Instant,
+    pub reply: ReplyHandle,
+    pub feedback: String,
+}
+
+impl PendingPlan {
+    pub fn new(session: String, agent: String, tool: &ToolCall, reply: ReplyHandle, now: Instant) -> Self {
+        let field = |key: &str| tool.input.get(key).and_then(|v| v.as_str()).map(str::to_owned);
+        let timeout = room_proto::reply_timeout(&serde_json::json!({ "tool_name": tool.name }));
+        Self {
+            session,
+            agent,
+            plan: field("plan").unwrap_or_default(),
+            path: field("planFilePath"),
+            shown_at: now,
+            expires_at: now + timeout,
+            reply,
+            feedback: String::new(),
+        }
+    }
+
+    pub fn accepts_input(&self, now: Instant) -> bool {
+        now >= self.shown_at + INPUT_GUARD
+    }
 }
 
 pub struct FinalAnswer {

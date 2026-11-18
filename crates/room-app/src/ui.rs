@@ -214,7 +214,7 @@ pub fn draw(
         let reason = pending.reason.trim();
         let message = (decision == Decision::Deny)
             .then(|| if reason.is_empty() { DENY_MESSAGE.to_owned() } else { format!("The user denied this: {reason}") });
-        pending.reply.send(&PermissionReply { decision, message, answers: None });
+        pending.reply.send(&PermissionReply { decision, message, answers: None, mode: None });
         let verb = match decision {
             Decision::Allow => "Allowed",
             Decision::Deny => "Denied",
@@ -222,6 +222,7 @@ pub fn draw(
         log.note(&pending.session, pending.agent, format!("{verb} {}", pending.tool.describe().1));
     }
     question_popup(ctx, &mut log, now);
+    plan_popup(ctx, &mut log, &mut markdown, now);
     // Don't cover a console the user is using; the answer stays a click away (Last
     // answer, the trophy shelf).
     if open.0.is_none() {
@@ -369,7 +370,7 @@ fn question_popup(ctx: &egui::Context, log: &mut RoomLog, now: Instant) {
         let card = log.questions.remove(0);
         let note = if send {
             let answers = card.answers();
-            card.reply.send(&PermissionReply { decision: Decision::Allow, message: None, answers });
+            card.reply.send(&PermissionReply { decision: Decision::Allow, message: None, answers, mode: None });
             "Answered the question"
         } else {
             // Dropping the reply closes the hook; Claude Code asks in the terminal.
@@ -379,10 +380,108 @@ fn question_popup(ctx: &egui::Context, log: &mut RoomLog, now: Instant) {
     }
 }
 
+/// How the user answers a plan.
+enum PlanAnswer {
+    /// Approve; the session switches to this permission mode.
+    Approve(&'static str),
+    /// Stay in plan mode; the feedback goes back to Claude.
+    KeepPlanning,
+    /// Let the terminal show its own plan prompt.
+    Terminal,
+}
+
+/// Claude's plan (`ExitPlanMode`) on a board in the middle, like the terminal's plan
+/// prompt: approve and let it edit freely, approve and review each edit, or keep
+/// planning with feedback (PLAN.md M22). Questions go first.
+fn plan_popup(ctx: &egui::Context, log: &mut RoomLog, markdown: &mut MarkdownCache, now: Instant) {
+    if !log.questions.is_empty() {
+        return;
+    }
+    let Some(card) = log.plans.first_mut() else { return };
+    let mut answer = None;
+    let size = ctx.viewport_rect().size() * egui::vec2(0.8, 0.82);
+    egui::Window::new(format!("{}'s plan", card.agent))
+        .id("plan".into())
+        .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+        .collapsible(false)
+        .resizable(false)
+        .fixed_size(size)
+        .show(ctx, |ui| {
+            egui::ScrollArea::both()
+                .max_height(size.y - 120.0)
+                .max_width(size.x)
+                .auto_shrink(false)
+                .show(ui, |ui| {
+                    if card.plan.trim().is_empty() {
+                        ui.weak("The plan is empty; read it in the terminal.");
+                    }
+                    egui_commonmark::CommonMarkViewer::new().show(ui, &mut markdown.0, &card.plan);
+                });
+            ui.separator();
+            if let Some(path) = &card.path {
+                ui.small(egui::RichText::new(path.as_str()).weak()).on_hover_text("The plan file");
+            }
+            ui.add(
+                egui::TextEdit::singleline(&mut card.feedback)
+                    .hint_text("What should change? (for Keep planning)")
+                    .desired_width(f32::INFINITY),
+            );
+            ui.horizontal_wrapped(|ui| {
+                let enabled = card.accepts_input(now);
+                if ui
+                    .add_enabled(enabled, colored_button("Approve, accept edits", ALLOW))
+                    .on_hover_text("Leave plan mode; Claude edits files without asking")
+                    .clicked()
+                {
+                    answer = Some(PlanAnswer::Approve("acceptEdits"));
+                }
+                if ui
+                    .add_enabled(enabled, colored_button("Approve, ask for each edit", ALLOW.gamma_multiply(0.75)))
+                    .on_hover_text("Leave plan mode; every edit still asks")
+                    .clicked()
+                {
+                    answer = Some(PlanAnswer::Approve("default"));
+                }
+                if ui
+                    .add_enabled(enabled, colored_button("Keep planning", DENY))
+                    .on_hover_text("Stay in plan mode and send the feedback above")
+                    .clicked()
+                {
+                    answer = Some(PlanAnswer::KeepPlanning);
+                }
+                if ui.button("Answer in terminal").clicked() {
+                    answer = Some(PlanAnswer::Terminal);
+                }
+                ui.small(format!("{} s", card.expires_at.saturating_duration_since(now).as_secs()));
+            });
+        });
+    let Some(answer) = answer else { return };
+    let card = log.plans.remove(0);
+    let note = match answer {
+        PlanAnswer::Approve(mode) => {
+            card.reply.send(&PermissionReply { decision: Decision::Allow, message: None, answers: None, mode: Some(mode.to_owned()) });
+            if mode == "acceptEdits" { "Approved the plan (accept edits)" } else { "Approved the plan (ask for each edit)" }
+        }
+        PlanAnswer::KeepPlanning => {
+            let feedback = card.feedback.trim();
+            let message = if feedback.is_empty() {
+                "The user wants to keep planning. Ask what should change.".to_owned()
+            } else {
+                format!("The user wants to keep planning: {feedback}")
+            };
+            card.reply.send(&PermissionReply { decision: Decision::Deny, message: Some(message), answers: None, mode: None });
+            "Plan: keep planning"
+        }
+        // Dropping the reply closes the hook; Claude Code shows its own prompt.
+        PlanAnswer::Terminal => "Plan: answer in the terminal",
+    };
+    log.note(&card.session, card.agent, note.to_owned());
+}
+
 /// Claude's answer at the end of a turn, rendered as markdown, until closed or the
 /// next prompt. Nothing else happens at that moment, so it takes most of the window.
 fn final_answer_popup(ctx: &egui::Context, log: &mut RoomLog, markdown: &mut MarkdownCache, mini: bool) {
-    if !log.questions.is_empty() {
+    if !log.questions.is_empty() || !log.plans.is_empty() {
         return;
     }
     let Some(text) = log.final_answer.as_ref().filter(|answer| answer.open).map(|answer| answer.text.clone()) else {

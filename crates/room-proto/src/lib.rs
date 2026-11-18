@@ -21,6 +21,8 @@ pub const SOCKET_NAME: &str = "room.sock";
 pub const LOCK_NAME: &str = "app.lock";
 /// Claude's multiple-choice question tool.
 pub const QUESTION_TOOL: &str = "AskUserQuestion";
+/// Claude presents its plan; the PermissionRequest for it is the plan approval (PLAN.md M22).
+pub const PLAN_TOOL: &str = "ExitPlanMode";
 
 const DEFAULT_PERMISSION_TIMEOUT: Duration = Duration::from_secs(60);
 
@@ -33,6 +35,18 @@ pub fn permission_timeout() -> Duration {
         .and_then(|s| s.parse::<u64>().ok())
         .filter(|&secs| secs > 0)
         .map_or(DEFAULT_PERMISSION_TIMEOUT, Duration::from_secs)
+}
+
+/// Plans take longer to read than a command: wait at least this long for an answer.
+const PLAN_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// How long the hook waits for the app's answer to this hook event.
+pub fn reply_timeout(hook: &Value) -> Duration {
+    let base = permission_timeout();
+    match hook.get("tool_name").and_then(Value::as_str) {
+        Some(PLAN_TOOL) => base.max(PLAN_TIMEOUT),
+        _ => base,
+    }
 }
 
 /// `~/.agent-room`, or `$AGENT_ROOM_DIR` when set (tests, multiple dev instances).
@@ -118,6 +132,10 @@ pub struct PermissionReply {
     /// For `AskUserQuestion`: question text ⇒ chosen label(s), comma-separated.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub answers: Option<serde_json::Map<String, Value>>,
+    /// For an approved plan: the permission mode the session switches to
+    /// (`acceptEdits`, `default`), for this session only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
 }
 
 impl PermissionReply {
@@ -127,7 +145,7 @@ impl PermissionReply {
         if hook.get("hook_event_name").and_then(Value::as_str) == Some("PreToolUse") {
             return self.question_output(hook);
         }
-        self.permission_output()
+        self.permission_output(hook)
     }
 
     /// Echo the questions back with the answers added (`updatedInput` replaces the
@@ -151,8 +169,21 @@ impl PermissionReply {
         }
     }
 
-    fn permission_output(&self) -> Value {
+    fn permission_output(&self, hook: &Value) -> Value {
+        let plan = hook.get("tool_name").and_then(Value::as_str) == Some(PLAN_TOOL);
         let decision = match (self.decision, &self.message) {
+            // A plan approval needs the input echoed back (hooks reference, "allow with
+            // updatedInput"); without it Claude Code still shows its own prompt.
+            (Decision::Allow, _) if plan => {
+                let mut decision = json!({
+                    "behavior": "allow",
+                    "updatedInput": hook.get("tool_input").cloned().unwrap_or_else(|| json!({})),
+                });
+                if let Some(mode) = &self.mode {
+                    decision["updatedPermissions"] = json!([{ "type": "setMode", "mode": mode, "destination": "session" }]);
+                }
+                decision
+            }
             (Decision::Allow, _) => json!({ "behavior": "allow" }),
             (Decision::Deny, Some(message)) => json!({ "behavior": "deny", "message": message }),
             (Decision::Deny, None) => json!({ "behavior": "deny" }),
@@ -179,7 +210,7 @@ mod tests {
 
     #[test]
     fn allow_output_has_no_message() {
-        let reply = PermissionReply { decision: Decision::Allow, message: Some("ignored".into()), answers: None };
+        let reply = PermissionReply { decision: Decision::Allow, message: Some("ignored".into()), answers: None, mode: None };
         assert_eq!(
             reply.hook_output(&json!({ "hook_event_name": "PermissionRequest" })),
             json!({ "hookSpecificOutput": { "hookEventName": "PermissionRequest", "decision": { "behavior": "allow" } } })
@@ -188,7 +219,7 @@ mod tests {
 
     #[test]
     fn deny_output_carries_message() {
-        let reply = PermissionReply { decision: Decision::Deny, message: Some("Not now".into()), answers: None };
+        let reply = PermissionReply { decision: Decision::Deny, message: Some("Not now".into()), answers: None, mode: None };
         assert_eq!(reply.hook_output(&json!({ "hook_event_name": "PermissionRequest" }))["hookSpecificOutput"]["decision"], json!({ "behavior": "deny", "message": "Not now" }));
     }
 
@@ -204,7 +235,7 @@ mod tests {
 
         let mut answers = serde_json::Map::new();
         answers.insert("Which?".into(), json!("A"));
-        let reply = PermissionReply { decision: Decision::Allow, message: None, answers: Some(answers) };
+        let reply = PermissionReply { decision: Decision::Allow, message: None, answers: Some(answers), mode: None };
         let out = reply.hook_output(&hook)["hookSpecificOutput"].clone();
         assert_eq!(out["permissionDecision"], "allow");
         assert_eq!(out["updatedInput"]["answers"], json!({ "Which?": "A" }));
@@ -212,10 +243,27 @@ mod tests {
     }
 
     #[test]
+    fn plan_approval_echoes_the_plan_and_sets_the_mode() {
+        let hook = json!({
+            "hook_event_name": "PermissionRequest",
+            "tool_name": "ExitPlanMode",
+            "tool_input": { "plan": "1. Do it", "planFilePath": "/p.md" }
+        });
+        let reply = PermissionReply { decision: Decision::Allow, message: None, answers: None, mode: Some("acceptEdits".into()) };
+        let decision = reply.hook_output(&hook)["hookSpecificOutput"]["decision"].clone();
+        assert_eq!(decision["behavior"], "allow");
+        assert_eq!(decision["updatedInput"]["plan"], "1. Do it");
+        assert_eq!(decision["updatedPermissions"], json!([{ "type": "setMode", "mode": "acceptEdits", "destination": "session" }]));
+
+        let keep = PermissionReply { decision: Decision::Deny, message: Some("Add tests".into()), answers: None, mode: None };
+        assert_eq!(keep.hook_output(&hook)["hookSpecificOutput"]["decision"], json!({ "behavior": "deny", "message": "Add tests" }));
+    }
+
+    #[test]
     fn reply_round_trips_through_json() {
         let line = r#"{"decision":"deny","message":"no"}"#;
         let reply: PermissionReply = serde_json::from_str(line).unwrap();
-        assert_eq!(reply, PermissionReply { decision: Decision::Deny, message: Some("no".into()), answers: None });
+        assert_eq!(reply, PermissionReply { decision: Decision::Deny, message: Some("no".into()), answers: None, mode: None });
         let reply: PermissionReply = serde_json::from_str(r#"{"decision":"allow"}"#).unwrap();
         assert_eq!(serde_json::to_string(&reply).unwrap(), r#"{"decision":"allow"}"#);
     }

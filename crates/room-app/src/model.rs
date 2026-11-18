@@ -461,6 +461,7 @@ fn react(kind: &EventKind, current: Pose, session: &SessionState) -> (Option<Pos
             (Some(Pose::Thinking), Some(format!("Hmm, {tool_name} failed")))
         }
         EventKind::ToolFailed { .. } => (Some(Pose::Idle), Some("Stopped".to_owned())),
+        EventKind::PermissionAsked { tool } if tool.name == room_proto::PLAN_TOOL => (Some(Pose::Waiting), Some("My plan is ready".to_owned())),
         EventKind::PermissionAsked { tool } => (Some(Pose::Waiting), Some(format!("May I? {}", tool.describe().1))),
         EventKind::PermissionAutoDenied { tool_name, .. } => {
             (Some(Pose::Thinking), Some(format!("Not allowed: {tool_name}")))

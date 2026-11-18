@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use room_proto::{HookEnvelope, PermissionReply, SOCKET_NAME, permission_timeout};
+use room_proto::{HookEnvelope, PermissionReply, SOCKET_NAME, reply_timeout};
 
 mod channel;
 
@@ -100,7 +100,7 @@ fn forward(raw: &str) -> Result<(), String> {
     }
 
     stream
-        .set_read_timeout(Some(permission_timeout()))
+        .set_read_timeout(Some(reply_timeout(&envelope.hook)))
         .map_err(|e| format!("socket timeout: {e}"))?;
     let mut reply = String::new();
     match BufReader::new(&stream).read_line(&mut reply) {

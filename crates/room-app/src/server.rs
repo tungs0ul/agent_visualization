@@ -229,7 +229,7 @@ mod tests {
     #[test]
     fn reply_reaches_the_hook() {
         let (app_side, hook_side) = UnixStream::pair().unwrap();
-        ReplyHandle(app_side).send(&PermissionReply { decision: room_proto::Decision::Allow, message: None, answers: None });
+        ReplyHandle(app_side).send(&PermissionReply { decision: room_proto::Decision::Allow, message: None, answers: None, mode: None });
         let mut line = String::new();
         BufReader::new(hook_side).read_line(&mut line).unwrap();
         assert_eq!(line, "{\"decision\":\"allow\"}\n");
