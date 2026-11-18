@@ -132,11 +132,26 @@ impl ChatSession {
     }
 
     pub fn send(&mut self, text: &str) {
-        if !self.write(&json!({ "type": "user", "message": { "role": "user", "content": text } })) {
+        self.send_with(text, &[]);
+    }
+
+    /// A message with images (PLAN.md M24): image blocks first, then the text.
+    pub fn send_with(&mut self, text: &str, images: &[crate::compose::Attachment]) {
+        let content = if images.is_empty() {
+            json!(text)
+        } else {
+            let mut blocks: Vec<Value> = images.iter().map(crate::compose::Attachment::block).collect();
+            if !text.is_empty() {
+                blocks.push(json!({ "type": "text", "text": text }));
+            }
+            Value::Array(blocks)
+        };
+        if !self.write(&json!({ "type": "user", "message": { "role": "user", "content": content } })) {
             self.transcript.push(Entry::Note("Claude has stopped. Start a new session.".to_owned()));
             return;
         }
-        self.transcript.push(Entry::You(text.to_owned()));
+        let names: String = images.iter().map(|image| format!("[image: {}]\n", image.name)).collect();
+        self.transcript.push(Entry::You(format!("{names}{text}").trim_end().to_owned()));
         self.busy = true;
     }
 
@@ -347,6 +362,10 @@ pub struct Chats {
     channels: Vec<Channel>,
     /// What the user sent to terminal sessions, by session id, oldest first.
     pub sent: Vec<(String, String)>,
+    /// The active session's folder's files, for `@` suggestions (PLAN.md M24).
+    pub files: crate::compose::FileIndex,
+    /// Images dropped on the window, sent with the next message.
+    pub attachments: Vec<crate::compose::Attachment>,
 }
 
 /// A session Claude Code saved on disk, which `claude --resume <id>` continues.

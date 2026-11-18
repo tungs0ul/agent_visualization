@@ -8,6 +8,7 @@
 mod activity;
 mod assets;
 mod chat;
+mod compose;
 mod console;
 mod diff;
 mod director;

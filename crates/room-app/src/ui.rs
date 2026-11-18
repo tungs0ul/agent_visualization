@@ -90,6 +90,7 @@ pub fn draw(
                 });
             });
     }
+    dropped_files(ctx, &mut chat.chats, &mut open);
     let RoomLog { lines, pending, final_answer, .. } = &mut *log;
 
     // Permission cards for every session, on top (the oldest of the shown session also
@@ -229,6 +230,41 @@ pub fn draw(
         final_answer_popup(ctx, &mut log, &mut markdown, mode.mini);
     }
     Ok(())
+}
+
+/// Files dropped on the window go to the chat's next message (PLAN.md M24): images
+/// attached, other files mentioned as `@path`. The chat console opens to show them.
+fn dropped_files(ctx: &egui::Context, chats: &mut Chats, open: &mut OpenConsole) {
+    if ctx.input(|i| !i.raw.hovered_files.is_empty()) {
+        egui::Area::new("drop-hint".into())
+            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+            .interactable(false)
+            .show(ctx, |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| ui.heading("Drop to add to the chat message"));
+            });
+    }
+    let dropped = ctx.input(|i| i.raw.dropped_files.clone());
+    if dropped.is_empty() {
+        return;
+    }
+    for path in dropped.iter().map(|file| file.path()) {
+        if crate::compose::image_type(path).is_some() {
+            match crate::compose::attach(path) {
+                Ok(image) => chats.attachments.push(image),
+                Err(error) => match chats.session_mut() {
+                    Some(session) => session.transcript.push(crate::chat::Entry::Note(error)),
+                    None => chats.error = Some(error),
+                },
+            }
+        } else {
+            if !chats.input.is_empty() && !chats.input.ends_with(char::is_whitespace) {
+                chats.input.push(' ');
+            }
+            chats.input.push_str(&crate::compose::mention_path(path));
+            chats.input.push(' ');
+        }
+    }
+    open.0 = Some(Console::Chat);
 }
 
 /// Where characters are on screen, for cards drawn next to them.
@@ -589,13 +625,68 @@ fn chat_console(ui: &mut egui::Ui, chat: &mut Desk, markdown: &mut MarkdownCache
                     ui.label(egui::RichText::new("Claude is working…").weak().italics());
                 }
             });
+        // Images dropped on the window go with the next message (PLAN.md M24).
+        if !chats.attachments.is_empty() {
+            ui.horizontal_wrapped(|ui| {
+                let mut remove = None;
+                for (index, image) in chats.attachments.iter().enumerate() {
+                    if ui.small_button(format!("🖼 {}  ✕", image.name)).on_hover_text("Remove").clicked() {
+                        remove = Some(index);
+                    }
+                }
+                if let Some(index) = remove {
+                    chats.attachments.remove(index);
+                }
+            });
+        }
+        // `@` suggests files from the session's folder; Tab or Enter takes the first.
+        chats.files.poll();
+        let mention = crate::compose::mention_query(&chats.input).map(|(start, query)| (start, query.to_owned()));
+        let suggestions: Vec<String> = match &mention {
+            Some((_, query)) => {
+                chats.files.ensure(&session.cwd, waker.clone());
+                chats.files.suggest(query).into_iter().map(str::to_owned).collect()
+            }
+            None => Vec::new(),
+        };
+        let input_id = egui::Id::new("chat-input");
+        let mut picked: Option<String> = None;
+        if !suggestions.is_empty()
+            && ui.memory(|memory| memory.has_focus(input_id))
+            && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Tab) || i.consume_key(egui::Modifiers::NONE, egui::Key::Enter))
+        {
+            picked = suggestions.first().cloned();
+        }
         let response = ui.add(
             egui::TextEdit::multiline(&mut chats.input)
-                .hint_text("Message Claude (Enter sends, Shift+Enter for a new line; /compact, /model and skills work)")
+                .id(input_id)
+                .hint_text("Message Claude (Enter sends, Shift+Enter: new line, @ mentions a file, drop images on the window)")
                 .desired_rows(2)
                 .desired_width(f32::INFINITY),
         );
-        let enter = response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift);
+        if let Some((_, query)) = &mention {
+            if chats.files.is_loading() {
+                ui.small(egui::RichText::new("Reading the folder's files…").weak());
+            } else if suggestions.is_empty() && !query.is_empty() {
+                ui.small(egui::RichText::new("No file matches").weak());
+            }
+            for path in &suggestions {
+                if ui.selectable_label(false, egui::RichText::new(format!("@{path}")).small().monospace()).clicked() {
+                    picked = Some(path.clone());
+                }
+            }
+        }
+        if let (Some(path), Some((start, _))) = (&picked, &mention) {
+            crate::compose::complete(&mut chats.input, *start, path);
+            // Back to typing, the cursor after the path.
+            response.request_focus();
+            if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), input_id) {
+                let end = egui::text::CCursor::new(chats.input.chars().count());
+                state.cursor.set_char_range(Some(egui::text::CCursorRange::one(end)));
+                state.store(ui.ctx(), input_id);
+            }
+        }
+        let enter = picked.is_none() && response.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.shift);
         ui.horizontal(|ui| {
             if enter || ui.button("Send").clicked() {
                 send = true;
@@ -618,8 +709,12 @@ fn chat_console(ui: &mut egui::Ui, chat: &mut Desk, markdown: &mut MarkdownCache
         chats.close_active();
     }
     let message = chats.input.trim().to_owned();
-    if send && !message.is_empty() && let Some(session) = chats.session_mut() {
-        session.send(&message);
+    let has_images = !chats.attachments.is_empty();
+    if send && (!message.is_empty() || has_images) && chats.session().is_some() {
+        let images = std::mem::take(&mut chats.attachments);
+        if let Some(session) = chats.session_mut() {
+            session.send_with(&message, &images);
+        }
         chats.input.clear();
     }
 }
