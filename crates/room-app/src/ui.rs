@@ -168,6 +168,11 @@ pub fn draw(
                 if ui.small_button("Stats").on_hover_text("This app's CPU, memory and frame rate (I)").clicked() {
                     stats.toggle();
                 }
+                let sound = if panel.sound { "Sound on" } else { "Sound off" };
+                if ui.small_button(sound).on_hover_text("Notification sounds (off plays nothing at all)").clicked() {
+                    panel.sound = !panel.sound;
+                    panel.save();
+                }
             });
             ui.separator();
             if let Some(session) = model.shown() {
@@ -589,11 +594,24 @@ fn ago(secs: u64) -> String {
 }
 
 /// UI choices remembered across starts, in `~/.agent-room/ui.json`.
-#[derive(Resource, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Resource, serde::Serialize, serde::Deserialize)]
 pub struct PanelPrefs {
     /// The side panel with the log is hidden (PLAN.md M12).
     #[serde(default)]
     pub hidden: bool,
+    /// Notification sounds (on by default, the user's choice; off plays nothing).
+    #[serde(default = "yes")]
+    pub sound: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+impl Default for PanelPrefs {
+    fn default() -> Self {
+        Self { hidden: false, sound: true }
+    }
 }
 
 impl PanelPrefs {
@@ -610,6 +628,10 @@ impl PanelPrefs {
 
     fn toggle(&mut self) {
         self.hidden = !self.hidden;
+        self.save();
+    }
+
+    fn save(&self) {
         if let (Some(path), Ok(text)) = (Self::path(), serde_json::to_string(self)) {
             let _ = std::fs::write(path, text);
         }

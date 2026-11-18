@@ -1494,3 +1494,7 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   pushed the title over the traffic lights); Bevy audio plugin off. V2 phase 3 done
   (lines, task and report capsules, failure ring; thinking in place). target/prof
   deleted. **Next:** phase 4 (event timeline, notifications, minimap, sound).
+- 2026-11-18, Claude Opus 5.5 (V2 phase 4): notification toasts and sounds
+  (`notify.rs`, `afplay`, Sound on/off saved in ui.json; measure.sh and tests run
+  with sound off); minimap removed on the user's request; the side log stays the
+  timeline. **Next:** phase 5 (camera: orbit, follow; replay) or stop here.

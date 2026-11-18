@@ -88,6 +88,7 @@ pub fn draw(
     trace: Res<Trace>,
     mut selected: ResMut<Selected>,
     camera: Query<&Camera, With<RoomCamera3d>>,
+    toasts: Res<crate::notify::Toasts>,
 ) -> Result {
     if mode.mini {
         return Ok(());
@@ -130,6 +131,8 @@ pub fn draw(
     if let Some(id) = picked {
         model.show(&id);
     }
+
+    toast_stack(ctx, area, &toasts);
 
     let Some(session) = model.shown() else { return Ok(()) };
 
@@ -249,4 +252,33 @@ pub fn draw(
         selected.0 = None;
     }
     Ok(())
+}
+
+/// The latest notifications, bottom right, fading out.
+fn toast_stack(ctx: &egui::Context, area: egui::Rect, toasts: &crate::notify::Toasts) {
+    use crate::notify::{Kind, TOAST_SECS};
+    if toasts.shown.is_empty() {
+        return;
+    }
+    egui::Area::new("hud-toasts".into())
+        .fixed_pos(egui::pos2(area.max.x - 8.0, area.max.y - 8.0))
+        .pivot(egui::Align2::RIGHT_BOTTOM)
+        .interactable(false)
+        .show(ctx, |ui| {
+            for (kind, text, at) in &toasts.shown {
+                let left = 1.0 - at.elapsed().as_secs_f32() / TOAST_SECS.as_secs_f32();
+                let fade = (left * 4.0).clamp(0.0, 1.0);
+                let accent = match kind {
+                    Kind::Joined => CYAN,
+                    Kind::Finished | Kind::Done => GREEN,
+                    Kind::Failed => egui::Color32::from_rgb(255, 110, 100),
+                    Kind::Waiting => egui::Color32::from_rgb(255, 190, 80),
+                };
+                card().stroke(egui::Stroke::new(1.0, accent.gamma_multiply(fade))).fill(GLASS.gamma_multiply(fade)).show(ui, |ui| {
+                    let text = egui::RichText::new(text).small().color(egui::Color32::WHITE.gamma_multiply(fade));
+                    ui.add(egui::Label::new(text).wrap_mode(egui::TextWrapMode::Extend));
+                });
+                ui.add_space(4.0);
+            }
+        });
 }

@@ -33,6 +33,8 @@ trap cleanup EXIT
 
 cargo build --release -q --manifest-path "$ROOT/Cargo.toml" -p room-app -p room-hook
 
+# Quiet: no notification sounds while measuring.
+echo '{"sound":false}' >"$DIR/ui.json"
 AGENT_ROOM_DIR="$DIR" "$ROOT/target/release/agent-room" >"$DIR/app.log" 2>&1 &
 APP_PID=$!
 sleep 6

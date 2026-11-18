@@ -10,6 +10,7 @@ mod director;
 mod log;
 mod mini;
 mod model;
+mod notify;
 mod repo;
 mod server;
 mod stats;
@@ -103,6 +104,7 @@ fn main() -> AppExit {
         .add_plugins(EguiPlugin::default())
         .add_message::<mini::ToggleMini>()
         .init_resource::<view3d::View3d>()
+        .init_resource::<notify::Toasts>()
         .init_resource::<view3d::BrightHolos>()
         .init_resource::<hud::Trace>()
         .init_resource::<hud::Selected>()
@@ -169,7 +171,8 @@ fn connect_waker(server: Res<Server>, proxy: Res<EventLoopProxyWrapper>) {
 }
 
 /// Every hook event: into the model (which tells the scene what to show), the log,
-/// and the permission cards.
+/// the permission cards and the notifications.
+#[allow(clippy::too_many_arguments)]
 fn receive_events(
     server: Res<Server>,
     mut model: ResMut<Model>,
@@ -177,12 +180,21 @@ fn receive_events(
     auto: Res<AutoAccept>,
     mode: Res<mini::ViewMode>,
     mut repos: ResMut<repo::RepoCache>,
+    mut toasts: ResMut<notify::Toasts>,
+    prefs: Res<ui::PanelPrefs>,
 ) {
     let now = Instant::now();
     for Incoming { event, reply } in server.events.try_iter() {
         let internal_helper = model.is_internal_helper(&event);
         for change in model.apply(&event) {
             trace!("{change:?}");
+        }
+        // A toast (and a sound) for what matters, from sessions the user works in.
+        if !internal_helper && let Some(session) = model.session(&event.session_id).filter(|session| !session.headless) {
+            let project = (model.live().len() > 1).then(|| session.name());
+            if let Some((kind, text)) = notify::notice(&event, project.as_deref()) {
+                toasts.push(kind, text, prefs.sound);
+            }
         }
         // Where everyone works (PLAN.md M4d): the session's repo from its cwd, each
         // agent's from the paths its tool calls touch.
@@ -339,6 +351,7 @@ fn pace_updates(
     model: Res<Model>,
     view: Res<view3d::View3d>,
     stats: Res<stats::Stats>,
+    mut toasts: ResMut<notify::Toasts>,
     screenshots: Option<Res<ScreenshotMode>>,
     mut current: Local<Option<(Duration, Duration)>>,
     mut last_busy: Local<Option<std::time::Instant>>,
@@ -362,7 +375,7 @@ fn pace_updates(
         Pace::Dozing
     };
     // Countdowns and the stats overlay need their own ticks even when all is still.
-    let tick = if !log.pending.is_empty() || !log.questions.is_empty() {
+    let tick = if !log.pending.is_empty() || !log.questions.is_empty() || toasts.tidy() {
         Some(COUNTDOWN_TICK)
     } else if stats.shown {
         Some(stats::REFRESH)
