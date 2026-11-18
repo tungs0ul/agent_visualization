@@ -39,16 +39,17 @@ use crate::model::{Model, Who};
 use crate::server::{Incoming, Server};
 use crate::window::{NeedsCornerPlacement, SavedWindow, ScreenshotMode};
 
-/// How often to redraw (focused, unfocused), from busiest to quietest. The app is a
-/// widget beside the terminal: it redraws fast only while something moves, and a
-/// 3D frame costs about 20 ms of CPU, so every frame saved counts (V2.md phase 0).
+/// How often to redraw (focused, unfocused), from busiest to quietest. Focused, the
+/// user is looking: always smooth (30 fps; the low rates looked laggy). Unfocused,
+/// the widget sits beside the terminal: a 3D frame costs about 20 ms of CPU, so it
+/// draws only as often as needed (V2.md phase 0). Dozing draws nothing either way.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Pace {
-    /// A robot walks or beams, the camera glides: smooth.
+    /// A robot walks or beams, the camera glides (unfocused: 10 fps).
     Moving,
-    /// Robots work in place (their clips play): a few frames are enough.
+    /// Robots work in place, their clips playing (unfocused: 4 fps).
     Working,
-    /// Nothing happens: the idle clip at about 4 fps (the user's choice).
+    /// Nothing happens: the idle clip (unfocused: 4 fps), for 30 s.
     Idle,
     /// Nothing happened for a while: no redraws until input or an event.
     Dozing,
@@ -58,9 +59,11 @@ impl Pace {
     fn every(self) -> Option<(Duration, Duration)> {
         let ms = Duration::from_millis;
         match self {
-            Pace::Moving => Some((ms(33), ms(160))),
-            Pace::Working => Some((ms(125), ms(250))),
-            Pace::Idle => Some((ms(250), ms(250))),
+            // Focused (the user looks at it or uses it): smooth. Unfocused (it sits
+            // beside the terminal): cheap, walking still readable.
+            Pace::Moving => Some((ms(33), ms(100))),
+            Pace::Working => Some((ms(33), ms(250))),
+            Pace::Idle => Some((ms(33), ms(250))),
             Pace::Dozing => None,
         }
     }

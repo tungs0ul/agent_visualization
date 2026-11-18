@@ -260,17 +260,6 @@ pub fn build(kit: &mut Kit) {
     // And to the teleporter.
     let dir = (TELEPORTER - Location::MainDesk.center()).normalize();
     kit.path(dir * 2.6, TELEPORTER - dir * 1.6, LinearRgba::rgb(0.4, 1.6, 3.2));
-    // Each workstation casts its colour on the polished floor.
-    for location in Location::ALL {
-        let light = PointLight {
-            color: Color::LinearRgba(location.glow()),
-            intensity: 70_000.0,
-            range: 6.0,
-            shadow_maps_enabled: false,
-            ..default()
-        };
-        kit.commands.spawn((light, Transform::from_translation(location.center() + Vec3::new(0.0, 2.4, 0.8))));
-    }
     sky(kit);
 }
 
