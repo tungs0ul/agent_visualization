@@ -1482,3 +1482,10 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   removed from `teleporter.py` (it was the "stray ring" by the Research station: 3 m
   up, the camera projected it there). Measured: dozing 0.3 %, active 18-26 % (noise).
   **Next:** active power, mini mode re-check.
+- 2026-11-18, Claude Opus 5.5 (power, the user's "widget, not the main app"): `Pace`
+  table (moving / working / idle / dozing), 2.5 s dwell at stations, measure.sh at
+  real speed. Working about 27 % to 15-17 %. Bloom, MSAA, shadows, pixel density,
+  pipelining and thread count measured as no effect (details in V2.md phase 0).
+  Labels show the real text again; activity screens glow with abstract writing
+  lines. Mini mode re-checked: follows Claude, screens and labels fine. **Next:**
+  phase 3 rest (task capsules, connection lines, error ring).
