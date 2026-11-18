@@ -89,6 +89,7 @@ pub fn draw(
     mut selected: ResMut<Selected>,
     camera: Query<&Camera, With<RoomCamera3d>>,
     toasts: Res<crate::notify::Toasts>,
+    usage: Res<crate::usage::Usage>,
 ) -> Result {
     if mode.mini {
         return Ok(());
@@ -184,12 +185,20 @@ pub fn draw(
         .show(ctx, |ui| {
             card().show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(format!("{agents} agents")).color(WHITE));
+                    let noun = if agents == 1 { "agent" } else { "agents" };
+                    ui.label(egui::RichText::new(format!("{agents} {noun}")).color(WHITE));
                     ui.label(egui::RichText::new(format!("✔ {active} active")).color(GREEN));
                     if let Some(started) = trace.started {
                         ui.label(egui::RichText::new(format!("⏱ {}", elapsed(started))).color(DIM));
                     }
                 });
+                // Updated when a turn ends (the session's own transcript).
+                if let Some(tokens) = usage.tokens(&session.id) {
+                    let line = format!("{} in · {} out tokens", crate::usage::short(tokens.input), crate::usage::short(tokens.output));
+                    ui.label(egui::RichText::new(line).small().color(DIM)).on_hover_text(
+                        "Tokens Claude used in this session so far (input includes cache reads), updated after each turn",
+                    );
+                }
             });
         });
 

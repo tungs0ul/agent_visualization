@@ -726,6 +726,7 @@ pub fn frame(
     mut view: ResMut<View3d>,
     mode: Res<crate::mini::ViewMode>,
     model: Res<Model>,
+    hand: Res<CameraView>,
     time: Res<Time>,
     avatars: Query<(&Avatar, &Transform), Without<RoomCamera3d>>,
     mut camera: Query<&mut Transform, With<RoomCamera3d>>,
@@ -735,10 +736,15 @@ pub fn frame(
     let claude = avatars.iter().find(|(avatar, _)| avatar.who == Who::Main && avatar.session == shown);
     let (eye, look) = match claude.or_else(|| avatars.iter().find(|(avatar, _)| avatar.who == Who::Main)) {
         Some((_, at)) if mode.mini => (at.translation + Vec3::new(0.0, 3.0, 4.2), at.translation + Vec3::Y * 0.8),
-        _ => (FULL_EYE, FULL_LOOK),
+        _ => {
+            // The user's pan and zoom (`camera_input`).
+            let look = FULL_LOOK + Vec3::new(hand.pan.x, 0.0, hand.pan.y);
+            (look + (FULL_EYE - FULL_LOOK) * hand.zoom, look)
+        }
     };
     let wanted = Transform::from_translation(eye).looking_at(look, Vec3::Y);
-    let blend = (time.delta_secs() * 4.0).min(1.0);
+    // Follow the hand at once (easing made dragging feel laggy); glide otherwise.
+    let blend = if hand.is_changed() && !mode.mini { 1.0 } else { (time.delta_secs() * 4.0).min(1.0) };
     if camera.translation.distance(wanted.translation) > 0.001 {
         view.moving = true;
         camera.translation = camera.translation.lerp(wanted.translation, blend);
@@ -1191,4 +1197,77 @@ fn spawn_capsule(commands: &mut Commands, assets: &AssetServer, from: Vec3, to: 
             Transform::from_translation(from).with_scale(Vec3::splat(0.3)),
         ))
         .observe(brighten_holo);
+}
+
+/// The user's view of the HQ: panned (metres on the floor) and zoomed (1 is the
+/// whole HQ, smaller is closer).
+#[derive(Resource)]
+pub struct CameraView {
+    pan: Vec2,
+    zoom: f32,
+}
+
+impl Default for CameraView {
+    fn default() -> Self {
+        Self { pan: Vec2::ZERO, zoom: 1.0 }
+    }
+}
+
+/// How far the view may pan (metres from the centre) and zoom.
+const PAN_LIMIT: Vec2 = Vec2::new(8.0, 6.0);
+const ZOOM_RANGE: (f32, f32) = (0.3, 1.25);
+
+/// Full view only: drag to pan, scroll or pinch to zoom, double-click to reset. Only
+/// over the HQ itself, never when the pointer is on a panel (its scrolling must not
+/// move the room).
+#[allow(clippy::too_many_arguments)]
+pub fn camera_input(
+    mode: Res<crate::mini::ViewMode>,
+    egui_input: Res<bevy_egui::input::EguiWantsInput>,
+    window: Single<&Window, With<bevy::window::PrimaryWindow>>,
+    camera: Query<&Camera, With<RoomCamera3d>>,
+    buttons: Res<ButtonInput<MouseButton>>,
+    motion: Res<bevy::input::mouse::AccumulatedMouseMotion>,
+    scroll: Res<bevy::input::mouse::AccumulatedMouseScroll>,
+    mut pinch: MessageReader<bevy::input::gestures::PinchGesture>,
+    time: Res<Time>,
+    mut hand: ResMut<CameraView>,
+    mut dragging: Local<bool>,
+    mut last_click: Local<f32>,
+) {
+    let pinched: f32 = pinch.read().map(|gesture| gesture.0).sum();
+    if mode.mini {
+        *dragging = false;
+        return;
+    }
+    let over = window.cursor_position().is_some_and(|cursor| {
+        camera.single().ok().and_then(|camera| camera.logical_viewport_rect()).is_some_and(|rect| rect.contains(cursor))
+    }) && !egui_input.wants_any_pointer_input();
+    if buttons.just_pressed(MouseButton::Left) && over {
+        let now = time.elapsed_secs();
+        if now - *last_click < 0.35 {
+            *hand = CameraView::default();
+        }
+        *last_click = now;
+        *dragging = true;
+    }
+    if !buttons.pressed(MouseButton::Left) {
+        *dragging = false;
+    }
+    if *dragging && motion.delta != Vec2::ZERO {
+        // A pixel moves the floor more when zoomed out.
+        let metres = 0.018 * hand.zoom;
+        let pan = (hand.pan - motion.delta * metres).clamp(-PAN_LIMIT, PAN_LIMIT);
+        hand.pan = pan;
+    }
+    if over {
+        let lines = match scroll.unit {
+            bevy::input::mouse::MouseScrollUnit::Line => scroll.delta.y,
+            bevy::input::mouse::MouseScrollUnit::Pixel => scroll.delta.y / 40.0,
+        };
+        let step = lines * 0.08 + pinched;
+        if step != 0.0 {
+            hand.zoom = (hand.zoom * (1.0 - step)).clamp(ZOOM_RANGE.0, ZOOM_RANGE.1);
+        }
+    }
 }

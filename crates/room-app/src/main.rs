@@ -18,6 +18,7 @@ mod hud;
 mod view3d;
 mod world3d;
 mod ui;
+mod usage;
 mod window;
 
 use std::time::{Duration, Instant};
@@ -104,7 +105,9 @@ fn main() -> AppExit {
         .add_plugins(EguiPlugin::default())
         .add_message::<mini::ToggleMini>()
         .init_resource::<view3d::View3d>()
+        .init_resource::<view3d::CameraView>()
         .init_resource::<notify::Toasts>()
+        .init_resource::<usage::Usage>()
         .init_resource::<view3d::BrightHolos>()
         .init_resource::<hud::Trace>()
         .init_resource::<hud::Selected>()
@@ -128,7 +131,7 @@ fn main() -> AppExit {
                 (receive_events, chat::dev_chat, chat::read_chats),
                 settle_permissions,
                 stats::measure,
-                (view3d::sync, view3d::teleporter, view3d::deliver, view3d::links, view3d::activity_holograms, view3d::light_trails, hud::trace, view3d::frame).chain(),
+                (view3d::sync, view3d::teleporter, view3d::deliver, view3d::links, view3d::activity_holograms, view3d::light_trails, hud::trace, view3d::camera_input, view3d::frame).chain(),
                 pace_updates,
                 log_frame_rate.run_if(|| std::env::var_os("AGENT_ROOM_FPS_LOG").is_some()),
                 window::take_screenshots,
@@ -182,12 +185,20 @@ fn receive_events(
     mut repos: ResMut<repo::RepoCache>,
     mut toasts: ResMut<notify::Toasts>,
     prefs: Res<ui::PanelPrefs>,
+    mut usage: ResMut<usage::Usage>,
 ) {
     let now = Instant::now();
     for Incoming { event, reply } in server.events.try_iter() {
         let internal_helper = model.is_internal_helper(&event);
         for change in model.apply(&event) {
             trace!("{change:?}");
+        }
+        // Tokens: once per turn, from what the transcript gained (cheap).
+        if matches!(event.kind, EventKind::TurnEnded { .. } | EventKind::SessionEnded { .. })
+            && event.agent == AgentRef::Main
+            && let Some(transcript) = &event.transcript_path
+        {
+            usage.update(&event.session_id, transcript);
         }
         // A toast (and a sound) for what matters, from sessions the user works in.
         if !internal_helper && let Some(session) = model.session(&event.session_id).filter(|session| !session.headless) {

@@ -1498,3 +1498,8 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   (`notify.rs`, `afplay`, Sound on/off saved in ui.json; measure.sh and tests run
   with sound off); minimap removed on the user's request; the side log stays the
   timeline. **Next:** phase 5 (camera: orbit, follow; replay) or stop here.
+- 2026-11-18, Claude Opus 5.5: V2 wrapped up for a widget. Pan and zoom in the full
+  view (drag, scroll or pinch, double-click resets; not tried with a real mouse
+  yet). Tokens per session in the counts card (`usage.rs`, read once per turn).
+  "1 agent" grammar. V2 phases 0-6 done or trimmed; open: working CPU 15-18 % vs
+  the 10 % budget (4 fps working would halve it, the user's call).
