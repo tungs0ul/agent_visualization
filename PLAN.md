@@ -1503,3 +1503,11 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   yet). Tokens per session in the counts card (`usage.rs`, read once per turn).
   "1 agent" grammar. V2 phases 0-6 done or trimmed; open: working CPU 15-18 % vs
   the 10 % budget (4 fps working would halve it, the user's call).
+- 2026-11-18, Claude Opus 5.5 (ideas from the research on similar apps, the user's
+  pick 1-6): who needs you (beacon, badge, window title); double-click a robot or
+  Open terminal to bring its terminal to the front; Claude's TodoWrite plan on a
+  board (the user's sessions never used TodoWrite so far); context tank with
+  PreCompact drain (plugin forwards PreCompact now: reinstall the plugin);
+  celebrations for commits and passing tests, trophy shelf of finished turns;
+  day/night sky by local time. Measured: dozing 0.0 %, active 21 %. **Next:** the
+  user tries pan/zoom/tilt, sounds and terminal jump with a real session.
