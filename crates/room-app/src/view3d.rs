@@ -739,7 +739,7 @@ pub fn frame(
         _ => {
             // The user's pan and zoom (`camera_input`).
             let look = FULL_LOOK + Vec3::new(hand.pan.x, 0.0, hand.pan.y);
-            (look + Quat::from_rotation_y(hand.turn) * (FULL_EYE - FULL_LOOK) * hand.zoom, look)
+            (look + Quat::from_rotation_y(hand.turn) * Quat::from_rotation_x(hand.tilt) * (FULL_EYE - FULL_LOOK) * hand.zoom, look)
         }
     };
     let wanted = Transform::from_translation(eye).looking_at(look, Vec3::Y);
@@ -1200,19 +1200,25 @@ fn spawn_capsule(commands: &mut Commands, assets: &AssetServer, from: Vec3, to: 
 }
 
 /// The user's view of the HQ: panned (metres on the floor), zoomed (1 is the whole
-/// HQ, smaller is closer) and turned round the point looked at (radians).
+/// HQ, smaller is closer), turned round the point looked at and tilted up or down
+/// (radians; positive tilt looks from lower down).
 #[derive(Resource)]
 pub struct CameraView {
     pan: Vec2,
     zoom: f32,
     turn: f32,
+    tilt: f32,
 }
 
 impl Default for CameraView {
     fn default() -> Self {
-        Self { pan: Vec2::ZERO, zoom: 1.0, turn: 0.0 }
+        Self { pan: Vec2::ZERO, zoom: 1.0, turn: 0.0, tilt: 0.0 }
     }
 }
+
+/// How far the view tilts: from almost straight down (85 degrees) to a low view
+/// (15 degrees above the floor); the default looks down at about 39 degrees.
+const TILT_RANGE: (f32, f32) = (-0.8, 0.42);
 
 /// How far the view turns either way: further, the back wall hides the HQ.
 const TURN_LIMIT: f32 = 1.05;
@@ -1221,8 +1227,8 @@ const TURN_LIMIT: f32 = 1.05;
 const PAN_LIMIT: Vec2 = Vec2::new(8.0, 6.0);
 const ZOOM_RANGE: (f32, f32) = (0.3, 1.25);
 
-/// Full view only: drag to pan, right-drag (or Option-drag, or a two-finger twist)
-/// to turn, scroll or pinch to zoom, double-click to reset. Only
+/// Full view only: drag to pan, right-drag or Option-drag to turn (sideways) and
+/// tilt (up and down), a two-finger twist to turn, scroll or pinch to zoom, double-click to reset. Only
 /// over the HQ itself, never when the pointer is on a panel (its scrolling must not
 /// move the room).
 #[allow(clippy::too_many_arguments)]
@@ -1268,9 +1274,10 @@ pub fn camera_input(
     }
     if motion.delta != Vec2::ZERO {
         match *dragging {
-            // Turn: sideways moves round the HQ.
+            // Turn: sideways moves round the HQ, up and down tilts the view.
             Some(MouseButton::Right) => {
                 hand.turn = (hand.turn - motion.delta.x * 0.006).clamp(-TURN_LIMIT, TURN_LIMIT);
+                hand.tilt = (hand.tilt - motion.delta.y * 0.005).clamp(TILT_RANGE.0, TILT_RANGE.1);
             }
             // Pan: the floor follows the hand, in the direction the camera faces.
             Some(_) => {
