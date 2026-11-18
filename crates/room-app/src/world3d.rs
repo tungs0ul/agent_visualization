@@ -105,6 +105,98 @@ pub const TELEPORTER: Vec3 = Vec3::new(-3.4, 0.0, 4.0);
 /// Height of its deck, where a robot stands to beam in or out.
 pub const TELEPORTER_DECK: f32 = 0.22;
 
+/// The sky's parts that change with the time of day.
+#[derive(Resource)]
+pub struct Sky {
+    stars: Handle<StandardMaterial>,
+    sun: Entity,
+    sun_glow: Handle<StandardMaterial>,
+}
+
+/// The time of day outside the window, from the local clock.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Daylight {
+    Night,
+    Dawn,
+    Day,
+    Dusk,
+}
+
+impl Daylight {
+    pub fn at(hour: u32) -> Self {
+        match hour {
+            6..8 => Daylight::Dawn,
+            8..18 => Daylight::Day,
+            18..20 => Daylight::Dusk,
+            _ => Daylight::Night,
+        }
+    }
+}
+
+/// The local hour, from `date` (std has no time zones; this runs every ten
+/// minutes at most).
+fn local_hour() -> Option<u32> {
+    // `AGENT_ROOM_HOUR=12` shows that hour's light (screenshot tests).
+    if let Some(hour) = std::env::var("AGENT_ROOM_HOUR").ok().and_then(|hour| hour.parse().ok()) {
+        return Some(hour);
+    }
+    let out = std::process::Command::new("date").arg("+%H").output().ok()?;
+    String::from_utf8_lossy(&out.stdout).trim().parse().ok()
+}
+
+/// Day and night outside the window, following the local time: a sun by day, low
+/// and orange at dawn and dusk; dimmer stars, a lighter sky and warmer light. Checked
+/// every ten minutes while the app draws; the scene changes only with the phase.
+#[allow(clippy::too_many_arguments)]
+pub fn daylight(
+    time: Res<Time>,
+    sky: Option<Res<Sky>>,
+    mut ambient: ResMut<GlobalAmbientLight>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut camera: Query<&mut Camera, With<crate::view3d::RoomCamera3d>>,
+    mut parts: Query<(&mut Transform, &mut Visibility)>,
+    mut checked: Local<Option<f32>>,
+    mut shown: Local<Option<Daylight>>,
+) {
+    let Some(sky) = sky else { return };
+    let now = time.elapsed_secs();
+    if checked.is_some_and(|at| now - at < 600.0) {
+        return;
+    }
+    *checked = Some(now);
+    let Some(phase) = local_hour().map(Daylight::at) else { return };
+    if *shown == Some(phase) {
+        return;
+    }
+    *shown = Some(phase);
+    let (clear, light, brightness, stars, sun) = match phase {
+        Daylight::Night => (Color::srgb(0.02, 0.02, 0.06), Color::srgb(0.55, 0.5, 1.0), 350.0, 1.0, None),
+        Daylight::Day => {
+            (Color::srgb(0.05, 0.09, 0.2), Color::srgb(0.8, 0.85, 1.0), 600.0, 0.3, Some((Vec3::new(-8.0, -4.0, -26.0), LinearRgba::rgb(12.0, 10.0, 7.0))))
+        }
+        Daylight::Dawn | Daylight::Dusk => {
+            (Color::srgb(0.1, 0.05, 0.1), Color::srgb(1.0, 0.7, 0.6), 450.0, 0.6, Some((Vec3::new(-10.0, -8.0, -26.0), LinearRgba::rgb(12.0, 4.0, 1.0))))
+        }
+    };
+    if let Ok(mut camera) = camera.single_mut() {
+        camera.clear_color = ClearColorConfig::Custom(clear);
+    }
+    ambient.color = light;
+    ambient.brightness = brightness;
+    if let Some(mut material) = materials.get_mut(&sky.stars) {
+        material.emissive = LinearRgba::rgb(3.0, 3.2, 4.0) * stars;
+    }
+    if let Ok((mut at, mut visibility)) = parts.get_mut(sky.sun) {
+        *visibility = if sun.is_some() { Visibility::Inherited } else { Visibility::Hidden };
+        if let Some((spot, glow)) = sun {
+            at.translation = spot;
+            if let Some(mut material) = materials.get_mut(&sky.sun_glow) {
+                material.emissive = glow;
+            }
+        }
+    }
+}
+
 /// What building the world needs.
 pub struct Kit<'a, 'w, 's> {
     pub commands: &'a mut Commands<'w, 's>,
@@ -209,4 +301,24 @@ fn sky(kit: &mut Kit) {
         ..default()
     });
     kit.mesh(Sphere::new(5.0), planet, Transform::from_xyz(12.0, 6.5, -26.0));
+    // The sun, shown by day (`daylight`); placed where the high camera sees it
+    // through the window.
+    let sun_glow = kit.glow(LinearRgba::rgb(12.0, 10.0, 7.0));
+    let sun = kit.mesh(Sphere::new(1.6), sun_glow.clone(), Transform::from_xyz(-8.0, -4.0, -26.0));
+    kit.commands.entity(sun).insert(Visibility::Hidden);
+    kit.commands.insert_resource(Sky { stars: bright, sun, sun_glow });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_hour_picks_the_light() {
+        assert_eq!(Daylight::at(3), Daylight::Night);
+        assert_eq!(Daylight::at(7), Daylight::Dawn);
+        assert_eq!(Daylight::at(12), Daylight::Day);
+        assert_eq!(Daylight::at(19), Daylight::Dusk);
+        assert_eq!(Daylight::at(23), Daylight::Night);
+    }
 }
