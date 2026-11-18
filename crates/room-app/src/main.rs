@@ -6,6 +6,7 @@
 //! cards (egui) over and beside it.
 
 mod activity;
+mod assets;
 mod chat;
 mod console;
 mod diff;
@@ -96,6 +97,8 @@ fn main() -> AppExit {
         // old and new sizes; wgpu rejects it and Bevy would quit. Skip that frame instead;
         // the next one is consistent again.
         .insert_resource(RenderErrorHandler(|_, _, _| RenderErrorPolicy::Ignore))
+        // The 3D models are compiled in (PLAN.md M21); must come before AssetPlugin.
+        .add_plugins(assets::EmbeddedAssetsPlugin)
         .add_plugins(
             DefaultPlugins
                 // No sound yet: Bevy's audio keeps an output stream open, which keeps
@@ -103,11 +106,9 @@ fn main() -> AppExit {
                 .build()
                 .disable::<bevy::audio::AudioPlugin>()
                 .set(WindowPlugin { primary_window: Some(window::initial_window(saved)), ..default() })
-                // The 3D models (PLAN.md M15) live in the checkout's `assets/`.
                 // Three threads, not one per core: waking a big pool every frame cost more
                 // than the work (V2.md phase 0: about 35 % to 22 % of a core while active).
-                .set(TaskPoolPlugin { task_pool_options: TaskPoolOptions::with_num_threads(3) })
-                .set(AssetPlugin { file_path: concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets").to_owned(), ..default() }),
+                .set(TaskPoolPlugin { task_pool_options: TaskPoolOptions::with_num_threads(3) }),
         )
         .add_plugins(EguiPlugin::default())
         .add_message::<mini::ToggleMini>()
