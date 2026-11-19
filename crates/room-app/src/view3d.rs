@@ -151,6 +151,9 @@ pub fn build(
     commands.spawn((
         RoomCamera3d,
         Camera3d::default(),
+        // A wider view, so the lit ceiling shows at the top and the front desks at the
+        // bottom (PLAN.md M29).
+        Projection::Perspective(PerspectiveProjection { fov: 0.98, ..default() }),
         Camera {
             order: 0,
             clear_color: ClearColorConfig::Custom(Color::srgb(0.02, 0.02, 0.06)),
@@ -178,6 +181,7 @@ pub fn build(
     commands.insert_resource(GlobalAmbientLight { color: Color::srgb(0.48, 0.64, 1.0), brightness: 190.0, ..default() });
     let mut kit = crate::world3d::Kit { commands: &mut commands, assets: &assets, meshes: &mut meshes, materials: &mut materials };
     crate::world3d::build(&mut kit);
+    crate::hull::build(&mut kit);
     crate::space::build(&mut kit, &mut images);
 }
 
@@ -864,8 +868,8 @@ pub fn frame(
 /// Where the camera looks at the whole workspace from.
 /// The camera (PLAN.md M29): lower than before, so the panoramic window shows a big
 /// slice of space above the bridge. `space` places things by this eye.
-pub(crate) const FULL_EYE: Vec3 = Vec3::new(0.0, 9.2, 12.6);
-const FULL_LOOK: Vec3 = Vec3::new(0.0, 0.7, -1.3);
+pub(crate) const FULL_EYE: Vec3 = Vec3::new(0.0, 6.0, 12.4);
+const FULL_LOOK: Vec3 = Vec3::new(0.0, 1.5, -2.6);
 
 /// The hologram floating beside a robot: a picture of what it is doing right now
 /// (PLAN.md M17, "the holograms are the visualisation of its mind").
@@ -1138,13 +1142,15 @@ pub fn desk_lights(
 
 /// Applies the graphics quality (PLAN.md M29) to the camera and lights, at start
 /// and whenever the setting changes.
-#[allow(clippy::type_complexity)]
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub fn apply_quality(
     mut commands: Commands,
     prefs: Res<crate::ui::PanelPrefs>,
     camera: Query<Entity, With<RoomCamera3d>>,
     mut sun: Query<&mut DirectionalLight>,
     mut lamps: Query<&mut PointLight>,
+    mut spots: Query<&mut SpotLight>,
+    mut desk_lamps: Query<&mut Visibility, With<crate::hull::DeskLamp>>,
     mut done: Local<Option<crate::ui::Quality>>,
 ) {
     use crate::ui::Quality;
@@ -1172,10 +1178,16 @@ pub fn apply_quality(
     for mut light in &mut sun {
         light.shadow_maps_enabled = quality != Quality::Low;
     }
-    // The brightest lamp (the core's) casts shadows on High only.
-    let brightest = lamps.iter().map(|lamp| lamp.intensity).fold(0.0, f32::max);
+    // The ceiling fixtures cast shadows on High only; point lamps never do.
     for mut lamp in &mut lamps {
-        lamp.shadow_maps_enabled = quality == Quality::High && lamp.intensity >= brightest;
+        lamp.shadow_maps_enabled = false;
+    }
+    for mut spot in &mut spots {
+        spot.shadow_maps_enabled = quality == Quality::High;
+    }
+    // Low drops the amber desk lamps (eight lights fewer).
+    for mut visibility in &mut desk_lamps {
+        *visibility = if quality == Quality::Low { Visibility::Hidden } else { Visibility::Inherited };
     }
 }
 

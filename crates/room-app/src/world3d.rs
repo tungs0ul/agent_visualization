@@ -231,8 +231,6 @@ pub fn build(kit: &mut Kit) {
     for (at, color, lumens, range) in [
         (command + Vec3::new(0.0, 3.8, -0.4), Color::srgb(0.35, 0.8, 1.0), 350_000.0, 9.0),
         (teleporter_spot() + Vec3::Y * 1.2, Color::srgb(0.3, 0.75, 1.0), 300_000.0, 6.0),
-        (Spot::Desk(0).center() + Vec3::new(0.0, 1.6, -0.6), Color::srgb(1.0, 0.6, 0.25), 90_000.0, 4.0),
-        (Spot::Desk(1).center() + Vec3::new(0.0, 1.6, -0.6), Color::srgb(1.0, 0.6, 0.25), 90_000.0, 4.0),
     ] {
         kit.commands.spawn((PointLight { color, intensity: lumens, range, ..default() }, Transform::from_translation(at)));
     }
@@ -356,7 +354,7 @@ fn sky(kit: &mut Kit) {
                 pick <= sum
             })
             .unwrap_or(&tiers[0]);
-        let (at, reach) = crate::space::through_window(-9.0 + next() * 18.0, 0.2 + next() * 4.2, -40.0 - next() * 140.0);
+        let (at, reach) = crate::space::through_window(-9.0 + next() * 18.0, 0.2 + next() * 7.4, -40.0 - next() * 140.0);
         kit.commands.spawn((
             Mesh3d(star.clone()),
             MeshMaterial3d(material.clone()),

@@ -11,7 +11,6 @@ mod chat;
 mod compose;
 mod console;
 mod diff;
-mod fx;
 mod director;
 mod log;
 mod mini;
@@ -24,6 +23,7 @@ mod repo;
 mod server;
 mod space;
 mod hud;
+mod hull;
 mod view3d;
 mod wins;
 mod work;
@@ -144,7 +144,7 @@ fn main() -> AppExit {
         .init_resource::<ui::MarkdownCache>()
         .init_resource::<chat::Chats>()
         .init_resource::<Model>()
-        .add_systems(Startup, (view3d::build, fx::setup, spawn_ui_camera, connect_waker, chat::init_folder))
+        .add_systems(Startup, (view3d::build, spawn_ui_camera, connect_waker, chat::init_folder))
         .add_systems(
             Update,
             (
@@ -153,7 +153,7 @@ fn main() -> AppExit {
                 (receive_events, replay::tick, chat::dev_chat, chat::read_chats, end_dead_sessions),
                 settle_permissions,
                 hud::title,
-                (view3d::sync, view3d::apply_quality, view3d::desk_lights, fx::energy, view3d::teleporter, view3d::deliver, view3d::links, view3d::context_tank, view3d::celebrate, world3d::daylight, view3d::activity_holograms, view3d::light_trails, hud::trace, view3d::camera_input, view3d::frame).chain(),
+                (view3d::sync, view3d::apply_quality, view3d::desk_lights, view3d::teleporter, view3d::deliver, view3d::links, view3d::context_tank, view3d::celebrate, world3d::daylight, view3d::activity_holograms, view3d::light_trails, hud::trace, view3d::camera_input, view3d::frame).chain(),
                 pace_updates,
                 log_frame_rate.run_if(|| std::env::var_os("AGENT_ROOM_FPS_LOG").is_some()),
                 window::take_screenshots,

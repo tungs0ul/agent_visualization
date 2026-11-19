@@ -31,12 +31,12 @@ fn facing_camera(at: Vec3) -> Quat {
 pub fn build(kit: &mut Kit, images: &mut Assets<Image>) {
     let rim = images.add(rim_texture(128));
     // The big blue planet, low on the right, its lit side towards the upper left.
-    let (at, reach) = through_window(5.6, 0.2, -48.0);
-    let radius = 2.6 * reach;
+    let (at, reach) = through_window(5.0, 3.2, -48.0);
+    let radius = 3.0 * reach;
     planet(kit, images, at, radius, PlanetLook::Ocean, &rim, LinearRgba::rgb(0.25, 0.75, 2.4));
     // A ringed gas giant, small and far, up on the left.
-    let (at, reach) = through_window(-4.4, 2.9, -80.0);
-    let radius = 0.55 * reach;
+    let (at, reach) = through_window(-4.8, 5.8, -85.0);
+    let radius = 0.65 * reach;
     planet(kit, images, at, radius, PlanetLook::Gas, &rim, LinearRgba::rgb(0.9, 0.7, 0.5));
     let ring = kit.materials.add(StandardMaterial {
         base_color: Color::srgba(0.85, 0.75, 0.6, 0.55),
@@ -53,10 +53,10 @@ pub fn build(kit: &mut Kit, images: &mut Assets<Image>) {
     let cloud = images.add(cloud_texture(256, 7));
     let cloud_b = images.add(cloud_texture(256, 23));
     for (glass_x, glass_y, size, color, texture) in [
-        (-3.2, 3.2, 5.5, LinearRgba::rgb(1.4, 0.4, 2.2), &cloud),
-        (-5.5, 1.4, 4.0, LinearRgba::rgb(0.4, 0.8, 2.2), &cloud_b),
-        (1.0, 3.4, 5.0, LinearRgba::rgb(0.3, 1.1, 2.0), &cloud_b),
-        (4.0, 3.0, 3.5, LinearRgba::rgb(1.1, 0.3, 1.8), &cloud),
+        (-3.0, 5.4, 6.5, LinearRgba::rgb(1.4, 0.4, 2.2), &cloud),
+        (-6.0, 2.8, 5.0, LinearRgba::rgb(0.4, 0.8, 2.2), &cloud_b),
+        (1.5, 6.2, 5.5, LinearRgba::rgb(0.3, 1.1, 2.0), &cloud_b),
+        (4.5, 5.8, 4.0, LinearRgba::rgb(1.1, 0.3, 1.8), &cloud),
     ] {
         let (at, reach) = through_window(glass_x, glass_y, -120.0);
         billboard(kit, texture, at, size * reach, color);
@@ -74,7 +74,7 @@ pub fn build(kit: &mut Kit, images: &mut Assets<Image>) {
         (seed % 10_000) as f32 / 10_000.0
     };
     for _ in 0..36 {
-        let (glass_x, glass_y) = (-7.0 + next() * 6.5, 0.6 + next() * 2.8);
+        let (glass_x, glass_y) = (-7.0 + next() * 6.5, 1.0 + next() * 5.5);
         let (at, reach) = through_window(glass_x, glass_y, -24.0 - next() * 20.0);
         let size = (0.04 + next() * 0.12) * reach;
         let scale = Vec3::new(size * (0.7 + next() * 0.6), size * (0.6 + next() * 0.5), size * (0.7 + next() * 0.6));
@@ -87,7 +87,7 @@ pub fn build(kit: &mut Kit, images: &mut Assets<Image>) {
     let metal = kit.materials.add(StandardMaterial { base_color: Color::srgb(0.6, 0.65, 0.75), metallic: 0.8, perceptual_roughness: 0.35, ..default() });
     let engine = kit.glow(LinearRgba::rgb(1.5, 4.0, 8.0));
     let flame = kit.meshes.add(Sphere::new(0.14));
-    for (glass_x, glass_y, z, heading) in [(-1.6, 2.4, -35.0, 0.3), (3.4, 2.9, -55.0, -0.5), (6.6, 1.9, -30.0, 2.6)] {
+    for (glass_x, glass_y, z, heading) in [(-1.6, 4.4, -35.0, 0.3), (2.6, 6.4, -55.0, -0.5), (6.6, 1.9, -30.0, 2.6)] {
         let (at, reach) = through_window(glass_x, glass_y, z);
         let scale = Vec3::splat(0.28 * reach);
         let ship = kit
@@ -114,7 +114,8 @@ fn planet(kit: &mut Kit, images: &mut Assets<Image>, at: Vec3, radius: f32, look
         emissive: air * 0.02,
         ..default()
     });
-    kit.mesh(Sphere::new(radius).mesh().uv(64, 32), material, Transform::from_translation(at).with_rotation(Quat::from_rotation_z(0.25)));
+    kit.mesh(Sphere::new(radius).mesh().uv(64, 32), material, Transform::from_translation(at).with_rotation(Quat::from_rotation_x(-1.25) * Quat::from_rotation_z(0.25)));
+    // (Tilted so its pole, where the texture pinches, faces away from the camera above.)
     // The glow sits just in front of the planet, a little larger, so its bright edge
     // rings the silhouette and fades outward.
     let toward = (EYE - at).normalize() * radius * 1.05;
@@ -239,8 +240,8 @@ fn rim_texture(size: u32) -> Image {
 }
 
 /// The surround polished metal reflects (a cubemap, 6 faces of `size`): dark navy, a
-/// cyan band at the height of the wall light strips, a bright reactor overhead, and
-/// the window's blue planet glow ahead.
+/// cyan band at the height of the wall light strips, the ceiling's round fixtures and
+/// strips overhead, and the window's blue planet glow ahead.
 pub fn environment(size: u32) -> Image {
     use bevy::render::render_resource::{TextureViewDescriptor, TextureViewDimension};
     let mut pixels = Vec::with_capacity((size * size * 6 * 8) as usize);
@@ -262,8 +263,14 @@ pub fn environment(size: u32) -> Image {
                 // Wall light strips all round.
                 let band = (1.0 - ((dir.y - 0.12).abs() / 0.05)).clamp(0.0, 1.0);
                 rgb += Vec3::new(0.1, 0.55, 1.0) * band * 2.5;
-                // The reactor straight above.
-                rgb += Vec3::new(0.3, 0.7, 1.2) * ((dir.y - 0.9) / 0.1).clamp(0.0, 1.0) * 4.0;
+                // The ceiling's round fixtures and light strips (`hull`), seen from the floor.
+                for fixture in [Vec3::new(0.0, 0.9, -0.45), Vec3::new(-0.55, 0.8, 0.1), Vec3::new(0.55, 0.8, 0.1), Vec3::new(-0.5, 0.82, 0.4), Vec3::new(0.5, 0.82, 0.4)] {
+                    let near = dir.dot(fixture.normalize());
+                    rgb += Vec3::new(0.7, 0.91, 1.0) * ((near - 0.975) / 0.025).clamp(0.0, 1.0) * 9.0;
+                }
+                if dir.y > 0.5 && (dir.z * 6.0).fract().abs() < 0.04 {
+                    rgb += Vec3::new(0.7, 0.91, 1.0) * 2.0;
+                }
                 // The window ahead (-z), lit by the blue planet.
                 if dir.z < -0.6 && dir.y > -0.05 && dir.y < 0.45 {
                     rgb += Vec3::new(0.05, 0.18, 0.45) * ((-dir.z - 0.6) / 0.4);

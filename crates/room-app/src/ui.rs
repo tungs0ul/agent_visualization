@@ -1022,12 +1022,12 @@ pub struct PanelPrefs {
 /// idle at every level; this sets what each drawn frame costs.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub enum Quality {
-    /// No glow, no energy effects, no shadows, light anti-aliasing.
+    /// No glow, no shadows, light anti-aliasing.
     Low,
-    /// Glow, energy effects while agents work, the key light's shadows.
+    /// Glow and the key light's shadows.
     #[default]
     Medium,
-    /// Also ambient occlusion (soft contact shadows) and shadows from the core's light.
+    /// Also ambient occlusion (soft contact shadows) and the ceiling lights' shadows.
     High,
 }
 
@@ -1042,16 +1042,12 @@ impl Quality {
 
     fn hint(self) -> &'static str {
         match self {
-            Quality::Low => "Cheapest: no glow, no lightning or pulses, no shadows",
-            Quality::Medium => "Glow, lightning and pulses while agents work, shadows from the key light",
-            Quality::High => "Also soft contact shadows (ambient occlusion) and shadows from the core light; uses more power",
+            Quality::Low => "Cheapest: no glow, no shadows, fewer lights",
+            Quality::Medium => "Glow, all lights, shadows from the key light",
+            Quality::High => "Also soft contact shadows (ambient occlusion) and shadows from the ceiling lights; uses more power",
         }
     }
 
-    /// Lightning, pulses and particles while agents work.
-    pub fn effects(self) -> bool {
-        self != Quality::Low
-    }
 }
 
 fn yes() -> bool {
@@ -1713,8 +1709,7 @@ mod tests {
         let old: PanelPrefs = serde_json::from_str(r#"{"sound":true,"notify":false,"effects":true}"#).unwrap();
         assert_eq!((old.notify, old.quality), (false, Quality::Medium));
         let high: PanelPrefs = serde_json::from_str(r#"{"quality":"High"}"#).unwrap();
-        assert!(high.notify && high.quality == Quality::High && high.quality.effects());
-        assert!(!Quality::Low.effects());
+        assert!(high.notify && high.quality == Quality::High);
     }
 
     #[test]
