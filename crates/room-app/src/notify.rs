@@ -1,8 +1,7 @@
 //! Notifications (V2.md phase 4): a small toast for what matters at a glance (an
-//! agent joined, finished, failed, needs you, Claude is done) and, unless the user
-//! turned sound off, a soft macOS system sound. Sounds play through `afplay`, one
-//! short process per sound, so nothing runs between them (an always-open audio
-//! stream kept the system's audio service busy).
+//! agent joined, finished, failed, needs you, Claude is done). Silent: the app plays
+//! no sound at all. Each sound woke macOS's audio service (0 % to 10-23 % CPU,
+//! measured 2026-11-19) and made other apps' audio crackle; the user had it removed.
 
 use std::collections::VecDeque;
 use std::time::{Duration, Instant};
@@ -24,17 +23,6 @@ pub enum Kind {
 }
 
 impl Kind {
-    /// The macOS system sound for it: quiet, distinct.
-    fn sound(self) -> &'static str {
-        match self {
-            Kind::Joined => "/System/Library/Sounds/Pop.aiff",
-            Kind::Finished => "/System/Library/Sounds/Glass.aiff",
-            Kind::Failed => "/System/Library/Sounds/Basso.aiff",
-            Kind::Waiting => "/System/Library/Sounds/Ping.aiff",
-            Kind::Done => "/System/Library/Sounds/Purr.aiff",
-            Kind::Win => "/System/Library/Sounds/Hero.aiff",
-        }
-    }
 }
 
 /// The notification an event deserves, if any. `project` names the session when
@@ -106,11 +94,10 @@ impl Bells {
     }
 }
 
-/// The bell: a macOS notification and a sound, whatever the app's sound setting, since
-/// the user asked for it.
+/// The bell: a macOS notification, whatever the notification setting, since the user
+/// asked for it.
 pub fn bell(text: &str) {
     system_notification(text);
-    play(Kind::Done.sound());
 }
 
 /// How long a toast stays.
@@ -124,8 +111,8 @@ pub struct Toasts {
 }
 
 impl Toasts {
-    /// Shows a toast and, if `sound` is on, plays its sound.
-    pub fn push(&mut self, kind: Kind, text: String, sound: bool) {
+    /// Shows a toast.
+    pub fn push(&mut self, kind: Kind, text: String) {
         // The same thing twice in a row (two failures in a burst) shows once.
         if self.shown.back().is_some_and(|(last, last_text, _)| *last == kind && *last_text == text) {
             return;
@@ -133,9 +120,6 @@ impl Toasts {
         self.shown.push_back((kind, text, Instant::now()));
         while self.shown.len() > MAX_TOASTS {
             self.shown.pop_front();
-        }
-        if sound {
-            play(kind.sound());
         }
     }
 
@@ -156,13 +140,6 @@ pub fn system_notification(text: &str) {
             .args(["-e", "on run argv", "-e", "display notification (item 1 of argv) with title \"Agent Room\"", "-e", "end run"])
             .arg(text)
             .status();
-    });
-}
-
-/// Plays a sound file quietly in the background; the process ends with the sound.
-fn play(file: &'static str) {
-    std::thread::spawn(move || {
-        let _ = std::process::Command::new("afplay").args([file, "-v", "0.35"]).status();
     });
 }
 
@@ -225,9 +202,9 @@ mod tests {
     #[test]
     fn a_burst_of_the_same_toast_shows_once() {
         let mut toasts = Toasts::default();
-        toasts.push(Kind::Failed, "Claude: Bash failed".into(), false);
-        toasts.push(Kind::Failed, "Claude: Bash failed".into(), false);
-        toasts.push(Kind::Done, "Claude is done".into(), false);
+        toasts.push(Kind::Failed, "Claude: Bash failed".into());
+        toasts.push(Kind::Failed, "Claude: Bash failed".into());
+        toasts.push(Kind::Done, "Claude is done".into());
         assert_eq!(toasts.shown.len(), 2);
     }
 }

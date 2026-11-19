@@ -19,7 +19,7 @@ use bevy_egui::{EguiContexts, egui};
 
 use crate::director::{self, Role};
 use crate::model::{Model, Pose, Who};
-use crate::world3d::{INBOX, Location, TELEPORTER, TELEPORTER_DECK};
+use crate::world3d::{Spot, TELEPORTER_DECK, inbox, teleporter_spot};
 
 /// The robot every agent is (`tools/blender/robot.py`): 1 m tall, facing +z.
 const ROBOT: &str = "models/robot/robot.glb";
@@ -100,9 +100,9 @@ pub(crate) struct Avatar {
     /// Its current report has been handed over or left on the desk.
     reported: bool,
     /// The station a sub-agent works at: where its first tool call took it.
-    home: Option<Location>,
+    desk: Option<u8>,
     /// The location it is at or walking to, and since when (seconds of app time).
-    at: Location,
+    at: Spot,
     since: f32,
 }
 
@@ -213,8 +213,10 @@ pub fn sync(
             avatar.session = role.session.clone();
         }
     }
-    // Who stays and where it goes.
-    let mut wanted: Vec<(Entity, Location)> = Vec::new();
+    // Who stays and where it goes. Desks already taken, so a sub-agent starting work
+    // gets a free one.
+    let mut taken: Vec<u8> = avatars.iter().filter_map(|(_, avatar, _)| avatar.desk).collect();
+    let mut wanted: Vec<(Entity, Spot)> = Vec::new();
     let mut seats: HashMap<Entity, usize> = HashMap::new();
     for (entity, mut avatar, mut transform) in &mut avatars {
         let role = roles.get(&(avatar.session.clone(), avatar.who.clone()));
@@ -250,21 +252,26 @@ pub fn sync(
             // Newest wins, but a robot stays a moment where it is before walking on:
             // quick tool calls one after another don't send it running back and forth.
             let (pose, is_main, at) = (avatar.pose, avatar.who == Who::Main, avatar.at);
-            let place = director::location_for(pose, is_main, at, &mut avatar.home);
+            let free = || {
+                let desk = director::free_desk(&taken, crate::world3d::DESKS.len() as u8);
+                taken.push(desk);
+                desk
+            };
+            let place = director::location_for(pose, is_main, at, &mut avatar.desk, free);
             let place = if place != avatar.at && time.elapsed_secs() - avatar.since < DWELL_SECS { avatar.at } else { place };
             wanted.push((entity, place));
         }
     }
     // Several at one place stand side by side.
-    wanted.sort_by_key(|(entity, location)| (*location as u8, entity.to_bits()));
-    let mut slots: HashMap<Entity, (Location, usize)> = HashMap::new();
-    let mut count: HashMap<Location, usize> = HashMap::new();
+    wanted.sort_by_key(|(entity, location)| (*location, entity.to_bits()));
+    let mut slots: HashMap<Entity, (Spot, usize)> = HashMap::new();
+    let mut count: HashMap<Spot, usize> = HashMap::new();
     for (entity, location) in wanted {
         let slot = count.entry(location).or_default();
         slots.insert(entity, (location, *slot));
         *slot += 1;
     }
-    let deck = TELEPORTER + Vec3::Y * TELEPORTER_DECK;
+    let deck = teleporter_spot() + Vec3::Y * TELEPORTER_DECK;
     // One robot on the deck at a time: the others wait round it, and the first to
     // arrive there beams out next.
     let mut deck_taken = avatars.iter().any(|(_, avatar, _)| match avatar.presence {
@@ -280,7 +287,7 @@ pub fn sync(
             Presence::Boarding => (deck, 0.0),
             Presence::Departing => {
                 let place = departing.iter().position(|entity| *entity == avatar_entity).unwrap_or(0);
-                let waiting = TELEPORTER + Quat::from_rotation_y(0.9 + 0.7 * place as f32) * Vec3::new(0.0, 0.0, 2.0);
+                let waiting = teleporter_spot() + Quat::from_rotation_y(0.9 + 0.7 * place as f32) * Vec3::new(0.0, 0.0, 2.0);
                 if !deck_taken && transform.translation.distance(waiting) < 0.1 {
                     deck_taken = true;
                     avatar.presence = Presence::Boarding;
@@ -296,10 +303,10 @@ pub fn sync(
                 // Each session's Claude has its own seat at the main desk; sub-agents
                 // there stand in front of the platform, facing it.
                 match location {
-                    Location::MainDesk if avatar.who == Who::Main => {
+                    Spot::Command if avatar.who == Who::Main => {
                         location.work_spot(seats.get(&avatar_entity).copied().unwrap_or(0))
                     }
-                    Location::MainDesk => (visitor_spot(slot), PI),
+                    Spot::Command => (visitor_spot(slot), PI),
                     _ => location.work_spot(slot),
                 }
             }
@@ -377,8 +384,8 @@ pub fn sync(
                     player: None,
                     playing: None,
                     reported: false,
-                    home: None,
-                    at: Location::MainDesk,
+                    desk: None,
+                    at: Spot::Command,
                     since: 0.0,
                 },
                 Transform::from_translation(deck).with_scale(Vec3::splat(0.001)),
@@ -479,7 +486,7 @@ pub fn teleporter(
         let climb = (k + t * if arriving { -0.5 } else { 0.5 }).rem_euclid(1.0);
         let angle = k * 23.0 + t * 3.0;
         let radius = 0.15 + 0.75 * gather * (0.6 + 0.4 * (k * 7.0).sin().abs());
-        at.translation = TELEPORTER + Vec3::new(radius * angle.cos(), TELEPORTER_DECK + 0.1 + climb * 2.4, radius * angle.sin());
+        at.translation = teleporter_spot() + Vec3::new(radius * angle.cos(), TELEPORTER_DECK + 0.1 + climb * 2.4, radius * angle.sin());
         at.scale = Vec3::splat(0.6 + 0.8 * (1.0 - climb));
     }
     for &(ring, speed) in &found.rings {
@@ -502,7 +509,7 @@ const WALK_SPEED: f32 = 1.8;
 
 /// Where a sub-agent stands at the main desk: in front of the platform, facing Claude.
 fn visitor_spot(slot: usize) -> Vec3 {
-    Location::MainDesk.center() + Vec3::new(-1.0 + 2.0 * (slot % 2) as f32, 0.0, 2.4 + 0.6 * (slot / 2) as f32)
+    Spot::Command.center() + Vec3::new(-1.0 + 2.0 * (slot % 2) as f32, 0.0, 2.4 + 0.6 * (slot / 2) as f32)
 }
 
 /// A report a sub-agent left on the main desk while Claude was away.
@@ -559,7 +566,7 @@ pub fn deliver(
                 Document,
                 Mesh3d(meshes.add(Cuboid::new(0.24, 0.02, 0.32))),
                 MeshMaterial3d(glow),
-                Transform::from_translation(INBOX + Vec3::Y * 0.04 * left as f32),
+                Transform::from_translation(inbox() + Vec3::Y * 0.04 * left as f32),
             ));
             left += 1;
         }
@@ -574,7 +581,7 @@ pub fn deliver(
     // Waiting documents bob gently so they catch the eye.
     let t = time.elapsed_secs();
     for (i, (_, mut at)) in documents.iter_mut().enumerate() {
-        at.translation.y = INBOX.y + 0.04 * i as f32 + 0.03 * (t * 2.0 + i as f32).sin();
+        at.translation.y = inbox().y + 0.04 * i as f32 + 0.03 * (t * 2.0 + i as f32).sin();
         at.rotation = Quat::from_rotation_y(t * 0.6);
     }
 }
@@ -648,49 +655,39 @@ pub fn labels(
     let ctx = contexts.ctx_mut()?;
     let Ok((camera, camera_at)) = camera.single() else { return Ok(()) };
     let offset = camera.logical_viewport_rect().map_or(Vec2::ZERO, |rect| rect.min);
-    // A sign over each location, in its colour.
-    for location in crate::world3d::Location::ALL.into_iter().filter(|_| !mode.mini) {
-        let Ok(screen) = camera.world_to_viewport(camera_at, location.center() + Vec3::Y * 2.6) else { continue };
+    // The command station's sign: where the settings and the other consoles are
+    // (PLAN.md M27), one button each.
+    if !mode.mini
+        && let Ok(screen) = camera.world_to_viewport(camera_at, Spot::Command.center() + Vec3::Y * 2.6)
+    {
         let screen = screen + offset;
-        let glow = location.glow();
-        let peak = glow.red.max(glow.green).max(glow.blue).max(1e-3);
-        let color = egui::Color32::from_rgb(
-            (120.0 + 135.0 * glow.red / peak) as u8,
-            (120.0 + 135.0 * glow.green / peak) as u8,
-            (120.0 + 135.0 * glow.blue / peak) as u8,
-        );
-        // The stations with a console (PLAN.md M19) say so, and their sign opens it.
-        let console = crate::console::Console::at(location);
-        egui::Area::new(egui::Id::new(("place3d", location.title())))
+        let color = egui::Color32::from_rgb(130, 200, 255);
+        egui::Area::new("command-sign".into())
             .fixed_pos(egui::pos2(screen.x, screen.y))
             .pivot(egui::Align2::CENTER_BOTTOM)
-            .interactable(console.is_some())
             .order(egui::Order::Background)
             .show(ctx, |ui| {
-                let sign = egui::Frame::new()
+                egui::Frame::new()
                     .fill(egui::Color32::from_rgba_unmultiplied(12, 14, 32, 210))
                     .stroke(egui::Stroke::new(1.0, color.gamma_multiply(0.7)))
                     .corner_radius(6.0)
                     .inner_margin(egui::Margin::symmetric(8, 4))
                     .show(ui, |ui| {
-                        ui.label(egui::RichText::new(location.title()).strong().color(color));
-                        ui.label(egui::RichText::new(location.subtitle()).small().color(egui::Color32::from_gray(190)));
-                        if let Some(console) = console {
-                            ui.label(egui::RichText::new(console.hint()).small().color(crate::console::HOLO));
-                        }
+                        ui.label(egui::RichText::new("Command").strong().color(color));
+                        ui.horizontal(|ui| {
+                            for console in crate::console::Console::ALL.into_iter().filter(|console| console.on_command()) {
+                                let text = egui::RichText::new(console.hint()).small().color(crate::console::HOLO);
+                                let key = console.key().map(|key| format!(" ({})", key.name())).unwrap_or_default();
+                                if ui.small_button(text).on_hover_text(format!("{}{key}", console.title())).clicked() {
+                                    open.toggle(console);
+                                }
+                            }
+                        });
                     });
-                if let Some(console) = console
-                    && ui
-                        .interact(sign.response.rect, ui.id().with("open"), egui::Sense::click())
-                        .on_hover_cursor(egui::CursorIcon::PointingHand)
-                        .clicked()
-                {
-                    open.toggle(console);
-                }
             });
     }
-    // The teleporter and the wall screen have consoles too, but no station sign.
-    for console in crate::console::Console::ALL.into_iter().filter(|console| console.station().is_none() && !mode.mini) {
+    // The teleporter and the wall screen have consoles too, with a sign of their own.
+    for console in crate::console::Console::ALL.into_iter().filter(|console| !console.on_command() && !mode.mini) {
         let Ok(screen) = camera.world_to_viewport(camera_at, console.anchor() + Vec3::Y * 1.2) else { continue };
         let screen = screen + offset;
         egui::Area::new(egui::Id::new(("console-sign", console.title())))
@@ -717,7 +714,7 @@ pub fn labels(
     if !mode.mini
         && let Some(session) = model.shown()
         && session.todos.iter().any(|(_, state)| *state != crate::model::TodoState::Done)
-        && let Ok(spot) = camera.world_to_viewport(camera_at, Location::MainDesk.center() + Vec3::new(0.0, 3.3, -1.0))
+        && let Ok(spot) = camera.world_to_viewport(camera_at, Spot::Command.center() + Vec3::new(0.0, 3.3, -1.0))
     {
         plan_board(ctx, spot + offset, &session.todos);
     }
@@ -1048,7 +1045,7 @@ pub fn light_trails(
 /// would cross it. Recomputed every frame, so the robot curves round the edge.
 fn detour(here: Vec3, target: Vec3) -> Vec3 {
     const RIM: f32 = 2.4;
-    let centre = Location::MainDesk.center();
+    let centre = Spot::Command.center();
     let (a, b, c) = (here.xz(), target.xz(), centre.xz());
     if a.distance(c) < RIM || b.distance(c) < RIM {
         return target;
@@ -1079,12 +1076,12 @@ mod tests {
     fn robots_walk_round_the_main_platform() {
         // Straight across: head for a point outside the rim instead.
         let goal = detour(Vec3::new(-6.0, 0.0, 0.5), Vec3::new(6.0, 0.0, 0.5));
-        assert!(goal.xz().distance(Location::MainDesk.center().xz()) > 2.4);
+        assert!(goal.xz().distance(Spot::Command.center().xz()) > 2.4);
         // Clear of the platform: straight to the target.
         let target = Vec3::new(6.0, 0.0, 4.0);
         assert_eq!(detour(Vec3::new(-6.0, 0.0, 4.0), target), target);
         // Going onto the platform (Claude's own desk): straight in.
-        let desk = Location::MainDesk.work_spot(0).0;
+        let desk = Spot::Command.work_spot(0).0;
         assert_eq!(detour(Vec3::new(-6.0, 0.0, 0.0), desk), desk);
     }
 }
@@ -1199,7 +1196,7 @@ pub fn links(
             state.reported.push(robot);
             let to = match claude {
                 Some((claude, _, _)) if avatar.handing > 0.0 => Ok(claude),
-                _ => Err(INBOX),
+                _ => Err(inbox()),
             };
             spawn_capsule(&mut commands, &assets, waist(at), to);
         }
@@ -1339,12 +1336,6 @@ pub struct StationPick<'w, 's> {
 }
 
 impl StationPick<'_, '_> {
-    /// The station a mesh entity belongs to, if any.
-    fn station_of(&self, entity: Entity) -> Option<crate::world3d::Location> {
-        std::iter::once(entity)
-            .chain(self.parents.iter_ancestors(entity))
-            .find_map(|ancestor| self.bodies.get(ancestor).ok().map(|body| body.0))
-    }
 
     /// The console of the station whose model the ray hits first, unless that hit is on
     /// the station's platform or floor ring.
@@ -1357,8 +1348,8 @@ impl StationPick<'_, '_> {
         let settings = MeshRayCastSettings::default()
             .with_filter(&on_station)
             .with_visibility(RayCastVisibility::VisibleInView);
-        let (entity, hit) = self.ray_cast.cast_ray(ray, &settings).first().map(|(entity, hit)| (*entity, hit.point))?;
-        crate::console::station_click(self.station_of(entity)?, hit.y)
+        let hit = self.ray_cast.cast_ray(ray, &settings).first().map(|(_, hit)| hit.point)?;
+        crate::console::station_click(hit.y)
     }
 }
 
@@ -1414,7 +1405,7 @@ pub fn camera_input(
         let on_station = camera.viewport_to_world(camera_at, cursor - offset).ok().and_then(|ray| stations.console(ray));
         // The teleporter and the wall screen keep the reach around their spot.
         let elsewhere = || {
-            let spots = Console::ALL.into_iter().filter(|console| console.station().is_none()).filter_map(|console| {
+            let spots = Console::ALL.into_iter().filter(|console| !console.on_command()).filter_map(|console| {
                 Some((console, camera.world_to_viewport(camera_at, console.anchor()).ok()? + offset))
             });
             console_at(cursor, spots, 90.0 / hand.zoom)

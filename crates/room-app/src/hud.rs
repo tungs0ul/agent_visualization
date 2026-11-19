@@ -466,7 +466,7 @@ pub fn focus_terminal(pid: u32) {
     });
 }
 
-/// "Tell me when done": a macOS notification and a sound once this session next goes
+/// "Tell me when done": a macOS notification once this session next goes
 /// idle. Lit while set.
 fn bell_button(ui: &mut egui::Ui, bells: &mut crate::notify::Bells, session: &str) {
     let set = bells.is_set(session);

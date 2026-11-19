@@ -9,7 +9,7 @@ Writes two files into assets/models/environment/ (or OUT_DIR):
 
 * floor.glb  - one mesh "Floor": dark titanium panels with fine seams, a polished
   centre disc with a hexagon inlay, thin LED lines and flush docking rings under
-  the five workstation spots. Floor top is y = 0.
+  the command station and the eight crew desks. Floor top is y = 0.
 * shell.glb  - the architecture: curved back/side walls (4.5 m) with a panoramic
   window (x -7.5..7.5) in the back wall, ribs, light strips, a partial ceiling overhang, a door,
   a holographic display, server racks, backlit panels, two pillars and four plants.
@@ -35,14 +35,11 @@ if "--" in sys.argv:
     if args:
         OUT_DIR = os.path.abspath(args[0])
 
-# Workstation spots in Blender plan coordinates (glTF z negated) and ring radius.
-STATIONS = [
-    ((0.0, 0.0), 2.4),     # main desk platform
-    ((-4.2, 3.4), 1.3),    # bookshelf alcove
-    ((4.4, 3.4), 1.3),     # processing lab
-    ((-5.8, -1.2), 1.3),   # file reading desk
-    ((5.8, -1.2), 1.3),    # writing desk
-]
+# Workstation spots in Blender plan coordinates (glTF z negated) and ring radius: the
+# bridge's command station and eight crew desks (PLAN.md M27). Keep in step with
+# `world3d::Spot` and `world3d::DESKS` in the app.
+DESKS = [(-5.4, -2.4), (5.4, -2.4), (-2.6, 0.6), (2.6, 0.6), (-6.8, 0.6), (6.8, 0.6), (-4.6, 3.6), (4.6, 3.6)]
+STATIONS = [((0.0, 3.6), 2.4)] + [((x, -z), 1.3) for x, z in DESKS]
 
 # ---------------------------------------------------------------- scene reset
 for ob in list(bpy.data.objects):

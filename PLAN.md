@@ -989,6 +989,36 @@ None of these is in the backlog above. The user picks.
 11. **Commit or open a PR from the writing desk** (M): git and `gh`. Moves the app from
     watching to doing, so the user decides.
 
+### M27: Starship bridge instead of the station HQ (requested 2026-11-19, in progress)
+
+User: "if the agent is working at their desk should we redesign our background? like a
+cockpit of a starship, where the command in the front where we can find the settings,
+and below it multiple desks so when the subagent need it it can go there". Follows M26:
+robots now stay at their desk, so five stations to walk between no longer fit.
+
+- Command deck: Claude's chair and console; Settings, Chat and Launch open there; the
+  plan board above it; a viewscreen with space and the wall-screen stats.
+- Crew deck: identical crew desks. A sub-agent beams in and works at a free desk; the
+  desk's screen shows the kind of work (book, terminal, pen).
+- History, Commands and Changes become clickable wall panels; robots don't walk there.
+- Teleporter pad stays. Walks stay as in M26: task, report, needing the user.
+- The ship flies while agents work (user, same day: "when the agents are working we
+  can see that the starship is moving forward (background going behind). and when
+  idle it just stop there"): the stars stream past the windows while any session is
+  busy and stand still when all are idle. It costs nothing extra: the view already
+  redraws while agents work, and still stars let it doze.
+- A generic sci-fi bridge, not a copy of any film's.
+
+Steps, each checked by screenshots of a replayed session:
+1. Grey-box prototypes of two layouts behind `AGENT_ROOM_LAYOUT` (`front`: command at
+   the back by the viewscreen, crew pit in two rows in front of it; `ring`: command
+   chair in the centre, crew desks on an arc around it), with the moving stars. The
+   user picks one.
+2. Blender models (bridge shell, command deck, crew desk, viewscreen), wall panels for
+   the consoles, desk assignment for sub-agents.
+3. Remove the old stations and their models; measure power with `scripts/measure.sh`
+   against the V2.md budget.
+
 ### M26: Robots work at their desk, walk only when it matters (requested 2026-11-19, done 2026-11-19)
 
 User asked whether robots should stay at their desk or move between stations. Research:
@@ -1312,6 +1342,7 @@ config file, and can remove both cleanly.
 - [x] M23 StopFailure reasons, PostCompact, PostModelSwitch, notices (2026-11-18; plugin 0.3.0)
 - [x] M24 Chat @ mentions and dropped images (2026-11-18; not yet seen on screen)
 - [x] M7 Distribution, code side (2026-11-17); publishing left to the user
+- [ ] M27 Starship bridge (2026-11-19: front bridge with eight crew desks, free desks for sub-agents, warp stars; power still to measure)
 - [x] M26 Robots work at their desk, walk only when it matters (2026-11-19)
 - [x] M25 Pause, resume and stop any session (2026-11-18; plugin 0.4.0; buttons not yet seen on screen)
 
@@ -1902,3 +1933,30 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   console's width, as the final-answer pop-up already did. A headless egui test lays out
   the real console with such an answer: 890 px wide before, within 460 px + margins
   after. Clippy clean, 63 tests pass. Not seen on screen after the fix (Mac locked).
+- 2026-11-19, Claude Opus 5.5: M27, the starship bridge is the room. A grey-box
+  prototype of two layouts was rejected ("soul less and bland"), so both were rebuilt
+  from the HQ's own models; the user picked `front` and asked for more desks. Now:
+  `world3d::Spot` (`Command` or `Desk(n)`) replaces the five station `Location`s; the
+  command station (main desk model) is at the back by the window, eight crew desks
+  (writing desk model, `world3d::DESKS`) in three rows in front, the teleporter front
+  centre, glowing routes from command to every desk. A sub-agent takes the first free
+  desk when it first works (`director::free_desk`; when all are taken it shares the
+  least used) and keeps it until it leaves. The command station's sign has a button for
+  Settings, History, Chat, Changes and Commands (`Console::on_command`); a click on its
+  model opens Settings; their holograms open over it. `floor.glb` is re-exported with
+  rings under the new spots (`environment.py` `DESKS`). Removed: the layout switch, the
+  bookshelf, lab and research models and their Blender builders (`research.py`,
+  `research_preview.py`, `build_bookshelf`, `build_lab`). The ship flies
+  (`world3d::cruise`): while any session is busy, 400 stars move along lines of sight
+  through the window and spread from its centre (a warp), with short streaks; idle,
+  they stand still and the view dozes. Seen on screen with a synthetic session of
+  Claude and six sub-agents (all at their own desks, stars filling the window at 40 s).
+  Not done: power measured with `scripts/measure.sh` (M27 step 3).
+- 2026-11-19, Claude Opus 5.5: all sound removed. The user heard other apps' audio go
+  "robot" while Agent Room ran. Measured with a busy session: macOS's audio service
+  idles at 0 % CPU and each notification sound (`afplay`) woke it to 10-23 %, three
+  overlapping at a session's start. The user then asked to remove audio completely:
+  no `afplay`, no Sound setting (`PanelPrefs.sound` gone; an old `ui.json` still
+  loads), the bell is a silent notification. Re-measured: no sound process, and the
+  audio service's remaining 8-10 % was there before the app started and after it quit
+  (another app's audio).

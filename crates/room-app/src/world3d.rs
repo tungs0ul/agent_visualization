@@ -1,5 +1,6 @@
-//! The 3D workspace (PLAN.md M17): one shared space-station HQ with five holographic
-//! workstations the robots walk between, so movement shows what they are doing.
+//! The 3D workspace (PLAN.md M17, M27): a starship bridge. Claude works at the command
+//! station by the window, sub-agents at crew desks in front of it, and the stars
+//! stream past while anyone works.
 //!
 //! Three layers, each its own models (Blender scripts in `tools/blender/`):
 //! environment (`environment.py`: floor with docking rings, the station shell with
@@ -10,83 +11,39 @@
 use bevy::prelude::*;
 use bevy::world_serialization::WorldAssetRoot;
 
-/// Where things happen (metres; x right, z towards the camera). The floor model has
-/// a docking ring under each of these spots.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
-pub enum Location {
-    /// Centre platform: the main agent thinks, plans and coordinates.
-    MainDesk,
-    /// Read files (Read, Grep, Glob).
-    Bookshelf,
-    /// Search and fetch the web: a knowledge-graph console (`tools/blender/research.py`).
-    Research,
-    /// Run scripts and programs.
-    Lab,
-    /// Create or edit files.
-    WritingDesk,
+/// Where a robot works (PLAN.md M27): Claude's command station at the back by the
+/// window, or one of the crew desks in front of it. Metres; x right, z towards the
+/// camera. The floor model has a docking ring under each (`environment.py`
+/// `STATIONS`, keep in step).
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Hash)]
+pub enum Spot {
+    Command,
+    Desk(u8),
 }
 
-impl Location {
-    pub const ALL: [Location; 5] = [Self::MainDesk, Self::Bookshelf, Self::Research, Self::Lab, Self::WritingDesk];
+/// The crew desks (x, z): two at the back beside the command station, four in the
+/// middle row, two in front either side of the teleporter.
+pub const DESKS: [(f32, f32); 8] =
+    [(-5.4, -2.4), (5.4, -2.4), (-2.6, 0.6), (2.6, 0.6), (-6.8, 0.6), (6.8, 0.6), (-4.6, 3.6), (4.6, 3.6)];
 
+impl Spot {
     pub fn center(self) -> Vec3 {
         match self {
-            Self::MainDesk => Vec3::new(0.0, 0.0, 0.0),
-            Self::Bookshelf => Vec3::new(-4.2, 0.0, -3.4),
-            Self::Research => Vec3::new(-5.8, 0.0, 1.2),
-            Self::Lab => Vec3::new(4.4, 0.0, -3.4),
-            Self::WritingDesk => Vec3::new(5.8, 0.0, 1.2),
+            Spot::Command => Vec3::new(0.0, 0.0, -3.6),
+            Spot::Desk(index) => {
+                let (x, z) = DESKS[index as usize % DESKS.len()];
+                Vec3::new(x, 0.0, z)
+            }
         }
     }
 
-    /// The top of the platform or floor ring built into the station's model
-    /// (`tools/blender/stations.py`: the main desk's three tiers rise to 0.35 m, the
-    /// other stations' `floor_disc`s to 0.05 m), plus a little margin.
+    /// The top of the platform or floor disc built into the station's model
+    /// (`tools/blender/stations.py`: the main desk's three tiers rise to 0.35 m, a
+    /// writing desk's `floor_disc` to 0.05 m), plus a little margin.
     pub fn platform_top(self) -> f32 {
         match self {
-            Self::MainDesk => 0.38,
-            _ => 0.08,
-        }
-    }
-
-    pub fn title(self) -> &'static str {
-        match self {
-            Self::MainDesk => "Main desk",
-            Self::Bookshelf => "Bookshelf",
-            Self::Research => "Research",
-            Self::Lab => "Processing lab",
-            Self::WritingDesk => "Writing desk",
-        }
-    }
-
-    pub fn subtitle(self) -> &'static str {
-        match self {
-            Self::MainDesk => "Plan & coordinate",
-            Self::Bookshelf => "Read files",
-            Self::Research => "Search the web",
-            Self::Lab => "Run scripts",
-            Self::WritingDesk => "Write files",
-        }
-    }
-
-    /// The location's signature colour (paths, lights, sign).
-    pub fn glow(self) -> LinearRgba {
-        match self {
-            Self::MainDesk => LinearRgba::rgb(0.2, 0.8, 3.0),
-            Self::Bookshelf => LinearRgba::rgb(0.4, 2.6, 1.0),
-            Self::Research => LinearRgba::rgb(2.4, 1.2, 0.2),
-            Self::Lab => LinearRgba::rgb(0.3, 2.2, 2.6),
-            Self::WritingDesk => LinearRgba::rgb(1.6, 0.5, 3.0),
-        }
-    }
-
-    fn model(self) -> &'static str {
-        match self {
-            Self::MainDesk => "models/stations/main_desk.glb",
-            Self::Bookshelf => "models/stations/bookshelf.glb",
-            Self::Research => "models/stations/research.glb",
-            Self::Lab => "models/stations/lab.glb",
-            Self::WritingDesk => "models/stations/writing_desk.glb",
+            Spot::Command => 0.38,
+            Spot::Desk(_) => 0.08,
         }
     }
 
@@ -96,22 +53,23 @@ impl Location {
     pub fn work_spot(self, slot: usize) -> (Vec3, f32) {
         let side = [0.0, -0.75, 0.75, -1.5, 1.5][slot % 5];
         let (front, height) = match self {
-            Self::MainDesk => (0.0, 0.35),
-            Self::Bookshelf => (1.3, 0.033),
-            Self::Research => (0.85, 0.043),
-            Self::Lab => (1.0, 0.053),
-            Self::WritingDesk => (0.85, 0.043),
+            Spot::Command => (0.0, 0.35),
+            Spot::Desk(_) => (0.85, 0.043),
         };
         (self.center() + Vec3::new(side, height, front), 0.0)
     }
 }
 
-/// Where the main desk's inbox tray is (sub-agents leave documents there).
-pub const INBOX: Vec3 = Vec3::new(0.6, 1.2, -0.86);
+/// Where the command station's inbox tray is (sub-agents leave documents there).
+pub fn inbox() -> Vec3 {
+    Spot::Command.center() + Vec3::new(0.6, 1.2, -0.86)
+}
 
 /// The teleporter (`tools/blender/teleporter.py`): every agent arrives and leaves
-/// here (V2.md phase 3). Front left, between the reading desk and the main platform.
-pub const TELEPORTER: Vec3 = Vec3::new(-3.4, 0.0, 4.0);
+/// here (V2.md phase 3). Front centre, between the front desks.
+pub fn teleporter_spot() -> Vec3 {
+    Vec3::new(0.0, 0.0, 4.1)
+}
 /// Height of its deck, where a robot stands to beam in or out.
 pub const TELEPORTER_DECK: f32 = 0.22;
 
@@ -207,10 +165,10 @@ pub fn daylight(
     }
 }
 
-/// The root of a workstation's model. A click opens its console only when it lands on
-/// the model itself, not on the docking ring in the floor around it (PLAN.md M19).
+/// The root of the command station's model. A click opens its console only when it
+/// lands on the model itself, not on the docking ring in the floor around it (M19).
 #[derive(Component, Clone, Copy)]
-pub struct StationBody(pub Location);
+pub struct StationBody;
 
 /// What building the world needs.
 pub struct Kit<'a, 'w, 's> {
@@ -257,26 +215,114 @@ impl Kit<'_, '_, '_> {
     }
 }
 
-/// Builds the environment and the workstations once.
+/// Builds the bridge once: the shell with its panoramic window, the main desk as the
+/// command station, holo-screen writing desks as crew desks, the teleporter, and
+/// glowing routes from the command station to every desk.
 pub fn build(kit: &mut Kit) {
     kit.model("models/environment/floor.glb", Vec3::ZERO);
     kit.model("models/environment/shell.glb", Vec3::ZERO);
-    for location in Location::ALL {
-        let station = kit.model(location.model(), location.center());
-        kit.commands.entity(station).insert(StationBody(location));
+    let command = Spot::Command.center();
+    let station = kit.model("models/stations/main_desk.glb", command);
+    kit.commands.entity(station).insert(StationBody);
+    for index in 0..DESKS.len() {
+        let at = Spot::Desk(index as u8).center();
+        kit.model("models/stations/writing_desk.glb", at);
+        let dir = (at - command).normalize();
+        kit.path(command + dir * 2.6, at - dir * 1.4, desk_glow(index));
     }
-    kit.model("models/stations/teleporter.glb", TELEPORTER);
-    // Routes from the main desk to every workstation.
-    for location in Location::ALL.into_iter().skip(1) {
-        let from = Location::MainDesk.center();
-        let to = location.center();
-        let dir = (to - from).normalize();
-        kit.path(from + dir * 2.6, to - dir * 1.4, location.glow());
-    }
-    // And to the teleporter.
-    let dir = (TELEPORTER - Location::MainDesk.center()).normalize();
-    kit.path(dir * 2.6, TELEPORTER - dir * 1.6, LinearRgba::rgb(0.4, 1.6, 3.2));
+    kit.model("models/stations/teleporter.glb", teleporter_spot());
+    let dir = (teleporter_spot() - command).normalize();
+    kit.path(command + dir * 2.6, teleporter_spot() - dir * 1.6, LinearRgba::rgb(0.4, 1.6, 3.2));
     sky(kit);
+}
+
+/// Each desk's route colour, so the floor isn't one flat blue.
+fn desk_glow(index: usize) -> LinearRgba {
+    [
+        LinearRgba::rgb(0.4, 2.6, 1.0),
+        LinearRgba::rgb(0.3, 2.2, 2.6),
+        LinearRgba::rgb(2.4, 1.2, 0.2),
+        LinearRgba::rgb(1.6, 0.5, 3.0),
+    ][index % 4]
+}
+
+/// A star outside: it streams past while the ship flies (`cruise`). `along` goes from
+/// 1 (far away) to 0 (just outside the window); `across` and `up` place it in the
+/// window (see [`star_spot`]).
+#[derive(Component)]
+pub struct Star {
+    along: f32,
+    across: f32,
+    up: f32,
+}
+
+/// How fast the stars stream past (metres per second), ramping up and down.
+#[derive(Resource, Default)]
+pub struct Cruise {
+    speed: f32,
+}
+
+/// Top speed while agents work, and how quickly the ship gets there or stops.
+const CRUISE_SPEED: f32 = 9.0;
+const CRUISE_RAMP: f32 = 6.0;
+/// Stars fly from `FAR` to `NEAR` (z), then start over far away. 400 tiny spheres
+/// share one mesh and material, and move only while the ship flies.
+const STARS: usize = 400;
+const FAR: f32 = -70.0;
+const NEAR: f32 = -15.0;
+
+/// The ship flies while any session works and stops when all are idle (PLAN.md M27):
+/// stars stream towards the window, stretched with speed. Still stars cost nothing,
+/// so the view can doze as before.
+pub fn cruise(
+    time: Res<Time>,
+    model: Res<crate::model::Model>,
+    mut cruise: ResMut<Cruise>,
+    mut view: ResMut<crate::view3d::View3d>,
+    mut stars: Query<(&mut Star, &mut Transform)>,
+) {
+    let working = model.live().iter().any(|session| session.is_busy());
+    let goal = if working { CRUISE_SPEED } else { 0.0 };
+    let dt = time.delta_secs().min(0.1);
+    let before = cruise.speed;
+    cruise.speed += (goal - cruise.speed).clamp(-CRUISE_RAMP * dt, CRUISE_RAMP * dt);
+    if cruise.speed == 0.0 && before == 0.0 {
+        return;
+    }
+    if cruise.speed != goal {
+        view.moving = true;
+    }
+    // Short streaks along the way each star moves: long ones read as rain.
+    let stretch = 1.0 + cruise.speed * 0.5;
+    for (mut star, mut at) in &mut stars {
+        star.along -= cruise.speed * dt / (NEAR - FAR);
+        // Flown past: start over far away.
+        if star.along < 0.0 {
+            star.along += 1.0;
+        }
+        let next = star_spot(star.along, star.across, star.up);
+        let heading = next - at.translation;
+        at.translation = next;
+        if heading.length_squared() > 1e-8 && heading.length() < 5.0 {
+            at.look_to(heading, Vec3::Y);
+        }
+        at.scale.z = at.scale.x * stretch;
+    }
+}
+
+/// A star's place: `along` 1 is far away, 0 just outside the window; `across` and `up`
+/// (0..1) are where on the panoramic window (glass y 0.5..3.95 at z -6.95, x
+/// -7.5..7.5) the camera sees it. Far stars gather near the window's centre and
+/// spread out as they come closer, so flying forward looks like a warp.
+fn star_spot(along: f32, across: f32, up: f32) -> Vec3 {
+    const EYE: Vec3 = Vec3::new(0.0, 11.0, 13.5);
+    const GLASS_Z: f32 = -6.95;
+    let z = NEAR + (FAR - NEAR) * along;
+    let reach = (EYE.z - z) / (EYE.z - GLASS_Z);
+    let spread = 0.35 + 1.4 * (1.0 - along);
+    let glass_y = 2.2 + (up - 0.5) * 4.0 * spread;
+    let glass_x = (across - 0.5) * 16.0 * spread;
+    Vec3::new(glass_x * reach, EYE.y + (glass_y - EYE.y) * reach, z)
 }
 
 /// Stars and a planet outside the panoramic window.
@@ -290,10 +336,12 @@ fn sky(kit: &mut Kit) {
         seed ^= seed << 5;
         (seed % 10_000) as f32 / 10_000.0
     };
-    for _ in 0..260 {
-        let at = Vec3::new((next() - 0.5) * 70.0, 0.5 + next() * 24.0, -16.0 - next() * 12.0);
+    for _ in 0..STARS {
+        let (along, across, up) = (next(), next(), next());
+        let at = star_spot(along, across, up);
         let size = 0.6 + next() * 1.8;
         kit.commands.spawn((
+            Star { along, across, up },
             Mesh3d(star.clone()),
             MeshMaterial3d(bright.clone()),
             Transform::from_translation(at).with_scale(Vec3::splat(size)),

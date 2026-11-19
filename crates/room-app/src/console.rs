@@ -1,12 +1,12 @@
-//! Station consoles (PLAN.md M19, M20): the stations are the controls. Main desk:
-//! settings. Bookshelf: history. Research: chat. Writing desk: the changes. Lab: recent
-//! commands. Teleporter: a new session. Wall screen: today's numbers. A console is a
-//! hologram over what was clicked; one is open at a time.
+//! Consoles (PLAN.md M19, M20, M27): the command station holds settings, history,
+//! chat, the changes and recent commands (its sign has a button for each; a click on
+//! its model opens settings). Teleporter: a new session. Wall screen: today's numbers.
+//! A console is a hologram over where it opens; one is open at a time.
 
 use bevy::prelude::*;
 use bevy_egui::egui;
 
-use crate::world3d::Location;
+use crate::world3d::Spot;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Console {
@@ -30,36 +30,26 @@ impl Console {
     pub const ALL: [Console; 7] =
         [Console::Settings, Console::History, Console::Chat, Console::Diff, Console::Commands, Console::Launch, Console::Stats];
 
-    /// The workstation it belongs to; the teleporter and the wall screen are none.
-    pub fn station(self) -> Option<Location> {
-        match self {
-            Console::Settings => Some(Location::MainDesk),
-            Console::History => Some(Location::Bookshelf),
-            Console::Chat => Some(Location::Research),
-            Console::Diff => Some(Location::WritingDesk),
-            Console::Commands => Some(Location::Lab),
-            Console::Launch | Console::Stats => None,
-        }
-    }
-
-    pub fn at(location: Location) -> Option<Console> {
-        Console::ALL.into_iter().find(|console| console.station() == Some(location))
+    /// Opens from the command station (its sign and model). The teleporter and the
+    /// wall screen have their own.
+    pub fn on_command(self) -> bool {
+        !matches!(self, Console::Launch | Console::Stats)
     }
 
     /// The point a click aims at, in the room.
     pub fn anchor(self) -> Vec3 {
-        match (self, self.station()) {
-            (_, Some(location)) => location.center() + Vec3::Y * 0.8,
-            (Console::Launch, None) => crate::world3d::TELEPORTER + Vec3::Y * 0.4,
-            _ => WALL_SCREEN,
+        match self {
+            Console::Launch => crate::world3d::teleporter_spot() + Vec3::Y * 0.4,
+            Console::Stats => WALL_SCREEN,
+            _ => Spot::Command.center() + Vec3::Y * 0.8,
         }
     }
 
     /// Where the hologram stands, in the room.
     pub fn hologram_at(self) -> Vec3 {
-        match self.station() {
-            Some(location) => location.center() + Vec3::Y * 2.2,
-            None => self.anchor() + Vec3::Y * 1.4,
+        match self {
+            Console::Launch | Console::Stats => self.anchor() + Vec3::Y * 1.4,
+            _ => Spot::Command.center() + Vec3::Y * 2.2,
         }
     }
 
@@ -143,11 +133,11 @@ pub fn console_at(click: Vec2, spots: impl IntoIterator<Item = (Console, Vec2)>,
         .map(|(console, _)| console)
 }
 
-/// The console a click opens when it lands on a station's model at `height` (metres
-/// above the floor). Clicks on the station's platform or the glowing ring it stands on
-/// don't count: those are easy to hit by mistake while aiming at the floor.
-pub fn station_click(location: Location, height: f32) -> Option<Console> {
-    (height > location.platform_top()).then(|| Console::at(location)).flatten()
+/// The console a click opens when it lands on the command station's model at
+/// `height` (metres above the floor). Clicks on its tiered platform don't count: they
+/// are easy to hit by mistake while aiming at the floor.
+pub fn station_click(height: f32) -> Option<Console> {
+    (height > Spot::Command.platform_top()).then_some(Console::Settings)
 }
 
 pub const HOLO: egui::Color32 = egui::Color32::from_rgb(90, 210, 255);
@@ -196,12 +186,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn each_station_has_one_console_and_every_console_a_key() {
-        for console in Console::ALL {
-            if let Some(location) = console.station() {
-                assert_eq!(Console::at(location), Some(console));
-            }
-        }
+    fn every_console_has_a_key() {
         let mut keys: Vec<_> = Console::ALL.iter().filter_map(|console| console.key()).map(|key| key.name()).collect();
         keys.sort_unstable();
         keys.dedup();
@@ -213,12 +198,10 @@ mod tests {
         let spots = [(Console::Settings, Vec2::new(100.0, 100.0)), (Console::History, Vec2::new(160.0, 100.0))];
         assert_eq!(console_at(Vec2::new(140.0, 100.0), spots, 50.0), Some(Console::History));
         assert_eq!(console_at(Vec2::new(400.0, 400.0), spots, 50.0), None);
-        // The main desk's tiered platform (up to 0.35 m) and a station's floor ring
-        // don't open anything; the desk or shelf itself does.
-        assert_eq!(station_click(Location::MainDesk, 0.30), None);
-        assert_eq!(station_click(Location::MainDesk, 0.9), Some(Console::Settings));
-        assert_eq!(station_click(Location::Bookshelf, 0.03), None);
-        assert_eq!(station_click(Location::Bookshelf, 1.2), Some(Console::History));
+        // The command station's tiered platform (up to 0.35 m) opens nothing; the desk
+        // itself opens settings.
+        assert_eq!(station_click(0.30), None);
+        assert_eq!(station_click(0.9), Some(Console::Settings));
         let mut open = OpenConsole::default();
         open.toggle(Console::Chat);
         assert!(open.is(Console::Chat));

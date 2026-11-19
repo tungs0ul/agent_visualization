@@ -103,8 +103,8 @@ fn main() -> AppExit {
         .add_plugins(assets::EmbeddedAssetsPlugin)
         .add_plugins(
             DefaultPlugins
-                // No sound yet: Bevy's audio keeps an output stream open, which keeps
-                // macOS's audio service busy all the time (V2.md phase 0).
+                // No sound at all: an open output stream keeps macOS's audio service
+                // busy (V2.md phase 0), and sounds made other apps' audio crackle.
                 .build()
                 .disable::<bevy::audio::AudioPlugin>()
                 .set(WindowPlugin { primary_window: Some(window::initial_window(saved)), ..default() })
@@ -118,6 +118,7 @@ fn main() -> AppExit {
         .init_resource::<view3d::CameraView>()
         .init_resource::<notify::Toasts>()
         .init_resource::<notify::Bells>()
+        .init_resource::<world3d::Cruise>()
         .init_resource::<usage::Usage>()
         .init_resource::<wins::Wins>()
         .init_resource::<view3d::BrightHolos>()
@@ -145,7 +146,7 @@ fn main() -> AppExit {
                 (receive_events, chat::dev_chat, chat::read_chats, end_dead_sessions),
                 settle_permissions,
                 hud::title,
-                (view3d::sync, view3d::teleporter, view3d::deliver, view3d::links, view3d::context_tank, view3d::celebrate, world3d::daylight, view3d::activity_holograms, view3d::light_trails, hud::trace, view3d::camera_input, view3d::frame).chain(),
+                (view3d::sync, view3d::teleporter, view3d::deliver, view3d::links, view3d::context_tank, view3d::celebrate, world3d::daylight, world3d::cruise, view3d::activity_holograms, view3d::light_trails, hud::trace, view3d::camera_input, view3d::frame).chain(),
                 pace_updates,
                 log_frame_rate.run_if(|| std::env::var_os("AGENT_ROOM_FPS_LOG").is_some()),
                 window::take_screenshots,
@@ -234,7 +235,7 @@ fn receive_events(
             }
             _ => {}
         }
-        // A toast (and a sound) for what matters, from sessions the user works in.
+        // A toast for what matters, from sessions the user works in.
         if !internal_helper && let Some(session) = model.session(&event.session_id).filter(|session| !session.headless) {
             let project = (model.live().len() > 1).then(|| session.name());
             if let Some((kind, text)) = notify::notice(&event, project.as_deref()) {
@@ -242,7 +243,7 @@ fn receive_events(
                 if kind == notify::Kind::Waiting && prefs.notify && !window.focused {
                     notify::system_notification(&text);
                 }
-                toasts.push(kind, text, prefs.sound);
+                toasts.push(kind, text);
             }
             // "Tell me when done": the user asked to hear when this session goes idle.
             if let Some(text) = bells.ring(&event, &session.name()) {
@@ -255,7 +256,7 @@ fn receive_events(
                     Some(project) => format!("{project} · {who}: {}", win.text()),
                     None => format!("{who}: {}", win.text()),
                 };
-                toasts.push(notify::Kind::Win, text, prefs.sound);
+                toasts.push(notify::Kind::Win, text);
             }
         }
         // Where everyone works (PLAN.md M4d): the session's repo from its cwd, each

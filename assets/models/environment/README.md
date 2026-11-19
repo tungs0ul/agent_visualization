@@ -4,9 +4,9 @@
 glTF Y-up, metres, origin = room centre at floor level, floor top at y = 0, front (+Z) open.
 
 - `floor.glb` (node `Floor`): titanium floor panels with chamfered seams, a polished centre disc
-  with a hexagon inlay, LED lines, and flush docking rings at the five workstation spots
-  (main (0, 0) r 2.4; bookshelf (-4.2, -3.4), lab (4.4, -3.4), file desk (-5.8, 1.2),
-  writing desk (5.8, 1.2), r 1.3). Materials: Floor, FloorAlt, Seam, Pad, Metal, Graphite,
+  with a hexagon inlay, LED lines, and flush docking rings under the starship bridge's
+  command station ((0, -3.6) r 2.4) and its eight crew desks (r 1.3, `DESKS` in
+  `environment.py` and `world3d.rs`). Materials: Floor, FloorAlt, Seam, Pad, Metal, Graphite,
   GlowCyan, GlowPurple, GlowOrange.
 - `shell.glb` (nodes Walls, Glass, Door, Holo, Racks, Pillars, Plants): curved back/side walls,
   4.5 m high. The back wall is at z = -6.95 with a panoramic window over x -7.5..7.5

@@ -327,10 +327,6 @@ fn settings(
     if row(ui, "Auto-accept", "A", auto.0, "Allow permission requests without asking. Risky commands like rm -rf or git push still ask.") {
         auto.0 = !auto.0;
     }
-    if row(ui, "Sound", "", prefs.sound, "Notification sounds; off plays nothing at all") {
-        prefs.sound = !prefs.sound;
-        prefs.save();
-    }
     if row(ui, "Notifications", "", prefs.notify, "A macOS notification when Claude needs you and this window isn't in front") {
         prefs.notify = !prefs.notify;
         prefs.save();
@@ -968,9 +964,6 @@ fn ago(secs: u64) -> String {
 /// UI choices remembered across starts, in `~/.agent-room/ui.json`.
 #[derive(Resource, serde::Serialize, serde::Deserialize)]
 pub struct PanelPrefs {
-    /// Notification sounds (on by default, the user's choice; off plays nothing).
-    #[serde(default = "yes")]
-    pub sound: bool,
     /// A macOS notification when Claude needs you and the window isn't in front.
     #[serde(default = "yes")]
     pub notify: bool,
@@ -982,7 +975,7 @@ fn yes() -> bool {
 
 impl Default for PanelPrefs {
     fn default() -> Self {
-        Self { sound: true, notify: true }
+        Self { notify: true }
     }
 }
 

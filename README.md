@@ -90,13 +90,17 @@ After pulling new changes, run `scripts/install-dev.sh` again and restart `agent
 - The window starts in the bottom-right corner, always on top. Move and resize it
   freely; it remembers where it was.
 - **F** full screen, **Esc** leave full screen, **P** toggle always-on-top.
-- The stations are the controls. Click the **main desk** (or its sign, or press **S**)
-  for settings: full screen, always on top, auto-accept, sound, stats, mini view.
-  Click the **bookshelf** (**L**) for the history log, and the **research console**
-  (**C**) to chat with Claude. The **writing desk** (**D**) shows what changed in the
-  session's folder (git diff), the **processing lab** (**R**) its recent commands with
-  their output, the **teleporter** (**O**) starts a new session in a folder, and the
-  **wall screen** (**T**) shows today's numbers. Esc or a click on the floor closes it.
+- The room is a starship bridge. Claude works at the **command station** by the
+  window; sub-agents take the crew desks in front of it. The stars stream past while
+  anyone works and stand still when all are idle.
+- The command station is the control panel. Its sign has a button for each console:
+  **Settings** (**S**: full screen, always on top, auto-accept, notifications, mini
+  view; a click on the station opens it too), **History** (**L**), **Chat** (**C**),
+  **Changes** (**D**, git diff of the session's folder) and **Commands** (**R**, recent
+  commands with their output). The **teleporter** (**O**) starts a new session in a
+  folder, and the **wall screen** (**T**) shows today's numbers. Esc or a click on the
+  floor closes a console.
+- The app makes no sound.
 - **Chat:** answers stream in as Claude writes, each tool step shows with ✔ or ✖,
   **Stop** ends the turn (not the session), and you can switch the model and the
   permission mode. Resumed sessions show their earlier conversation; several sessions
