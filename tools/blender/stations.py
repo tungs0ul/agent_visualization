@@ -782,70 +782,81 @@ def strip_along(points, z, width, height, material, closed=True, out=0.0):
             rot=(0, 0, math.degrees(math.atan2(dy, dx))))
 
 
+def rrect(length, width, r, n=8):
+    """Top-view outline of a rounded rectangle, counter-clockwise."""
+    pts = []
+    for cx, cy, a0 in ((length / 2 - r, -width / 2 + r, -90), (length / 2 - r, width / 2 - r, 0),
+                       (-length / 2 + r, width / 2 - r, 90), (-length / 2 + r, -width / 2 + r, 180)):
+        for i in range(n + 1):
+            a = math.radians(a0 + 90 * i / n)
+            pts.append((cx + r * math.cos(a), cy + r * math.sin(a)))
+    return pts
+
+
 def build_desk_console():
-    """The crew desk: a white stadium console with a concave operator edge, rounded end
-    caps with amber light slits, one centre pedestal (no drawers), a cyan underglow,
-    a front lip LED, a holo projector bar and dark holographic screens over it."""
+    """The crew desk, after the target's desk pods (crops 07, 08): a thick white
+    rounded slab with a dark glass top and a cyan line under its front edge, raised
+    white arms at the back corners joined by a graphite projector bar (the hologram
+    rises from it), two white pedestal blocks, a lit keyboard, two amber pads, touch
+    dials, a small tablet and a plant. The screens are painted by the app
+    (`screens.rs` `SCREENS`); only their emitters are modelled."""
     floor_disc(0, -0.3, 1.45)
     top = DESK_TOP
-    outline = stadium(DESK_L, DESK_W)
-    # tabletop slab and its dark glass inset
-    prism(outline, top - DESK_SLAB, top, "Panel", bevel=0.006, segs=3)
-    prism(stadium(DESK_L - 0.1, DESK_W - 0.1, concave=True), top - 0.006, top + 0.0005, "DeskGlass")
-    # underside: dark, with a cyan underglow strip 3 cm in from the edge, facing down
-    prism(stadium(DESK_L - 0.02, DESK_W - 0.02), top - DESK_SLAB - 0.004, top - DESK_SLAB, "PanelDark")
-    strip_along(stadium(DESK_L - 0.06, DESK_W - 0.06), top - DESK_SLAB - 0.006, 0.012, 0.004, "GlowCyanT2")
-    # front lip LED just under the concave edge
-    front = outline[:25]
-    strip_along(front, top - DESK_SLAB + 0.012, 0.004, 0.006, "GlowCyanT2", closed=False, out=0.003)
-    half = DESK_L / 2 - DESK_W / 2
-    r = DESK_W / 2
+    L, W, T = DESK_L, DESK_W, 0.12
+    # slab: white, rounded, with a dark glass inset on top
+    prism(rrect(L, W, 0.14), top - T, top, "Panel", bevel=0.012, segs=3)
+    prism(rrect(L - 0.12, W - 0.16, 0.09), top - 0.004, top + 0.002, "DeskGlass")
+    # silver trim line round the slab's side, and the cyan line under the front edge
+    strip_along(rrect(L + 0.004, W + 0.004, 0.14), top - T * 0.3, 0.006, 0.006, "Trim")
+    box((0, -W / 2 - 0.002, top - T * 0.62), (L - 0.36, 0.004, 0.008), "GlowCyanT2")
+    box((0, -W / 2 + 0.03, top - T - 0.004), (L - 0.4, 0.012, 0.006), "GlowCyanT2")
+    strip_along(rrect(L - 0.06, W - 0.06, 0.1), top - T - 0.006, 0.01, 0.004, "GlowCyanT2")
+    # back arms: raised white blocks on the back corners with an amber slit, joined by
+    # the projector bar the main hologram rises from
+    by = W / 2 - 0.09
     for sx in (-1, 1):
-        # rounded end-cap pod, floor to tabletop, following the stadium end
-        a0, a1 = (-80, 80) if sx > 0 else (100, 260)
-        with at((sx * half, 0, 0)):
-            bm = revolve([(r - 0.29, 0.0), (r - 0.01, 0.0), (r - 0.01, top - DESK_SLAB), (r - 0.29, top - DESK_SLAB)],
-                         segs=20, a0=90 - a1, a1=90 - a0)
-            part(bm, "Panel", bevel=0.005, segs=2)
-            # recessed vertical amber light slit on the outer face
-            box((sx * (r - 0.004), 0, 0.42), (0.012, 0.05, 0.3), "PanelDark")
-            box((sx * (r - 0.0), 0, 0.42), (0.006, 0.04, 0.28), "GlowAmberT2")
-            # kick plate
-            bm = revolve([(r - 0.28, 0.0), (r - 0.005, 0.0), (r - 0.005, 0.06), (r - 0.28, 0.06)],
-                         segs=20, a0=90 - a1, a1=90 - a0)
-            part(bm, "DeskGlass")
-    # centre pedestal, set back 15 cm from the front edge: grooves, a vent grille, kick plate
-    py = -r + 0.15 + 0.225 + 0.08
-    box((0, py, (top - DESK_SLAB) / 2), (1.2, 0.45, top - DESK_SLAB), "Panel", bevel=0.06, segs=4)
-    for z in (0.3, 0.46):
-        box((0, py - 0.226, z), (1.12, 0.006, 0.004), "PanelDark")
-    for i in range(10):
-        box((-0.18 + i * 0.04, py - 0.226, 0.17), (0.016, 0.006, 0.07), "PanelDark")
-    box((0, py, 0.03), (1.16, 0.43, 0.06), "DeskGlass")
-    # holo projector bar along the back edge: dark metal, emissive top
-    by = r - 0.07
-    box((0, by, top + 0.015), (1.6, 0.05, 0.03), "Graphite", bevel=0.006)
-    box((0, by, top + 0.031), (1.56, 0.03, 0.003), "GlowCyanT3")
-    # keyboard with a key grid, touch pad, buttons, tablet
-    with at((0, -0.2, top), (4, 0, 0)):
-        box((0, 0, 0.007), (0.45, 0.15, 0.012), "Graphite", bevel=0.004)
+        x = sx * (L / 2 - 0.16)
+        box((x, by, top + 0.08), (0.32, 0.19, 0.16), "Panel", bevel=0.06, segs=5)
+        box((x + sx * 0.161, by, top + 0.08), (0.004, 0.1, 0.02), "GlowAmberT2")
+        box((x, by - 0.096, top + 0.1), (0.2, 0.004, 0.012), "GlowCyanT2")
+        # the lens the side hologram rises from
+        box((x, by, top + 0.1605), (0.18, 0.06, 0.003), "GlowCyanT3")
+    box((0, by, top + 0.025), (L - 0.58, 0.06, 0.05), "Graphite", bevel=0.008)
+    box((0, by, top + 0.0505), (L - 0.64, 0.024, 0.003), "GlowCyanT3")
+    # pedestals: white blocks under each end, a groove, a vent and a status light;
+    # a dark modesty panel between them
+    for sx in (-1, 1):
+        x = sx * (L / 2 - 0.36)
+        h = top - T
+        box((x, 0.02, h / 2), (0.5, W - 0.22, h), "Panel", bevel=0.03, segs=3)
+        box((x, 0.02 - (W - 0.22) / 2 - 0.001, h * 0.62), (0.44, 0.004, 0.006), "PanelDark")
+        for i in range(6):
+            box((x - 0.1 + i * 0.04, 0.02 - (W - 0.22) / 2 - 0.001, h * 0.3), (0.018, 0.004, 0.08), "PanelDark")
+        box((x + 0.17, 0.02 - (W - 0.22) / 2 - 0.002, h * 0.85), (0.04, 0.004, 0.008), "GlowCyanT2")
+        box((x, 0.02, 0.02), (0.46, W - 0.26, 0.04), "DeskGlass")
+    box((0, 0.22, (top - T) / 2 + 0.05), (L - 1.2, 0.03, top - T - 0.1), "PanelDark")
+    # keyboard with a lit key grid
+    with at((0.05, -0.12, top), (3, 0, 0)):
+        box((0, 0, 0.008), (0.5, 0.17, 0.014), "Graphite", bevel=0.004)
         for row in range(4):
-            for col in range(15):
-                box((-0.196 + col * 0.028, -0.048 + row * 0.032, 0.016), (0.014 * 1.5, 0.014 * 1.5, 0.005), "Keys",
+            for col in range(17):
+                box((-0.224 + col * 0.028, -0.055 + row * 0.035, 0.0175), (0.021, 0.021, 0.005), "Keys",
                     bevel=0.0015, segs=1)
-    box((0.34, -0.2, top + 0.003), (0.12, 0.09, 0.004), "DeskGlass")
-    for dx, dy, sx_, sy_ in ((0, 0.045, 0.12, 0.003), (0, -0.045, 0.12, 0.003), (0.06, 0, 0.003, 0.09), (-0.06, 0, 0.003, 0.09)):
-        box((0.34 + dx, -0.2 + dy, top + 0.006), (sx_, sy_, 0.002), "GlowCyanT2")
-    for i, m in enumerate(("GlowAmberT2", "GlowPinkT2", "GlowWhiteT2", "GlowAmberT2", "GlowPinkT2")):
-        disc((-0.33 + i * 0.03, -0.24, top), 0.006, 0.0, 0.006, m, segs=12)
-    with at((-0.6, -0.17, top + 0.01), (12, 0, 14)):
-        box((0, 0, 0), (0.18, 0.12, 0.008), "Graphite", bevel=0.003)
-        box((0, 0, 0.0045), (0.16, 0.1, 0.001), "HoloScreenDim")
-    # Holographic screens (a wide main one rising from the projector bar, two side
-    # panels angled 28° in) are painted by the app (`screens.rs` `SCREENS`); only
-    # their emitters are modelled.
-    holo_emitter((-0.98, by - 0.16, top), 0.36, yaw=28)
-    holo_emitter((0.98, by - 0.16, top), 0.36, yaw=-28)
+    # two amber pads on the left, a small cyan tablet, touch dials and buttons on the right
+    for i in range(2):
+        with at((-0.62 + i * 0.16, -0.14, top + 0.004), (0, 0, 4)):
+            box((0, 0, 0), (0.14, 0.09, 0.006), "Graphite", bevel=0.002)
+            box((0, 0, 0.0035), (0.12, 0.07, 0.002), "GlowAmberT2")
+    with at((-0.78, 0.08, top + 0.01), (14, 0, 10)):
+        box((0, 0, 0), (0.15, 0.1, 0.008), "Graphite", bevel=0.003)
+        box((0, 0, 0.0045), (0.13, 0.08, 0.001), "HoloScreenDim")
+    for i, dx in enumerate((0.42, 0.54)):
+        disc((dx, -0.13, top), 0.04, 0.0, 0.012, "Graphite", segs=24, bevel=0.003)
+        ring((dx, -0.13, top), 0.03, 0.034, 0.012, 0.014, "GlowCyanT2" if i == 0 else "GlowPinkT2", segs=24)
+    for i, m in enumerate(("GlowCyanT2", "GlowWhiteT2", "GlowAmberT2", "GlowCyanT2")):
+        box((0.66 + i * 0.03, -0.1, top + 0.004), (0.02, 0.02, 0.006), m, bevel=0.002)
+    box((0.66 + 0.045, -0.16, top + 0.003), (0.12, 0.05, 0.004), "DeskGlass")
+    potted_plant((0.78, 0.12, top), scale=0.32, seed=17, leaves=12)
 
 
 # ---------------------------------------------------------------- activity holograms

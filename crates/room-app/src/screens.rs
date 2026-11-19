@@ -12,11 +12,11 @@ use crate::world3d::{DESKS, Kit, Spot};
 /// Where a desk's screens are, relative to the desk centre (glTF space), their size,
 /// yaw and tilt in degrees. Keep in step with `stations.py` `build_desk_console`.
 const SCREENS: [(Vec3, Vec2, f32, f32); 3] = [
-    // the main screen's lower edge sits on the projector bar (top 0.81 m)
-    (Vec3::new(0.0, 1.2, -0.355), Vec2::new(1.5, 0.75), 0.0, -6.0),
-    // side panels float a few cm over their emitters at the desk ends
-    (Vec3::new(-0.98, 1.1, -0.195), Vec2::new(0.36, 0.54), 28.0, -4.0),
-    (Vec3::new(0.98, 1.1, -0.195), Vec2::new(0.36, 0.54), -28.0, -4.0),
+    // the main screen's lower edge sits on the projector bar (top 0.83 m)
+    (Vec3::new(0.0, 1.21, -0.335), Vec2::new(1.5, 0.75), 0.0, -6.0),
+    // side panels float a few cm over the lenses on the back arms (top 0.94 m)
+    (Vec3::new(-0.94, 1.24, -0.3), Vec2::new(0.36, 0.54), 28.0, -4.0),
+    (Vec3::new(0.94, 1.24, -0.3), Vec2::new(0.36, 0.54), -28.0, -4.0),
 ];
 
 /// The big illustrations a main screen can show.

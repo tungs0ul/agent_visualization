@@ -2233,3 +2233,14 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   towards the sun). The ringed gas giant is replaced by a small cratered moon,
   rim-lit from the right. The old noise sphere, its glow billboard and the ring are gone.
   Not yet seen in the app: the Mac was locked (the app renders black then).
+- 2026-11-19, Claude Opus 5.5: user picked target crops 07 and 08 ("Ok 2 cái này nhìn
+  đc"). The crew desk is rebuilt after them (`stations.py` `build_desk_console`,
+  `rrect`): a 12 cm white rounded slab with a dark glass top, a silver trim line, a
+  cyan line on the front face and under the front edge, raised white arms on the back
+  corners (amber slit, cyan lens the side hologram rises from) joined by the
+  graphite projector bar, two white pedestal blocks with a groove, vent and status
+  light, a dark modesty panel, a lit 17-key-wide keyboard, two amber pads, a cyan
+  tablet, two touch dials, four buttons and a small plant. `screens::SCREENS`: main
+  at 1.21 m over the bar, sides at x ±0.94, 1.24 m over the arms. Activity holograms
+  float at 1.92 m (was 2.15). Preview (local): baseline/p05_desk.png. Not yet seen in
+  the app (Mac locked).
