@@ -659,10 +659,13 @@ def blackhole():
 
 
 SUBJECTS = dict(crate=crate, rocket=rocket, planet=planet, sun=sun, station=station, ship=ship, blackhole=blackhole)
-lean, turn = SUBJECTS[SUBJECT]()
+angles = SUBJECTS[SUBJECT]()
+if os.environ.get("HOLO_ANGLES"):           # try other angles: "lean,turn,roll"
+    angles = tuple(float(v) for v in os.environ["HOLO_ANGLES"].split(","))
+lean, turn, roll = (tuple(angles) + (0.0,))[:3]
 pivot.location = crate_c
-pivot.rotation_mode = "ZYX"   # spin about the vertical first, then lean toward the viewer
-pivot.rotation_euler = (math.radians(lean), 0, math.radians(turn))
+pivot.rotation_mode = "ZYX"   # spin about the vertical first, then lean toward the viewer, then roll
+pivot.rotation_euler = (math.radians(lean), math.radians(roll), math.radians(turn))
 
 # platform rings under the crate, on the glass plane
 for r, mat, wd in ((0.27, M_EDGE, 0.006), (0.34, M_LINE_DIM, 0.003), (0.2, M_LINE, 0.003)):
