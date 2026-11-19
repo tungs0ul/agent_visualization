@@ -598,6 +598,11 @@ fn chat_console(ui: &mut egui::Ui, chat: &mut Desk, markdown: &mut MarkdownCache
             .auto_shrink(false)
             .max_height((ui.available_height() - input_height).max(140.0))
             .show(ui, |ui| {
+                // Reading text: near-white on the dark panel (egui's dark default is
+                // mid-grey), with room between lines.
+                let style = ui.style_mut();
+                style.visuals.override_text_color = Some(egui::Color32::from_gray(232));
+                style.spacing.item_spacing.y = 6.0;
                 for entry in &session.transcript {
                     chat_entry(ui, entry, markdown);
                 }

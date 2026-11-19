@@ -166,7 +166,7 @@ pub fn hologram(ctx: &egui::Context, console: Console, spot: egui::Pos2, add: im
         .order(egui::Order::Foreground)
         .show(ctx, |ui| {
             egui::Frame::new()
-                .fill(egui::Color32::from_rgba_unmultiplied(6, 22, 40, 246))
+                .fill(egui::Color32::from_rgb(6, 22, 40))
                 .stroke(egui::Stroke::new(1.0, HOLO))
                 .corner_radius(8.0)
                 .inner_margin(egui::Margin::same(10))
