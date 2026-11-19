@@ -2288,3 +2288,9 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   only on flat parts); the moon became `planet` (glowing sphere, faint latitude bands, a
   flat streaked ring, a small moon; no orbit circle). User approved and asked to port,
   commit and push: re-baked planet, station, ship; `screens::SUBJECTS` uses planet.png.
+- 2026-11-19, Claude Opus 5.5: the station screen went through a ring station, an
+  ISS-like one (kept as subject `iss`; the user found it fake even with a lattice truss
+  and an Earth horizon, `HOLO_EXTRAS=earth`) and finally one after the user's reference
+  image: a round deck with a glowing rim, a domed hub with amber windows and an amber
+  foot ring, a ring of modules with screens, bridges, two antenna towers and a cargo arm,
+  seen from above (`station`, no ring platform). Approved and baked.
