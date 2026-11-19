@@ -71,11 +71,11 @@ CYAN = (0.0, 0.62, 1.0)
 PURPLE = (0.45, 0.12, 1.0)
 ORANGE = (1.0, 0.38, 0.05)
 MATS = {m.name: m for m in [
-    make_material("Floor", (0.035, 0.05, 0.09), 0.28, metal=0.8),
-    make_material("FloorAlt", (0.07, 0.1, 0.17), 0.22, metal=0.85),
+    make_material("Floor", (0.03, 0.04, 0.07), 0.16, metal=0.9),
+    make_material("FloorAlt", (0.06, 0.08, 0.13), 0.14, metal=0.9),
     make_material("Seam", (0.008, 0.009, 0.012), 0.6, metal=0.3),
     make_material("Pad", (0.02, 0.03, 0.06), 0.18, metal=0.7),
-    make_material("Panel", (0.13, 0.17, 0.27), 0.3, metal=0.5),
+    make_material("Panel", (0.1, 0.13, 0.2), 0.24, metal=0.7),
     make_material("Metal", (0.42, 0.5, 0.62), 0.28, metal=1.0),
     make_material("Graphite", (0.02, 0.03, 0.055), 0.35, metal=0.6),
     make_material("GlowCyan", CYAN, 0.3, emit=CYAN, strength=9.0),

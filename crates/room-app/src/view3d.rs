@@ -162,6 +162,13 @@ pub fn build(
         Bloom { intensity: 0.22, ..Bloom::NATURAL },
         Msaa::Sample4,
         Transform::from_translation(FULL_EYE).looking_at(FULL_LOOK, Vec3::Y),
+        // What polished metal reflects (PLAN.md M29): a generated bridge-like
+        // surround, filtered by Bevy once at start.
+        bevy::light::GeneratedEnvironmentMapLight {
+            environment_map: images.add(crate::space::environment(64)),
+            intensity: 900.0,
+            ..default()
+        },
     ));
     commands.spawn((
         DirectionalLight { illuminance: 2600.0, color: Color::srgb(0.78, 0.88, 1.0), shadow_maps_enabled: true, ..default() },
@@ -664,10 +671,12 @@ pub fn labels(
     if !mode.mini {
         let color = egui::Color32::from_rgb(130, 200, 255);
         let mission = model.shown().and_then(|session| session.prompts.last()).map(|prompt| room_proto::describe::truncate(prompt.trim(), 110));
-        let centre = camera.logical_viewport_rect().map_or(400.0, |rect| rect.center().x);
+        // At the left, level with the bottom of the window, as in the user's reference:
+        // centred it hid the view out.
+        let rect = camera.logical_viewport_rect().unwrap_or(bevy::math::Rect::new(0.0, 0.0, 800.0, 600.0));
         egui::Area::new("command-sign".into())
-            .fixed_pos(egui::pos2(centre, offset.y + 96.0))
-            .pivot(egui::Align2::CENTER_TOP)
+            .fixed_pos(egui::pos2(rect.min.x + rect.width() * 0.2, rect.min.y + rect.height() * 0.3))
+            .pivot(egui::Align2::CENTER_CENTER)
             .order(egui::Order::Middle)
             .show(ctx, |ui| {
                 egui::Frame::new()
@@ -676,7 +685,7 @@ pub fn labels(
                     .corner_radius(6.0)
                     .inner_margin(egui::Margin::symmetric(8, 4))
                     .show(ui, |ui| {
-                        ui.set_max_width(520.0);
+                        ui.set_max_width(360.0);
                         ui.label(egui::RichText::new("✦ Command").strong().color(color));
                         if let Some(mission) = &mission {
                             ui.label(egui::RichText::new(mission).small().color(crate::palette::TEXT));
@@ -853,8 +862,10 @@ pub fn frame(
 }
 
 /// Where the camera looks at the whole workspace from.
-const FULL_EYE: Vec3 = Vec3::new(0.0, 11.0, 13.5);
-const FULL_LOOK: Vec3 = Vec3::new(0.0, 0.0, -0.4);
+/// The camera (PLAN.md M29): lower than before, so the panoramic window shows a big
+/// slice of space above the bridge. `space` places things by this eye.
+pub(crate) const FULL_EYE: Vec3 = Vec3::new(0.0, 9.2, 12.6);
+const FULL_LOOK: Vec3 = Vec3::new(0.0, 0.7, -1.3);
 
 /// The hologram floating beside a robot: a picture of what it is doing right now
 /// (PLAN.md M17, "the holograms are the visualisation of its mind").
@@ -1122,6 +1133,49 @@ pub fn desk_lights(
                 material.emissive = state.glow();
             }
         }
+    }
+}
+
+/// Applies the graphics quality (PLAN.md M29) to the camera and lights, at start
+/// and whenever the setting changes.
+#[allow(clippy::type_complexity)]
+pub fn apply_quality(
+    mut commands: Commands,
+    prefs: Res<crate::ui::PanelPrefs>,
+    camera: Query<Entity, With<RoomCamera3d>>,
+    mut sun: Query<&mut DirectionalLight>,
+    mut lamps: Query<&mut PointLight>,
+    mut done: Local<Option<crate::ui::Quality>>,
+) {
+    use crate::ui::Quality;
+    use bevy::anti_alias::fxaa::Fxaa;
+    use bevy::pbr::ScreenSpaceAmbientOcclusion;
+    let quality = prefs.quality;
+    if *done == Some(quality) {
+        return;
+    }
+    let Ok(camera) = camera.single() else { return };
+    *done = Some(quality);
+    let mut camera = commands.entity(camera);
+    match quality {
+        Quality::Low => {
+            camera.remove::<(Bloom, ScreenSpaceAmbientOcclusion, Fxaa)>().insert(Msaa::Sample2);
+        }
+        Quality::Medium => {
+            camera.remove::<(ScreenSpaceAmbientOcclusion, Fxaa)>().insert((Msaa::Sample4, Bloom { intensity: 0.22, ..Bloom::NATURAL }));
+        }
+        Quality::High => {
+            // Ambient occlusion needs multisampling off; FXAA smooths the edges instead.
+            camera.insert((Msaa::Off, Fxaa::default(), ScreenSpaceAmbientOcclusion::default(), Bloom { intensity: 0.25, ..Bloom::NATURAL }));
+        }
+    }
+    for mut light in &mut sun {
+        light.shadow_maps_enabled = quality != Quality::Low;
+    }
+    // The brightest lamp (the core's) casts shadows on High only.
+    let brightest = lamps.iter().map(|lamp| lamp.intensity).fold(0.0, f32::max);
+    for mut lamp in &mut lamps {
+        lamp.shadow_maps_enabled = quality == Quality::High && lamp.intensity >= brightest;
     }
 }
 

@@ -299,8 +299,8 @@ fn command_core(kit: &mut Kit, command: Vec3) {
     const HEIGHT: f32 = 2.4;
     let base = command.y + 0.38;
     let glass = kit.materials.add(StandardMaterial {
-        base_color: Color::srgba(0.2, 0.7, 1.0, 0.05),
-        emissive: LinearRgba::rgb(0.02, 0.12, 0.28),
+        // Unlit: the base colour is what shows, added onto what is behind.
+        base_color: Color::LinearRgba(LinearRgba::rgb(0.02, 0.1, 0.24)),
         alpha_mode: AlphaMode::Add,
         double_sided: true,
         cull_mode: None,
@@ -326,89 +326,19 @@ fn desk_glow(index: usize) -> LinearRgba {
     ][index % 4]
 }
 
-/// A star outside: it streams past while the ship flies (`cruise`). `along` goes from
-/// 1 (far away) to 0 (just outside the window); `across` and `up` place it in the
-/// window (see [`star_spot`]).
-#[derive(Component)]
-pub struct Star {
-    along: f32,
-    across: f32,
-    up: f32,
-}
-
-/// How fast the stars stream past (metres per second), ramping up and down.
-#[derive(Resource, Default)]
-pub struct Cruise {
-    speed: f32,
-}
-
-/// Top speed while agents work, and how quickly the ship gets there or stops.
-const CRUISE_SPEED: f32 = 9.0;
-const CRUISE_RAMP: f32 = 6.0;
-/// Stars fly from `FAR` to `NEAR` (z), then start over far away. 400 tiny spheres
-/// share one mesh and material, and move only while the ship flies.
-const STARS: usize = 400;
-const FAR: f32 = -70.0;
-const NEAR: f32 = -15.0;
-
-/// The ship flies while any session works and stops when all are idle (PLAN.md M27):
-/// stars stream towards the window, stretched with speed. Still stars cost nothing,
-/// so the view can doze as before.
-pub fn cruise(
-    time: Res<Time>,
-    model: Res<crate::model::Model>,
-    mut cruise: ResMut<Cruise>,
-    mut view: ResMut<crate::view3d::View3d>,
-    mut stars: Query<(&mut Star, &mut Transform)>,
-) {
-    let working = model.live().iter().any(|session| session.is_busy());
-    let goal = if working { CRUISE_SPEED } else { 0.0 };
-    let dt = time.delta_secs().min(0.1);
-    let before = cruise.speed;
-    cruise.speed += (goal - cruise.speed).clamp(-CRUISE_RAMP * dt, CRUISE_RAMP * dt);
-    if cruise.speed == 0.0 && before == 0.0 {
-        return;
-    }
-    if cruise.speed != goal {
-        view.moving = true;
-    }
-    // Short streaks along the way each star moves: long ones read as rain.
-    let stretch = 1.0 + cruise.speed * 0.5;
-    for (mut star, mut at) in &mut stars {
-        star.along -= cruise.speed * dt / (NEAR - FAR);
-        // Flown past: start over far away.
-        if star.along < 0.0 {
-            star.along += 1.0;
-        }
-        let next = star_spot(star.along, star.across, star.up);
-        let heading = next - at.translation;
-        at.translation = next;
-        if heading.length_squared() > 1e-8 && heading.length() < 5.0 {
-            at.look_to(heading, Vec3::Y);
-        }
-        at.scale.z = at.scale.x * stretch;
-    }
-}
-
-/// A star's place: `along` 1 is far away, 0 just outside the window; `across` and `up`
-/// (0..1) are where on the panoramic window (glass y 0.5..3.95 at z -6.95, x
-/// -7.5..7.5) the camera sees it. Far stars gather near the window's centre and
-/// spread out as they come closer, so flying forward looks like a warp.
-fn star_spot(along: f32, across: f32, up: f32) -> Vec3 {
-    const EYE: Vec3 = Vec3::new(0.0, 11.0, 13.5);
-    const GLASS_Z: f32 = -6.95;
-    let z = NEAR + (FAR - NEAR) * along;
-    let reach = (EYE.z - z) / (EYE.z - GLASS_Z);
-    let spread = 0.35 + 1.4 * (1.0 - along);
-    let glass_y = 2.2 + (up - 0.5) * 4.0 * spread;
-    let glass_x = (across - 0.5) * 16.0 * spread;
-    Vec3::new(glass_x * reach, EYE.y + (glass_y - EYE.y) * reach, z)
-}
-
 /// Stars and a planet outside the panoramic window.
 fn sky(kit: &mut Kit) {
-    let star = kit.meshes.add(Sphere::new(0.04));
-    let bright = kit.glow(LinearRgba::rgb(3.0, 3.2, 4.0));
+    // Still stars (the user: "we dont need to move the star, i just want it to look
+    // real"): many tiny points, most faint, a few bright and bluish or warm, spread
+    // deep behind the window where the camera sees them through the glass.
+    let star = kit.meshes.add(Sphere::new(1.0).mesh().ico(1).unwrap());
+    let tiers = [
+        (kit.glow(LinearRgba::rgb(0.9, 0.95, 1.1)), 0.012, 0.70),
+        (kit.glow(LinearRgba::rgb(2.2, 2.4, 3.0)), 0.018, 0.25),
+        (kit.glow(LinearRgba::rgb(6.0, 6.5, 9.0)), 0.026, 0.04),
+        (kit.glow(LinearRgba::rgb(7.0, 5.5, 3.5)), 0.026, 0.01),
+    ];
+    let bright = tiers[1].0.clone();
     let mut seed = 0x2545_F491_u32;
     let mut next = move || {
         seed ^= seed << 13;
@@ -416,15 +346,21 @@ fn sky(kit: &mut Kit) {
         seed ^= seed << 5;
         (seed % 10_000) as f32 / 10_000.0
     };
-    for _ in 0..STARS {
-        let (along, across, up) = (next(), next(), next());
-        let at = star_spot(along, across, up);
-        let size = 0.6 + next() * 1.8;
+    for _ in 0..900 {
+        let pick = next();
+        let mut sum = 0.0;
+        let (material, size, _) = tiers
+            .iter()
+            .find(|(_, _, share)| {
+                sum += share;
+                pick <= sum
+            })
+            .unwrap_or(&tiers[0]);
+        let (at, reach) = crate::space::through_window(-9.0 + next() * 18.0, 0.2 + next() * 4.2, -40.0 - next() * 140.0);
         kit.commands.spawn((
-            Star { along, across, up },
             Mesh3d(star.clone()),
-            MeshMaterial3d(bright.clone()),
-            Transform::from_translation(at).with_scale(Vec3::splat(size)),
+            MeshMaterial3d(material.clone()),
+            Transform::from_translation(at).with_scale(Vec3::splat(size * reach * (0.7 + next() * 0.6))),
         ));
     }
     // The sun, shown by day (`daylight`); placed where the high camera sees it

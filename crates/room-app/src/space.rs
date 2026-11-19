@@ -12,7 +12,7 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use crate::world3d::Kit;
 
 /// Camera and window, to place things where the camera sees them through the glass.
-const EYE: Vec3 = Vec3::new(0.0, 11.0, 13.5);
+const EYE: Vec3 = crate::view3d::FULL_EYE;
 const GLASS_Z: f32 = -6.95;
 
 /// A point on the window (glass x -7.5..7.5, y 0.5..3.95) carried on along the
@@ -124,9 +124,8 @@ fn planet(kit: &mut Kit, images: &mut Assets<Image>, at: Vec3, radius: f32, look
 /// A flat additive picture facing the camera.
 fn billboard(kit: &mut Kit, texture: &Handle<Image>, at: Vec3, size: f32, color: LinearRgba) {
     let material = kit.materials.add(StandardMaterial {
-        base_color: Color::BLACK,
-        emissive: color,
-        emissive_texture: Some(texture.clone()),
+        // Unlit: the base colour is what shows (emissive is ignored).
+        base_color: Color::LinearRgba(color),
         base_color_texture: Some(texture.clone()),
         alpha_mode: AlphaMode::Add,
         unlit: true,
@@ -237,4 +236,64 @@ fn rim_texture(size: u32) -> Image {
         }
     }
     image(size, size, pixels)
+}
+
+/// The surround polished metal reflects (a cubemap, 6 faces of `size`): dark navy, a
+/// cyan band at the height of the wall light strips, a bright reactor overhead, and
+/// the window's blue planet glow ahead.
+pub fn environment(size: u32) -> Image {
+    use bevy::render::render_resource::{TextureViewDescriptor, TextureViewDimension};
+    let mut pixels = Vec::with_capacity((size * size * 6 * 8) as usize);
+    for face in 0..6 {
+        for y in 0..size {
+            for x in 0..size {
+                let (u, v) = ((x as f32 + 0.5) / size as f32 * 2.0 - 1.0, (y as f32 + 0.5) / size as f32 * 2.0 - 1.0);
+                // The usual cubemap face order: +x, -x, +y, -y, +z, -z.
+                let dir = match face {
+                    0 => Vec3::new(1.0, -v, -u),
+                    1 => Vec3::new(-1.0, -v, u),
+                    2 => Vec3::new(u, 1.0, v),
+                    3 => Vec3::new(u, -1.0, -v),
+                    4 => Vec3::new(u, -v, 1.0),
+                    _ => Vec3::new(-u, -v, -1.0),
+                }
+                .normalize();
+                let mut rgb = Vec3::new(0.012, 0.02, 0.045);
+                // Wall light strips all round.
+                let band = (1.0 - ((dir.y - 0.12).abs() / 0.05)).clamp(0.0, 1.0);
+                rgb += Vec3::new(0.1, 0.55, 1.0) * band * 2.5;
+                // The reactor straight above.
+                rgb += Vec3::new(0.3, 0.7, 1.2) * ((dir.y - 0.9) / 0.1).clamp(0.0, 1.0) * 4.0;
+                // The window ahead (-z), lit by the blue planet.
+                if dir.z < -0.6 && dir.y > -0.05 && dir.y < 0.45 {
+                    rgb += Vec3::new(0.05, 0.18, 0.45) * ((-dir.z - 0.6) / 0.4);
+                }
+                for channel in [rgb.x, rgb.y, rgb.z, 1.0] {
+                    pixels.extend_from_slice(&f16_bits(channel).to_le_bytes());
+                }
+            }
+        }
+    }
+    let mut image = Image::new(
+        Extent3d { width: size, height: size, depth_or_array_layers: 6 },
+        TextureDimension::D2,
+        pixels,
+        TextureFormat::Rgba16Float,
+        RenderAssetUsages::RENDER_WORLD,
+    );
+    image.texture_view_descriptor = Some(TextureViewDescriptor { dimension: Some(TextureViewDimension::Cube), ..Default::default() });
+    image
+}
+
+/// A small non-negative float as half-precision bits (no infinities or NaNs here).
+fn f16_bits(value: f32) -> u16 {
+    let bits = value.max(0.0).to_bits();
+    let exponent = ((bits >> 23) & 0xFF) as i32 - 127 + 15;
+    if exponent <= 0 {
+        return 0;
+    }
+    if exponent >= 31 {
+        return 0x7BFF;
+    }
+    ((exponent as u16) << 10) | ((bits >> 13) & 0x3FF) as u16
 }

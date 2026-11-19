@@ -365,10 +365,18 @@ fn settings(
         prefs.notify = !prefs.notify;
         prefs.save();
     }
-    if row(ui, "Effects", "", prefs.effects, "Lightning, energy pulses and particles while agents work; off saves power") {
-        prefs.effects = !prefs.effects;
-        prefs.save();
-    }
+    // Graphics quality (PLAN.md M29): how much the room costs to draw.
+    ui.horizontal(|ui| {
+        ui.label("Graphics");
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            for quality in [Quality::High, Quality::Medium, Quality::Low] {
+                if ui.selectable_label(prefs.quality == quality, quality.name()).on_hover_text(quality.hint()).clicked() {
+                    prefs.quality = quality;
+                    prefs.save();
+                }
+            }
+        });
+    });
     ui.add_space(4.0);
     if ui.button("Mini widget view (M)").clicked() {
         toggle_mini.write(ToggleMini);
@@ -1005,9 +1013,45 @@ pub struct PanelPrefs {
     /// A macOS notification when Claude needs you and the window isn't in front.
     #[serde(default = "yes")]
     pub notify: bool,
-    /// The ship's energy effects: lightning, pulses, particles (PLAN.md M29).
-    #[serde(default = "yes")]
-    pub effects: bool,
+    /// How much the room costs to draw (PLAN.md M29).
+    #[serde(default)]
+    pub quality: Quality,
+}
+
+/// Graphics quality: Low is cheapest, High the most cinematic. The room dozes when
+/// idle at every level; this sets what each drawn frame costs.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub enum Quality {
+    /// No glow, no energy effects, no shadows, light anti-aliasing.
+    Low,
+    /// Glow, energy effects while agents work, the key light's shadows.
+    #[default]
+    Medium,
+    /// Also ambient occlusion (soft contact shadows) and shadows from the core's light.
+    High,
+}
+
+impl Quality {
+    pub fn name(self) -> &'static str {
+        match self {
+            Quality::Low => "Low",
+            Quality::Medium => "Medium",
+            Quality::High => "High",
+        }
+    }
+
+    fn hint(self) -> &'static str {
+        match self {
+            Quality::Low => "Cheapest: no glow, no lightning or pulses, no shadows",
+            Quality::Medium => "Glow, lightning and pulses while agents work, shadows from the key light",
+            Quality::High => "Also soft contact shadows (ambient occlusion) and shadows from the core light; uses more power",
+        }
+    }
+
+    /// Lightning, pulses and particles while agents work.
+    pub fn effects(self) -> bool {
+        self != Quality::Low
+    }
 }
 
 fn yes() -> bool {
@@ -1016,7 +1060,7 @@ fn yes() -> bool {
 
 impl Default for PanelPrefs {
     fn default() -> Self {
-        Self { notify: true, effects: true }
+        Self { notify: true, quality: Quality::default() }
     }
 }
 
@@ -1663,6 +1707,15 @@ mod tests {
     use super::*;
     use crate::chat::Entry;
     use crate::console::{Console, hologram};
+
+    #[test]
+    fn old_settings_load_with_medium_graphics() {
+        let old: PanelPrefs = serde_json::from_str(r#"{"sound":true,"notify":false,"effects":true}"#).unwrap();
+        assert_eq!((old.notify, old.quality), (false, Quality::Medium));
+        let high: PanelPrefs = serde_json::from_str(r#"{"quality":"High"}"#).unwrap();
+        assert!(high.notify && high.quality == Quality::High && high.quality.effects());
+        assert!(!Quality::Low.effects());
+    }
 
     #[test]
     fn the_open_activity_console_keeps_its_height_inside_the_window() {

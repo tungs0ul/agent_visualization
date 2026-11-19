@@ -38,7 +38,7 @@ pub struct Look {
     green: Handle<StandardMaterial>,
 }
 
-/// One discharge: its segments are children; gone when its time is up.
+/// One segment of a discharge; gone when its time is up.
 #[derive(Component)]
 pub struct Bolt {
     left: f32,
@@ -66,6 +66,7 @@ pub struct ReactorRing {
 pub struct Timers {
     core: f32,
     reactor: f32,
+    floor: f32,
     pulses: Vec<f32>,
     /// Each desk's state last frame, to flash on a change.
     desks: Vec<DeskState>,
@@ -86,7 +87,9 @@ impl Timers {
 }
 
 fn additive(materials: &mut Assets<StandardMaterial>, color: LinearRgba) -> Handle<StandardMaterial> {
-    materials.add(StandardMaterial { base_color: Color::BLACK, emissive: color, alpha_mode: AlphaMode::Add, unlit: true, ..default() })
+    // Unlit materials draw their base colour (emissive is ignored), so the glow goes
+    // there; values above 1 feed the bloom.
+    materials.add(StandardMaterial { base_color: Color::LinearRgba(color), alpha_mode: AlphaMode::Add, unlit: true, ..default() })
 }
 
 /// Builds what is always there: the reactor rings with their energy nodes, the beam
@@ -121,8 +124,7 @@ pub fn setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mater
     }
     // The beam: a soft additive column from the core's top to the reactor.
     let beam = materials.add(StandardMaterial {
-        base_color: Color::BLACK,
-        emissive: LinearRgba::rgb(0.15, 0.6, 1.4),
+        base_color: Color::LinearRgba(LinearRgba::rgb(0.06, 0.28, 0.7)),
         alpha_mode: AlphaMode::Add,
         unlit: true,
         double_sided: true,
@@ -188,21 +190,20 @@ fn spawn_bolt(commands: &mut Commands, look: &Look, timers: &mut Timers, a: Vec3
     let mut segments = Vec::new();
     bolt_path(a, b, timers, 5, &mut segments, true);
     let life = BOLT_LIFE.0 + timers.random() * (BOLT_LIFE.1 - BOLT_LIFE.0);
-    let bolt = commands.spawn((Bolt { left: life }, Transform::default(), Visibility::default())).id();
     for (p, q, main) in segments {
         let length = p.distance(q);
         if length < 1e-4 {
             continue;
         }
         let rotation = Quat::from_rotation_arc(Vec3::Z, (q - p) / length);
-        let width = if main { 0.022 } else { 0.012 };
+        let width = if main { 0.045 } else { 0.025 };
         let core = if red { look.red.clone() } else { look.core.clone() };
         for (thickness, material) in [(width, core), (width * 3.5, look.glow.clone())] {
             commands.spawn((
                 Mesh3d(look.segment.clone()),
                 MeshMaterial3d(material),
                 Transform::from_translation((p + q) / 2.0).with_rotation(rotation).with_scale(Vec3::new(thickness, thickness, length)),
-                ChildOf(bolt),
+                Bolt { left: life },
             ));
         }
     }
@@ -246,7 +247,7 @@ pub fn energy(
 ) {
     let Some(look) = look else { return };
     let dt = time.delta_secs().min(0.1);
-    let busy = prefs.effects
+    let busy = prefs.quality.effects()
         && (model.live().iter().any(|session| session.is_busy()) || replay.active.as_ref().is_some_and(|play| play.playing));
     let command = Spot::Command.center();
 
@@ -306,6 +307,17 @@ pub fn energy(
         let b = on_ring(&mut timers, reactor, REACTOR_RADIUS);
         spawn_bolt(&mut commands, &look, &mut timers, a, b, false);
         timers.reactor = 0.5 + timers.random() * 1.2;
+    }
+
+    // The floor crackles round the teleporter, arcs running out along the routes.
+    timers.floor -= dt;
+    if timers.floor <= 0.0 {
+        let pad = crate::world3d::teleporter_spot() + Vec3::Y * 0.06;
+        let a = on_ring(&mut timers, pad, 1.7);
+        let out = (a - pad).normalize_or_zero();
+        let b = a + out * (1.0 + timers.random() * 1.2) + Vec3::Y * 0.02;
+        spawn_bolt(&mut commands, &look, &mut timers, a, b, false);
+        timers.floor = 0.5 + timers.random() * 1.1;
     }
 
     // Desks: a pulse from the core to each working desk now and then; a green pulse

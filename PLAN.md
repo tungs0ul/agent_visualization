@@ -2038,3 +2038,21 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   REPLAY badge below it. Robot details seen earlier ("Seen by Agent Room: 9 tool
   calls", expandable calls). Not seen: the Metrics, Files and Errors tabs, and an
   exported report opening (the report text is unit tested).
+- 2026-11-19, Claude Opus 5.5: M29, starship look (from the user's reference images and
+  two long art briefs). Done and seen on screen: navy steel and gunmetal materials
+  (Blender re-export), cool lighting with cyan and amber point lights, a lower camera
+  so the panoramic window shows a big slice of space, still realistic stars (the user:
+  "we dont need to move the star"; the warp/cruise is gone), a textured cloudy blue
+  planet and a ringed gas giant (`space.rs`, procedural textures), nebula clouds,
+  asteroids, distant ships, the glass command core, a reactor ring with nodes and a
+  beam above it, the command panel at the left above the desks, a generated
+  reflection environment (`space::environment`, `GeneratedEnvironmentMapLight`), and
+  Settings > Graphics: Low / Medium / High (`ui::Quality`, `view3d::apply_quality`;
+  High adds SSAO with FXAA and shadows from the core light; Low drops bloom, effects
+  and shadows). A bug hid every unlit additive material (unlit draws base colour, not
+  emissive); fixed. **Open**: the lightning bolts (`fx.rs`) spawn (logged: ~4 a second
+  while busy) but did not show in any frame, including 250 ms bursts; pulses and core
+  particles were not seen either. Next: find why runtime-spawned fx meshes don't draw
+  (the display slept before the last probe). Not done from the briefs: AAA geometry
+  (detailed walls, ceiling, floor modules), volumetric light, SSR reflections,
+  hologram scanlines; power not measured with the new effects.

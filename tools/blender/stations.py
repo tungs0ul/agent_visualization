@@ -56,9 +56,9 @@ ORANGE = (1.0, 0.38, 0.06)
 PURPLE = (0.55, 0.22, 1.0)
 GREEN = (0.15, 1.0, 0.35)
 MAT_SPECS = {
-    "Panel": dict(color=(0.62, 0.7, 0.82), rough=0.25, metal=0.35),
+    "Panel": dict(color=(0.3, 0.34, 0.43), rough=0.22, metal=0.75),
     "PanelDark": dict(color=(0.025, 0.035, 0.06), rough=0.12, metal=0.2),
-    "Trim": dict(color=(0.3, 0.38, 0.52), rough=0.3, metal=0.85),
+    "Trim": dict(color=(0.62, 0.68, 0.78), rough=0.18, metal=0.95),
     "GlowCyan": dict(color=CYAN, rough=0.3, emit=CYAN, strength=8.0),
     "GlowOrange": dict(color=ORANGE, rough=0.3, emit=ORANGE, strength=6.0),
     "GlowPurple": dict(color=PURPLE, rough=0.3, emit=PURPLE, strength=6.0),
