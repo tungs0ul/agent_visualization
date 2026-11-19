@@ -12,7 +12,7 @@ glass (`screens.rs`). Bake all with `tools/blender/bake_screens.sh`.
 Imports the desk (assets/models/stations/desk_console.glb) and builds the main screen
 on it at `screens::SCREENS`: dark see-through glass with a fresnel edge glow and
 corner brackets, a header plate, glowing UI bars, a 3D hologram of a starship subject
-(crate, rocket, moon, sun, station, ship, black hole) standing out of the glass, a soft light beam rising from the projector
+(crate, rocket, planet, sun, station, ship, black hole) standing out of the glass, a soft light beam rising from the projector
 bar, a scan band, floating motes and blue light spilling onto the desk.
 """
 import math
@@ -27,7 +27,7 @@ REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 args = sys.argv[sys.argv.index("--") + 1:]
 OUT = args[0]
 VIEW = args[1] if len(args) > 1 else "close"     # close | room | screen | bake
-SUBJECT = args[2] if len(args) > 2 else "crate"   # crate rocket moon sun station ship blackhole
+SUBJECT = args[2] if len(args) > 2 else "crate"   # crate rocket planet sun station ship blackhole
 rng = random.Random(7)
 
 sc = bpy.context.scene
@@ -360,23 +360,6 @@ def rocket():
     return (TILT + 10, 25)
 
 
-def moon():
-    both(uvs, segments=16, ring_count=10, radius=0.17, wire=0.003, face=M_FACE)
-    for k in range(7):
-        a, b = rng.uniform(0, 360), rng.uniform(-50, 50)
-        r = rng.uniform(0.018, 0.04)
-        d = Vector((math.cos(math.radians(b)) * math.sin(math.radians(a)),
-                    -math.cos(math.radians(b)) * math.cos(math.radians(a)), math.sin(math.radians(b))))
-        for op, mat, kw in ((cyl, M_FACE, dict(radius=r, depth=0.004, vertices=24)),
-                            (tor, M_LINE_DIM, dict(major_radius=r, minor_radius=0.0018, major_segments=24))):
-            t = part(op, mat, tuple(d * 0.171), **kw)
-            t.rotation_mode = "QUATERNION"
-            t.rotation_quaternion = d.to_track_quat("Z", "Y")
-    part(tor, M_LINE_DIM, rot=(75, 0, 15), major_radius=0.26, minor_radius=0.002, major_segments=96)
-    part(ico, M_WHITE, (0.25, -0.02, 0.07), radius=0.012, subdivisions=2)
-    return (TILT, 20)
-
-
 def radial_material(name, stops, strength, inner=0.0, outer=1.0, rings=0.0):
     """Light by distance from the object's centre (object space, metres): `stops` is
     a colour ramp over inner..outer, its alpha the brightness; optional fine rings
@@ -626,6 +609,24 @@ def ship():
     return (TILT + 22, -28)
 
 
+def planet():
+    # a ringed planet in the rocket's style: a smooth sphere whose edge glows, a few
+    # faint latitude bands, a flat ring (bright inner edge fading out, streaked) tilted
+    # toward the viewer, and a small moon (no orbit circle, the user dislikes outer rings)
+    rim = rim_face("planet")
+    part(uvs, rim, segments=64, ring_count=32, radius=0.15)
+    for z in (-0.07, -0.02, 0.05):
+        r = math.sqrt(0.15 ** 2 - z ** 2)
+        part(tor, M_LINE_DIM, (0, 0, z), major_radius=r, minor_radius=0.0012, major_segments=96)
+    stops = [(0.0, (0.5, 0.9, 1.0, 0.0)), (0.08, (0.5, 0.9, 1.0, 0.9)), (0.5, (0.15, 0.55, 1.0, 0.55)),
+             (1.0, (0.1, 0.3, 1.0, 0.0))]
+    ring = part(bpy.ops.mesh.primitive_circle_add, radial_material("pring", stops, 4.0, inner=0.19, outer=0.31, rings=60.0),
+                vertices=128, radius=0.31, fill_type="NGON")
+    ring.rotation_euler = (math.radians(14), math.radians(-12), 0)
+    part(uvs, rim_face("moonlet"), (0.33, -0.05, 0.11), segments=24, ring_count=12, radius=0.025)
+    return (TILT, 15)
+
+
 def blackhole():
     # the familiar look: a black core, a thin photon ring, a flat accretion disc
     # (white-hot inside, orange, fading out, streaked) seen from a little above, and
@@ -646,7 +647,7 @@ def blackhole():
     return (0, 0)
 
 
-SUBJECTS = dict(crate=crate, rocket=rocket, moon=moon, sun=sun, station=station, ship=ship, blackhole=blackhole)
+SUBJECTS = dict(crate=crate, rocket=rocket, planet=planet, sun=sun, station=station, ship=ship, blackhole=blackhole)
 lean, turn = SUBJECTS[SUBJECT]()
 pivot.location = crate_c
 pivot.rotation_mode = "ZYX"   # spin about the vertical first, then lean toward the viewer

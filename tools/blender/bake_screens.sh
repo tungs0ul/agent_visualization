@@ -4,7 +4,7 @@
 set -eu
 blender=${BLENDER:-/Applications/Blender.app/Contents/MacOS/Blender}
 mkdir -p assets/textures/screens
-for subject in crate rocket moon sun station ship blackhole; do
+for subject in crate rocket planet sun station ship blackhole; do
   "$blender" -b --factory-startup --python tools/blender/holo_screen_proto.py -- \
     "$PWD/assets/textures/screens/$subject.png" bake "$subject" >/dev/null
   echo "baked $subject"

@@ -1,5 +1,5 @@
 //! The crew desks' screens (the user: "it is a star ship and you display code?").
-//! The main screen shows a starship hologram (rocket, moon, sun, station, ship, black
+//! The main screen shows a starship hologram (rocket, planet, sun, station, ship, black
 //! hole, cargo crate) rendered in Blender and approved by the user; the side panels
 //! show gauges, lists and waves painted here once at start. Each screen is dark
 //! see-through glass with the art added over it as light, so the art glows and the
@@ -93,7 +93,7 @@ const MAIN_GAIN: f32 = 3.2;
 /// the beam as light only, straight on. One per desk, in this order.
 const SUBJECTS: [&[u8]; 7] = [
     include_bytes!("../../../assets/textures/screens/rocket.png"),
-    include_bytes!("../../../assets/textures/screens/moon.png"),
+    include_bytes!("../../../assets/textures/screens/planet.png"),
     include_bytes!("../../../assets/textures/screens/sun.png"),
     include_bytes!("../../../assets/textures/screens/station.png"),
     include_bytes!("../../../assets/textures/screens/ship.png"),

@@ -2283,3 +2283,8 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   take app screenshots first (hero, desk close-up), check screen brightness
   (`MAIN_GAIN`), planet placement and whether the activity holograms clash with the
   screen subjects; then, one item at a time with Blender approval, the rest of M30.
+- 2026-11-19, Claude Opus 5.5: station, ship and the moon screen redone in the
+  rocket's style (smooth translucent faces with a fresnel edge glow, `rim_face`; outlines
+  only on flat parts); the moon became `planet` (glowing sphere, faint latitude bands, a
+  flat streaked ring, a small moon; no orbit circle). User approved and asked to port,
+  commit and push: re-baked planet, station, ship; `screens::SUBJECTS` uses planet.png.
