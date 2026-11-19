@@ -2252,3 +2252,13 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   part shows above the sill. The moon is replaced by `terra`, a small planet with tan
   continents and blue oceans, lit from the upper right, in the left window. Preview
   (local): baseline/p06_planets.png. Not yet seen in the app (Mac locked).
+- 2026-11-19, Claude Opus 5.5: user (crop 07): the screen should be darker and the
+  picture on it should glow, in a different colour. Each desk screen is now two quads
+  (`screens::build`): dark navy see-through glass (alpha 0.68, faint grid,
+  `glass_bytes`) and, 4 mm in front, the art drawn with AlphaMode::Add at ×3
+  (`ART_GAIN`), so it blooms while the glass stays dim. The art is light only (black
+  adds nothing), tone-mapped by its brightest channel and pushed to purer hues so
+  glow stays blue/cyan instead of white; lines have a wider glow. The cargo screen is
+  one big isometric crate with translucent blue faces, cyan edges, white straps, a
+  glowing platform and labels (`Canvas::fill`). Preview (local):
+  baseline/p07_desk_glow.png. Not yet seen in the app (Mac locked).

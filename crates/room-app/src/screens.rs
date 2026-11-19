@@ -1,8 +1,9 @@
 //! The crew desks' screen art (PROMPT_03 B; the user: "it is a star ship and you
 //! display code? some display graph, some display planet"). Each desk shows starship
-//! illustrations painted here once at start: a big focal graphic on translucent
-//! luminous blue glass with a bright cyan edge, small gauges round it and one accent
-//! colour, so no two desks look alike. They are frameless holograms as in the target
+//! illustrations painted here once at start: a big focal graphic, small gauges round
+//! it and one accent colour, so no two desks look alike. Each screen is dark
+//! see-through glass with the art added over it as light, so the art glows and the
+//! glass stays dim. They are frameless holograms as in the target
 //! (crops 07, 08); the Blender desk (`stations.py`) has only their emitters.
 
 use bevy::prelude::*;
@@ -56,50 +57,89 @@ const VIOLET: Vec3 = Vec3::new(0.54, 0.36, 1.0);
 const GREEN: Vec3 = Vec3::new(0.13, 0.88, 0.48);
 const WHITE: Vec3 = Vec3::new(0.85, 0.95, 1.0);
 
-/// Spawns the art panels on every crew desk.
+/// Spawns the screens on every crew desk: each is two quads, a dark see-through glass
+/// pane and, just in front of it, the art added on top as light (it glows and blooms
+/// while the glass stays dim, as in the target's crop 07).
 pub fn build(kit: &mut Kit, images: &mut Assets<Image>) {
     let mains: Vec<Handle<Image>> = ARTS.iter().enumerate().map(|(seed, art)| images.add(paint_main(*art, seed as u32))).collect();
     let sides: Vec<Handle<Image>> = SIDES.iter().enumerate().map(|(seed, side)| images.add(paint_side(*side, seed as u32 + 40))).collect();
+    let glass_main = images.add(glass_image(512, 256));
+    let glass_side = images.add(glass_image(160, 240));
+    let unlit = |texture: Handle<Image>, gain: f32, alpha_mode: AlphaMode| StandardMaterial {
+        base_color: Color::LinearRgba(LinearRgba::new(gain, gain, gain, 1.0)),
+        base_color_texture: Some(texture),
+        alpha_mode,
+        unlit: true,
+        double_sided: true,
+        cull_mode: None,
+        ..default()
+    };
+    let glass = [kit.materials.add(unlit(glass_main, 1.0, AlphaMode::Blend)), kit.materials.add(unlit(glass_side, 1.0, AlphaMode::Blend))];
     let quad = kit.meshes.add(Rectangle::new(1.0, 1.0));
     for index in 0..DESKS.len() {
         let desk = Spot::Desk(index as u8).center();
         let textures = [mains[(index * 3) % ARTS.len()].clone(), sides[index % SIDES.len()].clone(), sides[(index + 2) % SIDES.len()].clone()];
-        for ((at, size, yaw, tilt), texture) in SCREENS.into_iter().zip(textures) {
-            let material = kit.materials.add(StandardMaterial {
-                // Unlit and a touch over 1: the art glows (and blooms a little) by itself.
-                base_color: Color::LinearRgba(LinearRgba::new(3.2, 3.2, 3.2, 1.0)),
-                base_color_texture: Some(texture),
-                alpha_mode: AlphaMode::Blend,
-                unlit: true,
-                double_sided: true,
-                cull_mode: None,
-                ..default()
-            });
+        for (i, ((at, size, yaw, tilt), texture)) in SCREENS.into_iter().zip(textures).enumerate() {
             let rotation = Quat::from_rotation_y(yaw.to_radians()) * Quat::from_rotation_x(tilt.to_radians());
-            let front = rotation * Vec3::Z * 0.006;
+            let front = rotation * Vec3::Z;
+            let scale = size.extend(1.0) * 0.97;
             kit.commands.spawn((
                 Mesh3d(quad.clone()),
-                MeshMaterial3d(material),
-                Transform::from_translation(desk + at + front).with_rotation(rotation).with_scale(size.extend(1.0) * 0.97),
+                MeshMaterial3d(glass[(i > 0) as usize].clone()),
+                Transform::from_translation(desk + at + front * 0.004).with_rotation(rotation).with_scale(scale),
+            ));
+            // The art: well over 1, added on top, so it blooms like a hologram.
+            let art = kit.materials.add(unlit(texture, ART_GAIN, AlphaMode::Add));
+            kit.commands.spawn((
+                Mesh3d(quad.clone()),
+                MeshMaterial3d(art),
+                Transform::from_translation(desk + at + front * 0.008).with_rotation(rotation).with_scale(scale),
             ));
         }
     }
 }
 
+/// How bright the art is drawn over its glass.
+const ART_GAIN: f32 = 3.0;
+
+/// The dark glass pane behind the art: deep navy, a touch lighter in the middle, a
+/// faint grid, about two thirds opaque so the room shows through it.
+fn glass_image(w: usize, h: usize) -> Image {
+    crate::space::image(w as u32, h as u32, glass_bytes(w, h))
+}
+
+fn glass_bytes(w: usize, h: usize) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(w * h * 4);
+    for y in 0..h {
+        for x in 0..w {
+            let u = Vec2::new(x as f32 / w as f32 - 0.5, y as f32 / h as f32 - 0.45);
+            let centre = (1.0 - (u.length() * 1.5).min(1.0)).powi(2);
+            let mut glass = Vec3::new(0.004, 0.014, 0.045) + Vec3::new(0.004, 0.02, 0.06) * centre;
+            if x.is_multiple_of(32) || y.is_multiple_of(32) {
+                glass += AZURE * 0.025;
+            }
+            for channel in [glass.x, glass.y, glass.z] {
+                bytes.push((linear_to_srgb(channel) * 255.0) as u8);
+            }
+            bytes.push((0.68 * 255.0) as u8);
+        }
+    }
+    bytes
+}
+
 // ---------------------------------------------------------------- a tiny painter
 
-/// An additive RGB canvas with alpha, painted in pixel units.
+/// An additive RGB canvas, painted in pixel units.
 struct Canvas {
     w: usize,
     h: usize,
     rgb: Vec<Vec3>,
-    alpha: Vec<f32>,
     seed: u32,
 }
 
 impl Canvas {
     fn new(w: usize, h: usize, seed: u32) -> Self {
-        Canvas { w, h, rgb: vec![Vec3::ZERO; w * h], alpha: vec![0.0; w * h], seed }
+        Canvas { w, h, rgb: vec![Vec3::ZERO; w * h], seed }
     }
 
     fn random(&mut self) -> f32 {
@@ -113,7 +153,6 @@ impl Canvas {
         }
         let i = y as usize * self.w + x as usize;
         self.rgb[i] += color * amount;
-        self.alpha[i] = (self.alpha[i] + amount).min(1.0);
     }
 
     /// A soft dot: a bright core and a falloff `glow` pixels wide.
@@ -135,7 +174,28 @@ impl Canvas {
         let steps = (length * 1.5) as i32 + 1;
         for i in 0..=steps {
             let p = a.lerp(b, i as f32 / steps as f32);
-            self.dot(p.x, p.y, width / 2.0, color * 0.5, width * 1.5);
+            self.dot(p.x, p.y, width / 2.0, color * 0.5, width * 2.5 + 2.0);
+        }
+    }
+
+    /// A flat filled polygon (convex or not), `amount` of `color` per pixel: the
+    /// translucent faces of a hologram.
+    fn fill(&mut self, points: &[Vec2], color: Vec3, amount: f32) {
+        let (lo, hi) = points.iter().fold((Vec2::MAX, Vec2::MIN), |(lo, hi), p| (lo.min(*p), hi.max(*p)));
+        for y in lo.y as i32..=hi.y as i32 {
+            for x in lo.x as i32..=hi.x as i32 {
+                let p = Vec2::new(x as f32 + 0.5, y as f32 + 0.5);
+                let mut inside = false;
+                for i in 0..points.len() {
+                    let (a, b) = (points[i], points[(i + 1) % points.len()]);
+                    if (a.y > p.y) != (b.y > p.y) && p.x < a.x + (p.y - a.y) / (b.y - a.y) * (b.x - a.x) {
+                        inside = !inside;
+                    }
+                }
+                if inside {
+                    self.add(x, y, color, amount);
+                }
+            }
         }
     }
 
@@ -203,8 +263,8 @@ impl Canvas {
         }
     }
 
-    /// Glass behind everything (translucent luminous blue, brighter in the middle, a
-    /// bright cyan edge), a faint grid and scanlines, then out to sRGB bytes.
+    /// The art as light only (black adds nothing): the focal graphic, the UI and a
+    /// bright cyan edge with a soft inner glow, lightly scanlined; out to sRGB bytes.
     fn finish(self) -> Image {
         let (w, h) = (self.w, self.h);
         crate::space::image(w as u32, h as u32, self.bytes())
@@ -213,27 +273,23 @@ impl Canvas {
     fn bytes(&self) -> Vec<u8> {
         let (w, h) = (self.w, self.h);
         let mut bytes = Vec::with_capacity(w * h * 4);
-        for (i, (rgb, alpha)) in self.rgb.iter().zip(&self.alpha).enumerate() {
+        for (i, rgb) in self.rgb.iter().enumerate() {
             let (x, y) = ((i % w) as f32, (i / w) as f32);
-            let u = Vec2::new(x / w as f32 - 0.5, y / h as f32 - 0.45);
-            let centre = (1.0 - (u.length() * 1.5).min(1.0)).powi(2);
-            let mut glass = Vec3::new(0.002, 0.012, 0.05) + Vec3::new(0.004, 0.022, 0.075) * centre;
-            // grid every 32 px and a scanline every third row
-            let grid = ((x as usize).is_multiple_of(32) || (y as usize).is_multiple_of(32)) as u8 as f32;
-            glass += AZURE * 0.04 * grid;
-            // the hologram's bright edge: 2 px of cyan and a soft inner falloff
             let edge = x.min(y).min(w as f32 - 1.0 - x).min(h as f32 - 1.0 - y);
-            let rim = if edge < 2.0 { 1.0 } else { (1.0 - (edge - 2.0) / 10.0).clamp(0.0, 1.0).powi(2) * 0.18 };
-            glass += CYAN * rim;
-            let scan = if (y as usize).is_multiple_of(3) { 0.85 } else { 1.0 };
-            let lit = (glass + *rgb) * scan;
-            // see-through glass, opaque where the art is
-            let a = (0.72 + 0.28 * alpha + rim * 0.3).min(1.0);
+            let rim = if edge < 2.0 { 0.55 } else { (1.0 - (edge - 2.0) / 12.0).clamp(0.0, 1.0).powi(2) * 0.06 };
+            let scan = if (y as usize).is_multiple_of(3) { 0.8 } else { 1.0 };
+            let lit = (*rgb + CYAN * rim) * scan;
+            // Purer hues (less of the weakest channel), so bright glow still reads
+            // as blue and cyan after the camera's tone mapping.
+            let lit = (lit - Vec3::splat(lit.min_element() * 0.75)).max(Vec3::ZERO);
+            // Tone-map by the brightest channel so overlapping glow keeps its hue
+            // (cyan stays cyan instead of burning to white).
+            let peak = lit.max_element().max(1e-6);
+            let lit = lit * ((peak / (1.0 + peak * 0.6)).min(1.0) / peak);
             for channel in [lit.x, lit.y, lit.z] {
-                let mapped = channel / (1.0 + channel * 0.35);
-                bytes.push((linear_to_srgb(mapped.min(1.0)) * 255.0) as u8);
+                bytes.push((linear_to_srgb(channel.min(1.0)) * 255.0) as u8);
             }
-            bytes.push((a * 255.0) as u8);
+            bytes.push(255);
         }
         bytes
     }
@@ -387,21 +443,45 @@ fn main_canvas(art: Art, seed: u32) -> Canvas {
             }
         }
         Art::Cargo => {
-            // Isometric wireframe crates, one highlighted.
-            let cube = |c: &mut Canvas, o: Vec2, s: f32, color: Vec3| {
-                let (dx, dy) = (Vec2::new(s * 0.87, s * 0.5), Vec2::new(-s * 0.87, s * 0.5));
-                let up = Vec2::new(0.0, -s);
-                let corners = [o, o + dx, o + dx + dy, o + dy];
-                for i in 0..4 {
-                    c.line(corners[i], corners[(i + 1) % 4], 1.6, color);
-                    c.line(corners[i] + up, corners[(i + 1) % 4] + up, 1.6, color);
-                    c.line(corners[i], corners[i] + up, 1.6, color);
+            // One big isometric crate (crop 07): translucent blue faces, bright edges,
+            // straps, a glowing platform under it and labels either side.
+            let o = Vec2::new(256.0, 150.0);
+            let dx = Vec2::new(0.87, 0.5) * 92.0;
+            let dy = Vec2::new(-0.87, 0.5) * 62.0;
+            let up = Vec2::new(0.0, -78.0);
+            let base = Vec2::new(0.0, 22.0);
+            let (o, top) = (o + base, o + base + up);
+            ellipse(&mut c, o + (dx + dy) / 2.0, Vec2::new(120.0, 34.0), 2.0, CYAN * 0.8);
+            ellipse(&mut c, o + (dx + dy) / 2.0, Vec2::new(150.0, 44.0), 1.0, AZURE * 0.6);
+            c.fill(&[top, top + dx, top + dx + dy, top + dy], AZURE, 0.22);
+            c.fill(&[o + dy, o + dy + dx, top + dy + dx, top + dy], AZURE, 0.14);
+            c.fill(&[o + dx, o + dx + dy, top + dx + dy, top + dx], CYAN, 0.12);
+            let corners = [o, o + dx, o + dx + dy, o + dy];
+            for i in 0..4 {
+                c.line(corners[i] + up, corners[(i + 1) % 4] + up, 2.6, CYAN);
+                if i != 0 {
+                    c.line(corners[i], corners[i] + up, 2.6, CYAN);
                 }
-            };
-            for (i, (x, y)) in [(150.0, 150.0), (220.0, 150.0), (185.0, 170.0), (290.0, 160.0), (360.0, 140.0), (330.0, 180.0)].into_iter().enumerate() {
-                cube(&mut c, Vec2::new(x, y), 36.0, if i == 4 { AMBER } else { CYAN });
             }
-            c.dot(392.0, 130.0, 3.0, AMBER, 8.0);
+            c.line(o + dx, o + dx + dy, 2.6, CYAN);
+            c.line(o + dx + dy, o + dy, 2.6, CYAN);
+            for k in [0.3, 0.7] {
+                let a = o + dx * k;
+                c.line(a + dy, a + dy + up, 2.0, WHITE * 0.8);
+                c.line(a + dy + up, a + up, 2.0, WHITE * 0.8);
+            }
+            let b = o + dy * 0.5;
+            c.line(b + dx, b + dx + up, 1.6, CYAN * 0.8);
+            c.line(o + dy + up * 0.82, o + dy + dx + up * 0.82, 1.4, CYAN * 0.6);
+            c.dot((top + dx).x, (top + dx).y, 4.0, AMBER, 10.0);
+            for x in [30.0, 392.0] {
+                for k in 0..4 {
+                    let y = 70.0 + k as f32 * 22.0;
+                    let len = 50.0 + c.random() * 40.0;
+                    c.rect(x, y, x + len, y + 4.0, if k == 0 { AMBER } else { CYAN }, 0.6);
+                    c.rect(x, y + 8.0, x + len * 0.6, y + 10.0, AZURE, 0.5);
+                }
+            }
         }
     }
     c.chrome(accent);
@@ -483,6 +563,13 @@ mod tests {
         }
         for (seed, side) in SIDES.iter().enumerate() {
             save(format!("side-{seed}"), side_canvas(*side, seed as u32 + 40));
+        }
+        for (name, w, h) in [("glass-main", 512, 256), ("glass-side", 160, 240)] {
+            let file = std::fs::File::create(format!("{dir}/{name}.png")).unwrap();
+            let mut encoder = png::Encoder::new(std::io::BufWriter::new(file), w as u32, h as u32);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder.write_header().unwrap().write_image_data(&glass_bytes(w, h)).unwrap();
         }
     }
 }
