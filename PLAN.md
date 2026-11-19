@@ -2223,3 +2223,13 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   Blender render of the desk with the dumped textures; not yet seen in the app
   (display off). Next: check on screen; tone down amber (pad arcs, chevrons);
   white hardware; then the rest of D, E, screen art by tool category, camera limits.
+- 2026-11-19, Claude Opus 5.5: user: the planets should look like the target; "do one
+  thing better, then give me the screenshot first". Planets are now sprites rendered
+  once in Blender Cycles (`tools/blender/planets.py`, `assets/textures/space/`):
+  premultiplied RGBA, 2.6 radii wide, drawn as camera-facing quads
+  (`space::planet_sprite`, AlphaMode::Premultiplied, unlit ×1.4). The blue planet has
+  continents, soft clouds, sun from the upper left, a night side with sparse city
+  lights, and a 2D-painted atmosphere (thin bright limb plus a soft halo, stronger
+  towards the sun). The ringed gas giant is replaced by a small cratered moon,
+  rim-lit from the right. The old noise sphere, its glow billboard and the ring are gone.
+  Not yet seen in the app: the Mac was locked (the app renders black then).

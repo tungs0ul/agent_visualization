@@ -1,8 +1,8 @@
 //! The view out of the panoramic window (PLAN.md M29, the user's starship reference):
-//! a big cloudy blue planet with a glowing atmosphere, a ringed planet, nebula
-//! clouds, asteroids and a few distant ships. Everything is built once at start,
-//! from textures made here with a little noise (no image files), and never redrawn
-//! on its own: it costs nothing while the view dozes.
+//! a big cloudy blue planet with a glowing atmosphere, a small moon, nebula clouds,
+//! asteroids and a few distant ships. Everything is built once at start (the planets
+//! are sprites rendered in Blender, the clouds noise textures made here) and never
+//! redrawn on its own: it costs nothing while the view dozes.
 
 use bevy::asset::RenderAssetUsages;
 use bevy::image::Image;
@@ -29,25 +29,12 @@ fn facing_camera(at: Vec3) -> Quat {
 }
 
 pub fn build(kit: &mut Kit, images: &mut Assets<Image>) {
-    let rim = images.add(rim_texture(128));
-    // The big blue planet, low on the right, its lit side towards the upper left.
+    // The big blue planet, low on the right, lit from the upper left, and a small moon
+    // up on the left: sprites rendered once in Blender (`tools/blender/planets.py`).
     let (at, reach) = through_window(5.0, 3.2, -48.0);
-    let radius = 3.0 * reach;
-    planet(kit, images, at, radius, PlanetLook::Ocean, &rim, LinearRgba::rgb(0.25, 0.75, 2.4));
-    // A ringed gas giant, small and far, up on the left.
+    planet_sprite(kit, images, include_bytes!("../../../assets/textures/space/ocean.png"), at, 3.0 * reach);
     let (at, reach) = through_window(-4.8, 5.8, -85.0);
-    let radius = 0.65 * reach;
-    planet(kit, images, at, radius, PlanetLook::Gas, &rim, LinearRgba::rgb(0.9, 0.7, 0.5));
-    let ring = kit.materials.add(StandardMaterial {
-        base_color: Color::srgba(0.85, 0.75, 0.6, 0.55),
-        emissive: LinearRgba::rgb(0.25, 0.2, 0.15),
-        alpha_mode: AlphaMode::Blend,
-        double_sided: true,
-        cull_mode: None,
-        ..default()
-    });
-    let tilt = Quat::from_rotation_x(-1.2) * Quat::from_rotation_z(0.35);
-    kit.mesh(Annulus::new(radius * 1.45, radius * 2.2).mesh().resolution(64).build(), ring, Transform::from_translation(at).with_rotation(tilt));
+    planet_sprite(kit, images, include_bytes!("../../../assets/textures/space/moon.png"), at, 0.55 * reach);
 
     // Nebula clouds far behind: soft additive billboards in purple, blue and cyan.
     let cloud = images.add(cloud_texture(256, 7));
@@ -98,28 +85,28 @@ pub fn build(kit: &mut Kit, images: &mut Assets<Image>) {
     }
 }
 
-#[derive(Clone, Copy)]
-enum PlanetLook {
-    Ocean,
-    Gas,
-}
-
-/// A planet: a textured sphere lit by the room's key light (so it has a day and a night
-/// side), plus a camera-facing glow ring around its edge for the atmosphere.
-fn planet(kit: &mut Kit, images: &mut Assets<Image>, at: Vec3, radius: f32, look: PlanetLook, rim: &Handle<Image>, air: LinearRgba) {
-    let surface = images.add(planet_texture(512, 256, look));
+/// A planet: a camera-facing quad with a sprite rendered in Blender (premultiplied
+/// RGBA, 2.6 radii wide: the body hides the sky, its atmosphere adds light round it).
+fn planet_sprite(kit: &mut Kit, images: &mut Assets<Image>, png_bytes: &[u8], at: Vec3, radius: f32) {
     let material = kit.materials.add(StandardMaterial {
-        base_color_texture: Some(surface),
-        perceptual_roughness: 0.8,
-        emissive: air * 0.02,
+        base_color: Color::LinearRgba(LinearRgba::new(1.4, 1.4, 1.4, 1.0)),
+        base_color_texture: Some(images.add(decode_png(png_bytes))),
+        alpha_mode: AlphaMode::Premultiplied,
+        unlit: true,
         ..default()
     });
-    kit.mesh(Sphere::new(radius).mesh().uv(64, 32), material, Transform::from_translation(at).with_rotation(Quat::from_rotation_x(-1.25) * Quat::from_rotation_z(0.25)));
-    // (Tilted so its pole, where the texture pinches, faces away from the camera above.)
-    // The glow sits just in front of the planet, a little larger, so its bright edge
-    // rings the silhouette and fades outward.
-    let toward = (EYE - at).normalize() * radius * 1.05;
-    billboard(kit, rim, at + toward, radius * 2.5, air);
+    let size = radius * 2.6;
+    kit.mesh(Rectangle::new(size, size), material, Transform::from_translation(at).with_rotation(facing_camera(at)));
+}
+
+/// An RGBA8 PNG compiled into the binary, as a mipmapped image.
+fn decode_png(bytes: &[u8]) -> Image {
+    let mut reader = png::Decoder::new(std::io::Cursor::new(bytes)).read_info().expect("planet sprite is a PNG");
+    let mut buffer = vec![0; reader.output_buffer_size().expect("planet sprite size")];
+    let info = reader.next_frame(&mut buffer).expect("planet sprite decodes");
+    buffer.truncate(info.buffer_size());
+    assert_eq!(info.color_type, png::ColorType::Rgba, "planet sprites are RGBA");
+    image(info.width, info.height, buffer)
 }
 
 /// A flat additive picture facing the camera.
@@ -208,33 +195,6 @@ fn fbm(x: f32, y: f32, period: i32, seed: u32) -> f32 {
     sum / norm
 }
 
-/// An equirectangular planet surface: oceans, land and white clouds, or gas bands.
-fn planet_texture(width: u32, height: u32, look: PlanetLook) -> Image {
-    let mut pixels = Vec::with_capacity((width * height * 4) as usize);
-    for y in 0..height {
-        for x in 0..width {
-            let (u, v) = (x as f32 / width as f32 * 8.0, y as f32 / height as f32 * 4.0);
-            let rgb = match look {
-                PlanetLook::Ocean => {
-                    let land = fbm(u, v, 8, 1);
-                    let cloud = fbm(u * 1.7, v * 2.2, 14, 9);
-                    let base = if land > 0.56 { [0.16, 0.32, 0.22] } else { [0.03, 0.12, 0.42] };
-                    let shade = 0.75 + 0.5 * (land - 0.5).abs();
-                    let white = ((cloud - 0.5) * 3.0).clamp(0.0, 1.0);
-                    [0, 1, 2].map(|i| base[i] * shade * (1.0 - white) + 0.92 * white)
-                }
-                PlanetLook::Gas => {
-                    let band = (v * 6.0 + fbm(u, v * 0.5, 8, 5) * 2.5).sin() * 0.5 + 0.5;
-                    [0.75 + band * 0.2, 0.6 + band * 0.15, 0.45 + band * 0.1]
-                }
-            };
-            pixels.extend(rgb.map(|c| (c.clamp(0.0, 1.0).powf(1.0 / 2.2) * 255.0) as u8));
-            pixels.push(255);
-        }
-    }
-    image(width, height, pixels)
-}
-
 /// A soft cloud: fbm noise fading to nothing at the edges (alpha and colour alike,
 /// for additive blending).
 fn cloud_texture(size: u32, seed: u32) -> Image {
@@ -245,23 +205,6 @@ fn cloud_texture(size: u32, seed: u32) -> Image {
             let edge = (1.0 - (u * u + v * v).sqrt()).clamp(0.0, 1.0);
             let n = fbm(x as f32 / size as f32 * 6.0, y as f32 / size as f32 * 6.0, 6, seed);
             let value = ((n - 0.35) * 1.8).clamp(0.0, 1.0) * edge * edge;
-            let byte = (value * 255.0) as u8;
-            pixels.extend([byte, byte, byte, byte]);
-        }
-    }
-    image(size, size, pixels)
-}
-
-/// A glow ring: bright at 0.4 of the radius (the planet's edge on a quad 2.5x its
-/// radius), dark inside, fading outward.
-fn rim_texture(size: u32) -> Image {
-    let mut pixels = Vec::with_capacity((size * size * 4) as usize);
-    for y in 0..size {
-        for x in 0..size {
-            let (u, v) = (x as f32 / size as f32 * 2.0 - 1.0, y as f32 / size as f32 * 2.0 - 1.0);
-            let r = (u * u + v * v).sqrt();
-            let edge = 0.4;
-            let value = if r < edge { ((r - edge + 0.06) / 0.06).clamp(0.0, 1.0).powi(2) } else { (1.0 - (r - edge) / (1.0 - edge)).clamp(0.0, 1.0).powi(3) };
             let byte = (value * 255.0) as u8;
             pixels.extend([byte, byte, byte, byte]);
         }
