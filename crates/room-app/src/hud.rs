@@ -92,6 +92,7 @@ pub fn draw(
     mut selected: ResMut<Selected>,
     camera: Query<&Camera, With<RoomCamera3d>>,
     toasts: Res<crate::notify::Toasts>,
+    mut bells: ResMut<crate::notify::Bells>,
     usage: Res<crate::usage::Usage>,
 ) -> Result {
     let Ok(camera) = camera.single() else { return Ok(()) };
@@ -128,7 +129,15 @@ pub fn draw(
         .sessions()
         .into_iter()
         .filter(|session| !session.ended && !session.headless)
-        .map(|session| (session.id.clone(), session.name(), session.is_busy()))
+        .map(|session| {
+            // Claude working in another repository than the session's says where.
+            let away = session.main_repo.as_ref().filter(|repo| repo.away_from(session.home_repo.as_ref()));
+            let name = match away {
+                Some(repo) => format!("{} {}", session.name(), repo.badge()),
+                None => session.name(),
+            };
+            (session.id.clone(), name, session.is_busy())
+        })
         .collect();
     let mut picked = None;
     let mut forget = None;
@@ -152,6 +161,7 @@ pub fn draw(
                             if ui.selectable_label(current, text).on_hover_text("Show this session's room").clicked() && !current {
                                 picked = Some(id.clone());
                             }
+                            bell_button(ui, &mut bells, id);
                             if ui.small_button("✖").on_hover_text(FORGET_HOVER).clicked() {
                                 forget = Some(id.clone());
                             }
@@ -337,6 +347,9 @@ pub fn draw(
                 {
                     focus_terminal(pid);
                 }
+                if info.is_none() {
+                    bell_button(ui, &mut bells, &session.id);
+                }
                 if info.is_none() && ui.small_button("Remove").on_hover_text(FORGET_HOVER).clicked() {
                     forget_shown = true;
                 }
@@ -451,4 +464,18 @@ pub fn focus_terminal(pid: u32) {
             }
         }
     });
+}
+
+/// "Tell me when done": a macOS notification and a sound once this session next goes
+/// idle. Lit while set.
+fn bell_button(ui: &mut egui::Ui, bells: &mut crate::notify::Bells, session: &str) {
+    let set = bells.is_set(session);
+    let hover = if set {
+        "You'll get a notification when Claude next stops. Click to cancel."
+    } else {
+        "Tell me when done: a notification when Claude next stops"
+    };
+    if ui.add(egui::Button::new(egui::RichText::new("🔔").small()).small().selected(set)).on_hover_text(hover).clicked() {
+        bells.toggle(session);
+    }
 }

@@ -734,6 +734,11 @@ pub fn labels(
         if let Some(tree) = repo.and_then(|repo| repo.worktree.as_ref().map(|tree| repo.branch.as_ref().unwrap_or(tree))) {
             name.push_str(&format!(" · ⎇ {tree}"));
         }
+        // Working in another repository than its session's (PLAN.md M4d): say which.
+        if let Some(repo) = repo.filter(|repo| repo.away_from(session.home_repo.as_ref())) {
+            name.push(' ');
+            name.push_str(&repo.badge());
+        }
         let lift = if mode.mini { 1.35 } else { 1.05 };
         let head = at.translation() + Vec3::Y * lift * at.scale().y;
         let Ok(screen) = camera.world_to_viewport(camera_at, head) else { continue };

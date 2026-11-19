@@ -76,6 +76,43 @@ pub fn notice(event: &RoomEvent, project: Option<&str>) -> Option<(Kind, String)
     }))
 }
 
+/// Sessions the user asked to hear about when they next go idle ("Tell me when
+/// done"), by session id. Each rings once, then is forgotten.
+#[derive(bevy::prelude::Resource, Default)]
+pub struct Bells(pub std::collections::HashSet<String>);
+
+impl Bells {
+    /// Turns the bell for a session on or off.
+    pub fn toggle(&mut self, session: &str) {
+        if !self.0.remove(session) {
+            self.0.insert(session.to_owned());
+        }
+    }
+
+    pub fn is_set(&self, session: &str) -> bool {
+        self.0.contains(session)
+    }
+
+    /// The bell's text if this event makes a belled session idle: Claude's turn ended
+    /// or failed, or the session ended. The bell is then cleared.
+    pub fn ring(&mut self, event: &RoomEvent, name: &str) -> Option<String> {
+        let text = match &event.kind {
+            EventKind::TurnEnded { .. } if event.agent == AgentRef::Main => format!("{name}: Claude is done"),
+            EventKind::TurnFailed { .. } if event.agent == AgentRef::Main => format!("{name}: Claude stopped"),
+            EventKind::SessionEnded { .. } => format!("{name}: the session ended"),
+            _ => return None,
+        };
+        self.0.remove(&event.session_id).then_some(text)
+    }
+}
+
+/// The bell: a macOS notification and a sound, whatever the app's sound setting, since
+/// the user asked for it.
+pub fn bell(text: &str) {
+    system_notification(text);
+    play(Kind::Done.sound());
+}
+
 /// How long a toast stays.
 pub const TOAST_SECS: Duration = Duration::from_secs(5);
 /// At most this many at once (the oldest go first).
@@ -168,6 +205,21 @@ mod tests {
         }
         let switched = event(json!({ "hook_event_name": "PostModelSwitch", "to_model": "claude-opus-5-5" }));
         assert_eq!(notice(&switched, None), Some((Kind::Joined, "Claude now runs opus-5-5".to_owned())));
+    }
+
+    #[test]
+    fn a_bell_rings_once_when_claude_next_stops() {
+        let mut bells = Bells::default();
+        let stop = event(json!({ "hook_event_name": "Stop" }));
+        assert_eq!(bells.ring(&stop, "app"), None, "no bell set");
+        bells.toggle("s");
+        let sub_stop = event(json!({ "hook_event_name": "SubagentStop", "agent_id": "a1", "agent_type": "Explore" }));
+        assert_eq!(bells.ring(&sub_stop, "app"), None, "a sub-agent finishing isn't the session going idle");
+        assert_eq!(bells.ring(&stop, "app"), Some("app: Claude is done".to_owned()));
+        assert_eq!(bells.ring(&stop, "app"), None, "rings once");
+        bells.toggle("s");
+        bells.toggle("s");
+        assert!(!bells.is_set("s"), "toggling twice turns it off");
     }
 
     #[test]

@@ -117,6 +117,7 @@ fn main() -> AppExit {
         .init_resource::<view3d::View3d>()
         .init_resource::<view3d::CameraView>()
         .init_resource::<notify::Toasts>()
+        .init_resource::<notify::Bells>()
         .init_resource::<usage::Usage>()
         .init_resource::<wins::Wins>()
         .init_resource::<view3d::BrightHolos>()
@@ -197,6 +198,7 @@ fn receive_events(
     mode: Res<mini::ViewMode>,
     mut repos: ResMut<repo::RepoCache>,
     mut toasts: ResMut<notify::Toasts>,
+    mut bells: ResMut<notify::Bells>,
     prefs: Res<ui::PanelPrefs>,
     mut usage: ResMut<usage::Usage>,
     mut wins: ResMut<wins::Wins>,
@@ -241,6 +243,10 @@ fn receive_events(
                     notify::system_notification(&text);
                 }
                 toasts.push(kind, text, prefs.sound);
+            }
+            // "Tell me when done": the user asked to hear when this session goes idle.
+            if let Some(text) = bells.ring(&event, &session.name()) {
+                notify::bell(&text);
             }
             // Commits and passing tests get a burst of light; finished turns, a trophy.
             if let Some(win) = wins.on_event(&event, &session.name()) {
@@ -396,7 +402,12 @@ const DEAD_CHECK_EVERY: Duration = Duration::from_secs(5);
 /// Ends sessions whose `claude` process is gone (a closed terminal window or chat tab
 /// never sends `SessionEnd`), so their robot and roster row leave. Runs only on frames
 /// that are drawn anyway, at most every few seconds: one `kill(pid, 0)` per session.
-fn end_dead_sessions(mut model: ResMut<Model>, chats: Res<chat::Chats>, mut last: Local<Option<Instant>>) {
+fn end_dead_sessions(
+    mut model: ResMut<Model>,
+    chats: Res<chat::Chats>,
+    mut bells: ResMut<notify::Bells>,
+    mut last: Local<Option<Instant>>,
+) {
     let now = Instant::now();
     if last.is_some_and(|at| now - at < DEAD_CHECK_EVERY) {
         return;
@@ -409,6 +420,11 @@ fn end_dead_sessions(mut model: ResMut<Model>, chats: Res<chat::Chats>, mut last
     }
     for id in model.end_dead(process_alive) {
         debug!("session {id} ended: its claude process is gone");
+        // A killed session sends no SessionEnd, so its bell rings here.
+        if bells.0.remove(&id) {
+            let name = model.session(&id).map_or_else(|| id.clone(), |session| session.name());
+            notify::bell(&format!("{name}: the session ended"));
+        }
     }
 }
 

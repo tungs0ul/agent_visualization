@@ -19,6 +19,23 @@ pub struct Repo {
     pub worktree: Option<String>,
 }
 
+impl Repo {
+    /// Working outside the session's own repository (PLAN.md M4d): a different
+    /// checkout, or any repository when the session's folder isn't one. A linked
+    /// worktree has its own "⎇" badge, so it doesn't count here.
+    pub fn away_from(&self, home: Option<&Repo>) -> bool {
+        self.worktree.is_none() && home.is_none_or(|home| home.root != self.root)
+    }
+
+    /// "↪ api · main": where an agent away from home works.
+    pub fn badge(&self) -> String {
+        match &self.branch {
+            Some(branch) => format!("↪ {} · {branch}", self.name),
+            None => format!("↪ {}", self.name),
+        }
+    }
+}
+
 #[derive(Resource, Default)]
 pub struct RepoCache {
     by_dir: HashMap<PathBuf, Option<Repo>>,
@@ -115,6 +132,22 @@ pub fn paths_in(tool: &ToolCall, cwd: Option<&str>) -> Vec<PathBuf> {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn only_work_in_another_checkout_is_away() {
+        let repo = |name: &str, worktree: Option<&str>| Repo {
+            name: name.into(),
+            branch: Some("main".into()),
+            root: PathBuf::from(format!("/src/{name}")),
+            worktree: worktree.map(str::to_owned),
+        };
+        let home = repo("app", None);
+        assert!(!repo("app", None).away_from(Some(&home)));
+        assert!(repo("api", None).away_from(Some(&home)));
+        assert!(repo("api", None).away_from(None), "a session outside any repo");
+        assert!(!repo("app-fix", Some("app-fix")).away_from(Some(&home)), "worktrees have their own badge");
+        assert_eq!(repo("api", None).badge(), "↪ api · main");
+    }
 
     fn temp_repo(name: &str, head: &str) -> PathBuf {
         let root = std::env::temp_dir().join(format!("agent-room-repo-{}-{name}", std::process::id())).join(name);
