@@ -599,6 +599,12 @@ repository appears and the agent walks there.
 - The roster list shows each agent's room. The office camera fits all rooms in use.
 - Decide the layout: rooms side by side with a corridor, or separate "floors"/tabs.
 
+**Part 2 decided 2026-11-19 (user): a badge, no rooms.** Separate rooms would undo the
+2026-11-18 "no wings, one shared HQ" decision (V2.md section 8). Instead an agent whose
+latest tool call works in another checkout than its session's (`Repo::away_from`)
+shows "↪ repo · branch" in its 3D label, and Claude's row in the sessions card says
+the same. Linked worktrees keep their own "⎇" badge.
+
 ### M4e: Waiting at the Approval desk, with the card there (requested 2026-11-17)
 
 - A sub-agent that needs permission walks to the Approval desk (already) and **stays
@@ -951,6 +957,38 @@ Claude Code desktop redesign). Nothing here is built yet; the user picks.
 Left out: dollar cost (V2 phase 6 dropped it as a guess), Gantt/replay (V2 phase 5
 trimmed), remote control (non-goal).
 
+### Backlog from the 2026-11-19 feature research (not started)
+
+A web research pass (code.claude.com docs for hooks, agent teams, cross-session
+messaging and monitoring; HN threads; Conductor, Crystal, AgentsRoom, claude-code-kanban).
+None of these is in the backlog above. The user picks.
+
+1. **Same-file clash alert** (S): two sessions edit the same file within N minutes;
+   warn and draw a red line between the robots. `PreToolUse` Edit/Write `file_path`.
+2. **Limit forecast** (S): "5h window runs out at about 15:40 at this pace", from the
+   rise in `rate_limit_event` / status-line `rate_limits` (M10 data).
+3. **Claimed vs real** (S): the answer says "tests pass" but the last test command
+   failed; flag the turn. `Stop.last_assistant_message` plus Bash outcomes. The
+   matching rule is a guess.
+4. **Messages between sessions** (S): a capsule flies between robots on `SendMessage`
+   (on by default since 2.1.224). `tool_input` field names unverified.
+5. **Retry after an auto-mode denial** (S): card with the classifier's reason and Retry;
+   `PermissionDenied` returns `hookSpecificOutput.retry: true`.
+6. **Agent teams in the HQ** (M): teammates as robots, inbox messages as capsules, idle
+   teammates in a lounge. `~/.claude/teams/<team>/config.json`, `inboxes/`,
+   `TeammateIdle`. Experimental flag only.
+7. **Local telemetry receiver, opt-in** (M): listen on `localhost:4318` (OTLP http/json)
+   for measured cost, lines changed, commits, PRs, API errors.
+   `CLAUDE_CODE_ENABLE_TELEMETRY=1`, set by the user.
+8. **Rules shelf** (S): which CLAUDE.md and `.claude/rules` files loaded and why.
+   `InstructionsLoaded` (`load_reason`, `globs`, `trigger_file_path`).
+9. **"Tell me when done" bell** (S): done 2026-11-19. A 🔔 on Claude's details window
+   and each row of the sessions card; when Claude next stops, fails or the session
+   ends, a macOS notification and the Purr sound (even with sound off), once.
+10. **Read the answer aloud** (S): `say` the final answer, per session toggle.
+11. **Commit or open a PR from the writing desk** (M): git and `gh`. Moves the app from
+    watching to doing, so the user decides.
+
 ### M25: Pause, resume and stop a session (requested 2026-11-18, done 2026-11-18)
 
 User: "there is no way to stop or pause an agent, maybe we want to have feature that we
@@ -1231,7 +1269,7 @@ config file, and can remove both cleanly.
 - [x] M4 Life (2026-11-17)
 - [x] M4b Office zones (2026-11-17)
 - [x] M4c Mini mode, code (2026-11-17); frosted glass still to be confirmed by the user on screen
-- [ ] M4d Rooms per repository (part 1 done 2026-11-17: repo + branch detection, shown in roster/title; part 2: separate rooms in the scene)
+- [x] M4d Rooms per repository (part 1 2026-11-17: repo + branch detection; part 2 2026-11-19: a "↪ repo · branch" badge instead of rooms, user's choice; not yet seen on screen)
 - [x] M4e Waiting at the Approval desk with the card in the scene (2026-11-17)
 - [x] M4f Camera controls: zoom, pan (2026-11-17; pinning dropped by the user)
 - [x] M8 Chat with Claude from the app (8a: new/continue/resume sessions; 8b: send to
@@ -1811,3 +1849,21 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   Local commands such as `/context` are never echoed (skills are), so a turn that ends
   without an echo marks the oldest queued message taken (`chat::track_pickup`, unit
   test with the measured order). Not seen on screen (Mac locked).
+- 2026-11-19, Claude Opus 5.5: chat text was hard to read. A screenshot showed two
+  causes: message text in egui's mid-grey, and the HUD, station labels and room
+  showing through the chat console at roughly a quarter strength, although its fill
+  had alpha 246. The console fill is now opaque (`console::hologram`) and the chat
+  transcript draws text near-white (`override_text_color` 232) with 6 px between
+  items. Clippy clean, tests pass. **Not seen on screen**: the Mac locked before the
+  second screenshot. If text still shows through after the opaque fill, the cause is in
+  how the egui camera's output is blended (`spawn_ui_camera`, `ALPHA_BLENDING`), not
+  the fill. Research for new features went into the "2026-11-19 feature research"
+  backlog.
+- 2026-11-19, Claude Opus 5.5: "Tell me when done" bell (`notify::Bells`): a 🔔 toggle
+  on Claude's details window and each sessions-card row; the next `Stop`,
+  `StopFailure` or `SessionEnd` of that session (or `end_dead_sessions` finding its
+  process gone) fires one macOS notification plus a sound, then clears. M4d part 2 is
+  a badge, not rooms (see M4d): `Repo::away_from` / `Repo::badge`, used by the 3D
+  labels and the sessions card. Unit tests for both; clippy clean, 61 tests pass.
+  **Not seen on screen** (Mac locked): the user tries the 🔔 and checks the glyph
+  renders.
