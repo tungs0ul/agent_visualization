@@ -2029,3 +2029,12 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   `AGENT_ROOM_FEED=tools`, `AGENT_ROOM_REPLAY=<recording>` with
   `AGENT_ROOM_CONSOLE=replay`, `AGENT_ROOM_SHOW_DETAILS=1`. README's privacy section
   now lists what is written to disk (mission recordings hold prompts and commands).
+- 2026-11-19, Claude Opus 5.5: M28 seen on screen once the display woke: the open
+  activity console (Tool calls tab) now keeps its height with the tab row clear; the
+  Replay console plays a recording made by the app ("event 61 of 126", timeline,
+  speeds, Exit); the room rebuilds the replayed session (six robots at their desks,
+  tool counts on the nameplates). The command sign covered robot labels wherever it
+  stood in the room, so it is now a fixed panel under the title, top left, with the
+  REPLAY badge below it. Robot details seen earlier ("Seen by Agent Room: 9 tool
+  calls", expandable calls). Not seen: the Metrics, Files and Errors tabs, and an
+  exported report opening (the report text is unit tested).

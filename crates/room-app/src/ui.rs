@@ -171,7 +171,7 @@ pub fn draw(
     if let Some(play) = replay.active.as_ref() {
         let name = play.name.clone();
         egui::Area::new("replay-badge".into())
-            .anchor(egui::Align2::LEFT_TOP, egui::vec2(8.0, 64.0))
+            .anchor(egui::Align2::LEFT_TOP, egui::vec2(8.0, 116.0))
             .show(ctx, |ui| {
                 egui::Frame::new()
                     .fill(crate::palette::GLASS)

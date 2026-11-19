@@ -655,17 +655,14 @@ pub fn labels(
     let ctx = contexts.ctx_mut()?;
     let Ok((camera, camera_at)) = camera.single() else { return Ok(()) };
     let offset = camera.logical_viewport_rect().map_or(Vec2::ZERO, |rect| rect.min);
-    // The command station's sign: where the settings and the other consoles are
-    // (PLAN.md M27), one button each.
-    if !mode.mini
-        && let Ok(screen) = camera.world_to_viewport(camera_at, Spot::Command.center() + Vec3::new(-2.6, 1.0, 0.0))
-    {
-        let screen = screen + offset;
+    // The command panel: where the settings and the other consoles are (PLAN.md M27),
+    // one button each. Fixed under the title, top left: anchored in the room it
+    // covered the robots' labels.
+    if !mode.mini {
         let color = egui::Color32::from_rgb(130, 200, 255);
         egui::Area::new("command-sign".into())
-            .fixed_pos(egui::pos2(screen.x, screen.y))
-            .pivot(egui::Align2::RIGHT_CENTER)
-            .order(egui::Order::Background)
+            .fixed_pos(egui::pos2(offset.x + 8.0, offset.y + 64.0))
+            .order(egui::Order::Middle)
             .show(ctx, |ui| {
                 egui::Frame::new()
                     .fill(egui::Color32::from_rgba_unmultiplied(12, 14, 32, 210))
