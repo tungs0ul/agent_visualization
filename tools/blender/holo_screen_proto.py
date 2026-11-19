@@ -27,7 +27,11 @@ REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 args = sys.argv[sys.argv.index("--") + 1:]
 OUT = args[0]
 VIEW = args[1] if len(args) > 1 else "close"     # close | room | screen | bake
-SUBJECT = args[2] if len(args) > 2 else "crate"   # crate rocket planet sun station ship blackhole
+SUBJECT = args[2] if len(args) > 2 else "crate"
+# Animation frames for the app (`bake_screens.sh`): HOLO_FRAME i of HOLO_FRAMES n
+# gives T from -1 to 1; the app plays them forth and back while the desk works.
+FRAMES = int(os.environ.get("HOLO_FRAMES", "1"))
+T = -1.0 + 2.0 * int(os.environ.get("HOLO_FRAME", "0")) / (FRAMES - 1) if FRAMES > 1 else 0.0   # crate rocket planet sun station ship blackhole
 rng = random.Random(7)
 
 sc = bpy.context.scene
@@ -388,6 +392,7 @@ def radial_material(name, stops, strength, inner=0.0, outer=1.0, rings=0.0):
         wv.wave_type = "RINGS"
         wv.inputs["Scale"].default_value = rings
         wv.inputs["Distortion"].default_value = 1.0
+        wv.inputs["Phase Offset"].default_value = -3.0 * T   # streaks flow inward over the frames
         wv.inputs["Detail"].default_value = 4.0
         nt.links.new(tc.outputs["Object"], wv.inputs["Vector"])
         mx = nt.nodes.new("ShaderNodeMapRange")
@@ -423,7 +428,7 @@ def sun():
     tc = nt.nodes.new("ShaderNodeTexCoord")
     nz = nt.nodes.new("ShaderNodeTexNoise")
     nz.noise_dimensions = "4D"
-    for k, v in (("Scale", 9.0), ("Detail", 10.0), ("Roughness", 0.65), ("Distortion", 2.2), ("W", 4.0)):
+    for k, v in (("Scale", 9.0), ("Detail", 10.0), ("Roughness", 0.65), ("Distortion", 2.2), ("W", 4.0 + 0.5 * T)):
         nz.inputs[k].default_value = v
     nt.links.new(tc.outputs["Object"], nz.inputs["Vector"])
     rp = nt.nodes.new("ShaderNodeValToRGB")
@@ -760,6 +765,8 @@ angles = SUBJECTS[SUBJECT]()
 if os.environ.get("HOLO_ANGLES"):           # try other angles: "lean,turn,roll"
     angles = tuple(float(v) for v in os.environ["HOLO_ANGLES"].split(","))
 lean, turn, roll = (tuple(angles) + (0.0,))[:3]
+if SUBJECT not in ("sun", "blackhole"):
+    turn += 18.0 * T                          # a slow sway forth and back
 pivot.location = crate_c
 pivot.rotation_mode = "ZYX"   # spin about the vertical first, then lean toward the viewer, then roll
 pivot.rotation_euler = (math.radians(lean), math.radians(roll), math.radians(turn))
@@ -816,7 +823,8 @@ if "callouts" in EXTRAS:
 for i in range(40):
     bpy.ops.mesh.primitive_ico_sphere_add(radius=rng.uniform(0.003, 0.007), subdivisions=1)
     p = bpy.context.object
-    p.location = on_screen(rng.uniform(-0.35, 0.35), rng.uniform(-0.25, 0.25), rng.uniform(0.0, 0.15))
+    x, y, z = rng.uniform(-0.35, 0.35), rng.uniform(-0.25, 0.25), rng.uniform(0.0, 0.15)
+    p.location = on_screen(x, y + 0.03 * T * (0.5 + (i % 3) * 0.5), z)   # drifting up
     p.data.materials.append(M_WHITE if i % 4 == 0 else M_LINE)
 
 # ---------------------------------------------------------------- beam and scan band
@@ -853,7 +861,8 @@ def gradient_plane(name, center, size, rot, color, strength, fade_up=True):
 # beam: from the projector bar up the face of the glass, fading upward
 gradient_plane("beam", on_screen(0, -hh + 0.12, 0.012), (SW * 0.98, 0.26), ROT, (0.1, 0.55, 1.0), 1.4)
 # a brighter scan band a third of the way up
-gradient_plane("scan", on_screen(0, 0.16, 0.006), (SW * 0.96, 0.02), ROT, (0.3, 0.8, 1.0), 0.5)
+gradient_plane("scan", on_screen(0, 0.16 if FRAMES == 1 else -0.25 + 0.5 * (T + 1) / 2, 0.006), (SW * 0.96, 0.02), ROT,
+               (0.3, 0.8, 1.0), 0.5)
 # blue light from the screen onto the desk top
 light("AREA", tuple(on_screen(0, -0.1, 0.15)), 40, (0.15, 0.55, 1.0), size=1.4, target=(0, -0.2, 0.78))
 
@@ -892,7 +901,7 @@ if VIEW == "bake":
     sc.view_settings.view_transform = "Standard"
     sc.view_settings.look = "None"
     sc.view_settings.exposure = -1.7   # keep peaks under 1 so colours survive; the app adds gain
-    sc.render.resolution_x, sc.render.resolution_y = 1024, 512
+    sc.render.resolution_x, sc.render.resolution_y = (1024, 512) if FRAMES == 1 else (512, 256)
     sc.render.image_settings.color_mode = "RGB"
     cd_.type = "ORTHO"
     cd_.ortho_scale = SW

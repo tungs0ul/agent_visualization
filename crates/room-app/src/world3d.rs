@@ -49,8 +49,9 @@ impl Spot {
 
     /// Where a robot stands to work here and the way it faces (radians about y).
     /// At the command core robots face the camera. At a crew desk the robot stands
-    /// by the desk's end, half turned to its screens, so it no longer hides the desk
-    /// and you see its face and its screens together (the user, 2026-11-19).
+    /// in the middle of the operator side, at the keyboard, facing its screens (the
+    /// user, 2026-11-19: "stand in the middle of the desk, look at the screen"); a
+    /// second or third robot at the same desk stands to either side.
     pub fn work_spot(self, slot: usize) -> (Vec3, f32) {
         match self {
             Spot::Command => {
@@ -58,9 +59,9 @@ impl Spot {
                 (self.center() + Vec3::new(side, 0.35, 0.0), 0.0)
             }
             Spot::Desk(_) => {
-                let side = if slot % 2 == 0 { 1.0 } else { -1.0 };
-                let along = 0.45 + 0.35 * (slot / 2) as f32;
-                (self.center() + Vec3::new(side * 1.3, 0.043, along), -side * 0.6)
+                // slot 0 at the middle, then alternately right and left of it
+                let side = [0.0, 0.65, -0.65, 1.3, -1.3][slot % 5];
+                (self.center() + Vec3::new(side, 0.043, 0.8), std::f32::consts::PI)
             }
         }
     }

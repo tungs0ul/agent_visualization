@@ -158,7 +158,7 @@ fn main() -> AppExit {
                 (receive_events, replay::tick, chat::dev_chat, chat::read_chats, end_dead_sessions),
                 settle_permissions,
                 hud::title,
-                (view3d::sync, look::reload, look::apply, probe::capture, hull::cutaway, view3d::desk_lights, view3d::teleporter, view3d::deliver, view3d::links, view3d::context_tank, view3d::celebrate, world3d::daylight, view3d::activity_holograms, view3d::light_trails, hud::trace, view3d::camera_input, view3d::frame).chain(),
+                (view3d::sync, look::reload, look::apply, probe::capture, hull::cutaway, view3d::desk_lights, view3d::screen_animation, view3d::teleporter, view3d::deliver, view3d::links, view3d::context_tank, view3d::celebrate, world3d::daylight, view3d::activity_holograms, view3d::light_trails, hud::trace, view3d::camera_input, view3d::frame).chain(),
                 pace_updates,
                 log_frame_rate.run_if(|| std::env::var_os("AGENT_ROOM_FPS_LOG").is_some()),
                 window::take_screenshots,

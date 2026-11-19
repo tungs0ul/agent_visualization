@@ -2300,3 +2300,15 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   Screen subjects read well from the hero camera. Still open: screen brightness looks
   fine but unmeasured; activity holograms vs screen subjects not yet checked closely.
   Hero (local): baseline/p21_app_hero.png.
+- 2026-11-19, Claude Opus 5.5: user: sub-agents should stand in the middle of the desk,
+  facing the screen, and the screen should animate while they work. `Spot::work_spot`
+  for desks: slot 0 at the middle of the operator side (0.8 m in front of the desk
+  centre), facing the screens (yaw π); more robots at ±0.65, ±1.3 m. Screens: the bake
+  now renders 8 frames per subject (`HOLO_FRAMES`/`HOLO_FRAME`, T -1..1: the subject
+  sways ±18°, the sun's plasma boils, the black hole's disc streaks flow inward, motes
+  drift up, a scan band sweeps), packed 4x2 into a 2048x512 atlas
+  (`tools/blender/atlas.py`, `bake_screens.sh`, ~2 min). `screens::ScreenArt` and
+  `view3d::screen_animation` play it forth and back at 6 fps (uv_transform) while a
+  robot works at the desk and rest on frame 3 otherwise. Checked in the app with a
+  busy replay: robots at the desk middle, the working desk's screen changes frame,
+  idle desks hold still. Screens (local): baseline/p22_*.png.

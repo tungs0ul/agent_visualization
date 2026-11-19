@@ -73,13 +73,68 @@ pub fn build(kit: &mut Kit, images: &mut Assets<Image>) {
             // The art: well over 1, added on top, so it blooms like a hologram. The
             // main screens are baked darker (exposure -1.7) to keep their colours.
             let gain = if i == 0 { MAIN_GAIN } else { ART_GAIN };
-            let art = kit.materials.add(unlit(texture, gain, AlphaMode::Add));
-            kit.commands.spawn((
+            let mut material = unlit(texture, gain, AlphaMode::Add);
+            if i == 0 {
+                material.uv_transform = frame_uv(REST_FRAME);
+            }
+            let art = kit.materials.add(material);
+            let mut screen = kit.commands.spawn((
                 Mesh3d(quad.clone()),
                 MeshMaterial3d(art),
                 Transform::from_translation(desk + at + front * 0.008).with_rotation(rotation).with_scale(scale),
             ));
+            if i == 0 {
+                screen.insert(ScreenArt { desk: index as u8, step: 0, clock: 0.0 });
+            }
         }
+    }
+}
+
+/// A desk's main screen: an atlas of `FRAMES` frames (4 columns, 2 rows) that plays
+/// forth and back while the desk works (`view3d::screen_animation`) and rests on the
+/// middle frame when it doesn't.
+#[derive(Component)]
+pub struct ScreenArt {
+    pub desk: u8,
+    step: usize,
+    clock: f32,
+}
+
+const FRAMES: usize = 8;
+const COLUMNS: usize = 4;
+const ROWS: usize = 2;
+const REST_FRAME: usize = 3;
+/// Frames per second while the desk works.
+const FPS: f32 = 6.0;
+
+/// The atlas window that shows frame `frame`.
+fn frame_uv(frame: usize) -> bevy::math::Affine2 {
+    let (col, row) = (frame % COLUMNS, frame / COLUMNS);
+    let size = Vec2::new(1.0 / COLUMNS as f32, 1.0 / ROWS as f32);
+    bevy::math::Affine2::from_scale_angle_translation(size, 0.0, Vec2::new(col as f32, row as f32) * size)
+}
+
+impl ScreenArt {
+    /// Moves the animation on by `dt` seconds; the new frame's UV window when the
+    /// frame changed.
+    pub fn advance(&mut self, dt: f32) -> Option<bevy::math::Affine2> {
+        self.clock += dt;
+        if self.clock < 1.0 / FPS {
+            return None;
+        }
+        self.clock = 0.0;
+        // forth and back: 0 1 .. 7 6 .. 1, then again
+        self.step = (self.step + 1) % (2 * FRAMES - 2);
+        let frame = if self.step < FRAMES { self.step } else { 2 * FRAMES - 2 - self.step };
+        Some(frame_uv(frame))
+    }
+
+    /// Back to the resting frame; its UV window when it wasn't there already.
+    pub fn rest(&mut self) -> Option<bevy::math::Affine2> {
+        let was = self.step;
+        self.step = REST_FRAME;
+        self.clock = 0.0;
+        (was != REST_FRAME).then(|| frame_uv(REST_FRAME))
     }
 }
 
@@ -90,7 +145,8 @@ const MAIN_GAIN: f32 = 3.2;
 
 /// The main screens' starship holograms, rendered in Blender
 /// (`tools/blender/holo_screen_proto.py`, `bake_screens.sh`): the subject, the UI and
-/// the beam as light only, straight on. One per desk, in this order.
+/// the beam as light only, straight on, 8 frames in an atlas. One per desk, in
+/// this order.
 const SUBJECTS: [&[u8]; 7] = [
     include_bytes!("../../../assets/textures/screens/rocket.png"),
     include_bytes!("../../../assets/textures/screens/planet.png"),

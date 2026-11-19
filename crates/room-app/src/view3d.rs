@@ -1165,6 +1165,29 @@ pub fn desk_lights(
     }
 }
 
+/// The desk screens' holograms move while a robot works at the desk and hold still
+/// otherwise (the user, 2026-11-19). The view redraws while agents work anyway.
+pub fn screen_animation(
+    time: Res<Time>,
+    avatars: Query<&Avatar>,
+    mut screens: Query<(&mut crate::screens::ScreenArt, &MeshMaterial3d<StandardMaterial>)>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    for (mut screen, material) in &mut screens {
+        let working = avatars.iter().any(|avatar| {
+            avatar.desk == Some(screen.desk)
+                && !matches!(avatar.presence, Presence::Leaving(_))
+                && !avatar.failed
+                && !avatar.done
+                && avatar.pose != Pose::Waiting
+        });
+        let uv = if working { screen.advance(time.delta_secs()) } else { screen.rest() };
+        if let (Some(uv), Some(mut material)) = (uv, uv.and_then(|_| materials.get_mut(&material.0))) {
+            material.uv_transform = uv;
+        }
+    }
+}
+
 /// The way a walking robot faces: where it actually moved this frame.
 fn transform_heading(before: Vec3, after: Vec3, fallback: Vec3) -> f32 {
     let moved = Vec3::new(after.x - before.x, 0.0, after.z - before.z);
