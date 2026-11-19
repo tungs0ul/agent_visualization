@@ -85,7 +85,14 @@ pub fn build(kit: &mut Kit) {
     let width = SIDE_X * 2.0 + 0.6;
     let depth = FRONT_Z - BACK_Z + 0.5;
     let middle_z = (FRONT_Z + BACK_Z) / 2.0;
-    kit.mesh(Cuboid::new(width, 0.3, depth), hull.clone(), Transform::from_xyz(0.0, CEILING + 0.15, middle_z));
+    // Ceiling #0B1428 (brief 3.5), darker than the walls.
+    let ceiling = kit.materials.add(StandardMaterial {
+        base_color: Color::srgb_u8(0x0B, 0x14, 0x28),
+        metallic: 0.5,
+        perceptual_roughness: 0.5,
+        ..default()
+    });
+    kit.mesh(Cuboid::new(width, 0.3, depth), ceiling, Transform::from_xyz(0.0, CEILING + 0.15, middle_z));
     for z in [-1.0, 2.6] {
         kit.mesh(Cuboid::new(width - 0.6, 0.4, 0.55), trim.clone(), Transform::from_xyz(0.0, CEILING - 0.2, z));
         kit.mesh(Cuboid::new(width - 0.8, 0.03, 0.1), white.clone(), Transform::from_xyz(0.0, CEILING - 0.42, z));

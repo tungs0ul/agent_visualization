@@ -2143,3 +2143,22 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   crops identical between two frames 0.5 s apart; 60 fps (debug build, 2800x1782).
   Screens (local): baseline/fix01_*.png. **Next:** wait for the user's review; do not
   start phase 4.
+- 2026-11-19, Claude Opus 5.5: M30 PROMPT_02 step 1 (look pass; brief in
+  `docs/agent-room-visual-overhaul/PROMPT_02_models_and_look.md`). New `probe.rs`: about
+  2.5 s after start, six 90° cameras render the room into 256 px HDR faces (main
+  exposure, no tonemapping), GPU readback, rows mirrored, assembled into a cube and
+  swapped into the camera's GeneratedEnvironmentMapLight. The startup cubemap must
+  be the same size (Bevy sizes the filter's mip chain from the first map and fails
+  validation otherwise). `env_intensity` now means "as seen" ≈ 1.2·2^ev100; 850 in
+  look.json. Blender: floor panels in three roughnesses with clearcoat 0.4
+  (KHR_materials_clearcoat), pad and centre bezels dark trim, rings thin RingCyan
+  tubes (strength 9), screen glass dark navy alpha 0.55, page content dim blue
+  (no white). Desk state halos are thin tori, not 16 cm annuli. Ceiling #0B1428. The
+  stray floor bar was the trophy shelf cuboid in `view3d::celebrate` (unnamed mesh):
+  removed. Camera (0,6,15.6) → (0,0,-4), FOV 0.785: the whole window band shows; the
+  open front edge leaves a dark band at the bottom. `AGENT_ROOM_CAMERA=<turn°>,<zoom>
+  [,<pan x>,<pan z>]` starts from another angle (orbit screenshots). Lights:
+  spot_scale 1.7, point_scale 1.6, ambient 90, post_saturation 0.9. Metrics 7/7:
+  median 0.189, dark 39%, glow 12%, p95 0.72; walls/floor identical across 0.5 s;
+  49–56 fps debug. Orbiting ±40° shows outside the shell (camera rig limits are step 8).
+  Screens (local): baseline/p02s1_*.png. **Next:** user review, then step 2 (desk console).

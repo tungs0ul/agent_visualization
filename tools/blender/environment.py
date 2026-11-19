@@ -51,10 +51,14 @@ scene = bpy.context.scene
 
 
 # ---------------------------------------------------------------- materials
-def make_material(name, color, rough, metal=0.0, emit=None, strength=0.0, alpha=1.0):
+def make_material(name, color, rough, metal=0.0, emit=None, strength=0.0, alpha=1.0, coat=0.0):
     mat = bpy.data.materials.new(name)
     mat.use_nodes = True
     bsdf = mat.node_tree.nodes.get("Principled BSDF")
+    if coat > 0.0:
+        # Exported as KHR_materials_clearcoat; Bevy reads it into `clearcoat`.
+        bsdf.inputs["Coat Weight"].default_value = coat
+        bsdf.inputs["Coat Roughness"].default_value = 0.08
     bsdf.inputs["Base Color"].default_value = (*color, 1.0)
     bsdf.inputs["Roughness"].default_value = rough
     bsdf.inputs["Metallic"].default_value = metal
@@ -71,8 +75,16 @@ CYAN = (0.0, 0.62, 1.0)
 PURPLE = (0.45, 0.12, 1.0)
 ORANGE = (1.0, 0.38, 0.05)
 MATS = {m.name: m for m in [
-    make_material("Floor", (0.0044, 0.0103, 0.0331), 0.3, metal=0.75),
-    make_material("FloorAlt", (0.006, 0.014, 0.042), 0.26, metal=0.75),
+    # Floor #0E1A33, glossy with a clear coat; three roughnesses so neighbouring panels
+    # reflect a little differently (PROMPT_02 step 1).
+    make_material("Floor", (0.0044, 0.0103, 0.0331), 0.3, metal=0.75, coat=0.4),
+    make_material("FloorB", (0.0044, 0.0103, 0.0331), 0.24, metal=0.75, coat=0.4),
+    make_material("FloorC", (0.0044, 0.0103, 0.0331), 0.36, metal=0.75, coat=0.4),
+    make_material("FloorAlt", (0.006, 0.014, 0.042), 0.28, metal=0.75, coat=0.4),
+    # Dark trim (#1A2640) for bezels round the floor rings.
+    make_material("Trim", (0.0103, 0.0185, 0.0513), 0.28, metal=0.85),
+    # Ring tubes: thin, intense cyan (#38C8FF tier T2/T3).
+    make_material("RingCyan", (0.04, 0.58, 1.0), 0.3, emit=(0.04, 0.58, 1.0), strength=9.0),
     make_material("Seam", (0.008, 0.009, 0.012), 0.6, metal=0.3),
     make_material("Pad", (0.0018, 0.006, 0.0242), 0.35, metal=0.7),
     make_material("Panel", (0.006, 0.0159, 0.0513), 0.45, metal=0.5),
@@ -208,23 +220,23 @@ def floor_panel(x0, y0, x1, y1, mat):
 for i in range(len(XS_F) - 1):
     for j in range(len(YS_F) - 1):
         outer = i in (0, len(XS_F) - 2) or j in (0, len(YS_F) - 2)
-        floor_panel(XS_F[i], YS_F[j], XS_F[i + 1], YS_F[j + 1], "FloorAlt" if outer else "Floor")
+        floor_panel(XS_F[i], YS_F[j], XS_F[i + 1], YS_F[j + 1], "FloorAlt" if outer else ("Floor", "FloorB", "FloorC")[(i * 2 + j) % 3])
 rect(fb, -10.1, -6.5, 10.1, 6.95, -0.03, "Seam")
 
 # Centre: one seamless polished disc with a glow edge and a hexagon inlay around it.
 Z1, Z2, Z3 = 0.002, 0.004, 0.006
 disc(fb, 0, 0, 3.3, Z1, "FloorAlt", seg=96)
-annulus(fb, 0, 0, 3.3, 3.34, Z2, "Metal")
-annulus(fb, 0, 0, 3.34, 3.36, Z2, "GlowCyan")
-annulus(fb, 0, 0, 4.10, 4.14, Z1, "Metal", seg=6)
+annulus(fb, 0, 0, 3.3, 3.34, Z2, "Trim")
+annulus(fb, 0, 0, 3.34, 3.352, Z2, "RingCyan")
+annulus(fb, 0, 0, 4.10, 4.14, Z1, "Trim", seg=6)
 annulus(fb, 0, 0, 4.16, 4.172, Z1, "GlowPurple", seg=6)
 
 # Docking rings: dark pad, glowing ring, metal bezel; four orange markers on the main ring.
 for (cx, cy), r in STATIONS:
     disc(fb, cx, cy, r - 0.05, Z2, "Pad", seg=72)
-    annulus(fb, cx, cy, r - 0.05, r - 0.02, Z3, "Metal", seg=72)
-    annulus(fb, cx, cy, r - 0.02, r + 0.04, Z3, "GlowCyan", seg=72)
-    annulus(fb, cx, cy, r + 0.04, r + 0.11, Z3, "Metal", seg=72)
+    annulus(fb, cx, cy, r - 0.05, r - 0.01, Z3, "Trim", seg=72)
+    annulus(fb, cx, cy, r - 0.01, r + 0.01, Z3, "RingCyan", seg=72)
+    annulus(fb, cx, cy, r + 0.01, r + 0.11, Z3, "Trim", seg=72)
     annulus(fb, cx, cy, r + 0.11, r + 0.125, Z3, "Seam", seg=72)
     inner = r * 0.62
     annulus(fb, cx, cy, inner, inner + 0.012, Z3, "GlowCyan", seg=72)

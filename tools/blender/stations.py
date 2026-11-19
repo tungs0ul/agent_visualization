@@ -60,13 +60,20 @@ MAT_SPECS = {
     "PanelDark": dict(color=(0.025, 0.035, 0.06), rough=0.12, metal=0.2),
     "Trim": dict(color=(0.62, 0.68, 0.78), rough=0.18, metal=0.95),
     "GlowCyan": dict(color=CYAN, rough=0.3, emit=CYAN, strength=2.6),
+    # Ring tubes: the brief's tier T2/T3 cyan, thin and intense with a burnt-white core.
+    "RingCyan": dict(color=CYAN, rough=0.3, emit=CYAN, strength=9.0),
     "GlowOrange": dict(color=ORANGE, rough=0.3, emit=ORANGE, strength=2.4),
     "GlowPurple": dict(color=PURPLE, rough=0.3, emit=PURPLE, strength=2.4),
     "GlowGreen": dict(color=GREEN, rough=0.3, emit=GREEN, strength=6.0),
-    "Holo": dict(color=(0.02, 0.2, 1.0), rough=0.2, emit=(0.03, 0.24, 1.0), strength=3.0, alpha=0.8),
+    # Screen glass: dark translucent navy (#06122C, alpha 0.55); only the content on it
+    # glows (PROMPT_02 step 1: no white or blown-out screens).
+    "Holo": dict(color=(0.0024, 0.0060, 0.0242), rough=0.2, emit=(0.004, 0.02, 0.07), strength=1.0, alpha=0.55),
     "HoloDark": dict(color=(0.01, 0.05, 0.08), rough=0.2, emit=(0.02, 0.25, 0.35), strength=1.0, alpha=0.6),
     "Glass": dict(color=(0.7, 0.92, 1.0), rough=0.05, alpha=0.2),
-    "Paper": dict(color=(0.93, 0.96, 1.0), rough=0.6, emit=(0.85, 0.93, 1.0), strength=1.2),
+    # Pages and cursors on screens: a dim holo blue, not white.
+    "Paper": dict(color=(0.01, 0.04, 0.12), rough=0.6, emit=(0.03, 0.2, 0.75), strength=0.8),
+    # Pad rims: dark trim (#1A2640) so the thin ring tube is the only bright edge.
+    "PadRim": dict(color=(0.0103, 0.0185, 0.0513), rough=0.28, metal=0.85),
     "Leaf": dict(color=(0.04, 0.32, 0.13), rough=0.45),
     "Pot": dict(color=(0.9, 0.91, 0.93), rough=0.25),
     "BookBlue": dict(color=(0.12, 0.25, 0.65), rough=0.55),
@@ -473,10 +480,10 @@ def holo_screen(center, w, h, yaw=0.0, tilt=10.0, content="bars", frame="GlowCya
 
 def floor_disc(cx, cy, r, h=0.04, segs=64):
     """Circular illuminated platform: white rim, dark glossy top, glowing rings."""
-    disc((cx, cy, 0), r, 0.0, h, "Panel", segs=segs, bevel=0.012, bsegs=2)
+    disc((cx, cy, 0), r, 0.0, h, "PadRim", segs=segs, bevel=0.012, bsegs=2)
     disc((cx, cy, 0), r - 0.1, h, h + 0.003, "PanelDark", segs=segs)
-    ring((cx, cy, 0), r - 0.1, r - 0.075, h - 0.002, h + 0.005, "GlowCyan", segs=segs)
-    ring((cx, cy, 0), r - 0.012, r + 0.004, h * 0.35, h * 0.65, "GlowCyan", segs=segs)
+    ring((cx, cy, 0), r - 0.1, r - 0.088, h - 0.002, h + 0.006, "RingCyan", segs=segs)
+    ring((cx, cy, 0), r - 0.006, r + 0.004, h * 0.4, h * 0.6, "RingCyan", segs=segs)
     ring((cx, cy, 0), r * 0.42, r * 0.42 + 0.015, h, h + 0.005, "GlowCyan", segs=segs)
     for k in range(4):
         a = 45 + 90 * k

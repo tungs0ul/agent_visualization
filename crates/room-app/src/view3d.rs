@@ -152,7 +152,7 @@ pub fn build(
         Camera3d::default(),
         // The brief's framing (section 4, FIX 01 step 3): the room fills the width, the
         // window band near the top, the core a little above the middle.
-        Projection::Perspective(PerspectiveProjection { fov: 0.80, ..default() }),
+        Projection::Perspective(PerspectiveProjection { fov: 0.785, ..default() }),
         Camera {
             order: 0,
             clear_color: ClearColorConfig::Custom(Color::srgb(0.02, 0.02, 0.06)),
@@ -173,7 +173,7 @@ pub fn build(
         // What polished metal reflects (PLAN.md M29): a generated bridge-like
         // surround, filtered by Bevy once at start.
         bevy::light::GeneratedEnvironmentMapLight {
-            environment_map: images.add(crate::space::environment(64)),
+            environment_map: images.add(crate::space::environment(crate::probe::SIZE)),
             intensity: 1600.0,
             ..default()
         },
@@ -876,11 +876,11 @@ pub fn frame(
 }
 
 /// Where the camera looks at the whole workspace from.
-/// The camera (FIX 01 step 3): just under the ceiling's front edge, looking down 24°,
-/// fitted so the window band starts near the top, the robot's head sits at about 38%
+/// The camera (PROMPT_02 step 1): below the ceiling's front edge, looking down 17°,
+/// fitted so the whole window band shows near the top, the robot's head sits at about 38%
 /// and the teleporter at about 71% of the height. `space` places things by this eye.
-pub(crate) const FULL_EYE: Vec3 = Vec3::new(0.0, 7.0, 14.0);
-const FULL_LOOK: Vec3 = Vec3::new(0.0, 0.0, -1.7);
+pub(crate) const FULL_EYE: Vec3 = Vec3::new(0.0, 6.0, 15.6);
+const FULL_LOOK: Vec3 = Vec3::new(0.0, 0.0, -4.0);
 
 /// The hologram floating beside a robot: a picture of what it is doing right now
 /// (PLAN.md M17, "the holograms are the visualisation of its mind").
@@ -1396,8 +1396,17 @@ pub struct CameraView {
 }
 
 impl Default for CameraView {
+    /// The hero view, or `AGENT_ROOM_CAMERA=<turn°>,<zoom>[,<pan x>,<pan z>]` for
+    /// screenshots from other angles (the brief's orbit shots).
     fn default() -> Self {
-        Self { pan: Vec2::ZERO, zoom: 1.0, turn: 0.0, tilt: 0.0 }
+        let view = Self { pan: Vec2::ZERO, zoom: 1.0, turn: 0.0, tilt: 0.0 };
+        let Ok(spec) = std::env::var("AGENT_ROOM_CAMERA") else { return view };
+        let numbers: Vec<f32> = spec.split(',').filter_map(|part| part.trim().parse().ok()).collect();
+        match numbers[..] {
+            [turn, zoom, x, z] => Self { turn: turn.to_radians(), zoom, pan: Vec2::new(x, z), ..view },
+            [turn, zoom] => Self { turn: turn.to_radians(), zoom, ..view },
+            _ => view,
+        }
     }
 }
 
@@ -1711,21 +1720,8 @@ pub fn celebrate(
     let (cube, spark_glow, gold) = state
         .look
         .get_or_insert_with(|| {
-            // A dark trim ledge with a faint cyan edge; it used to be a bright amber bar
-            // that read as a stray yellow stripe on the floor (FIX 01 step 4).
-            let shelf = materials.add(StandardMaterial {
-                base_color: Color::srgb_u8(0x1A, 0x26, 0x40),
-                emissive: LinearRgba::rgb(0.0, 0.06, 0.12),
-                metallic: 0.85,
-                perceptual_roughness: 0.3,
-                ..default()
-            });
-            let length = TROPHY_STEP * crate::wins::SHELF as f32;
-            commands.spawn((
-                Mesh3d(meshes.add(Cuboid::new(length, 0.03, 0.2))),
-                MeshMaterial3d(shelf),
-                Transform::from_translation(SHELF_AT + Vec3::new(length / 2.0 - TROPHY_STEP / 2.0, 0.3, 0.0)),
-            ));
+            // No shelf mesh: its bar on the floor read as a stray stripe (FIX 01 step 4,
+            // PROMPT_02 step 1). Trophy cubes float on their own at the front edge.
             (
                 meshes.add(Cuboid::new(1.0, 1.0, 1.0)),
                 materials.add(StandardMaterial { base_color: Color::BLACK, emissive: LinearRgba::rgb(3.0, 2.6, 6.0), ..default() }),

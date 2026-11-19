@@ -253,13 +253,14 @@ pub fn build(kit: &mut Kit) {
         // The desk's own light over the floor ring, coloured by its robot's state
         // (`view3d::desk_lights`).
         let light = kit.materials.add(StandardMaterial { base_color: Color::BLACK, emissive: DeskState::Free.glow(), ..default() });
-        // A halo on the floor just outside the desk's own disc (`stations.py`
-        // `floor_disc`: r 1.45, 0.3 m forward): dark while the desk is free.
-        let ring = kit.meshes.add(Annulus::new(1.5, 1.66));
+        // A thin light tube on the floor just outside the desk's own disc (`stations.py`
+        // `floor_disc`: r 1.45, 0.3 m forward): dark while the desk is free. A tube,
+        // not a wide halo plane: bloom makes the halo (PROMPT_02 step 1).
+        let ring = kit.meshes.add(Torus::new(1.565, 1.59));
         kit.commands.spawn((
             Mesh3d(ring),
             MeshMaterial3d(light),
-            Transform::from_translation(at + Vec3::new(0.0, 0.02, 0.3)).with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
+            Transform::from_translation(at + Vec3::new(0.0, 0.015, 0.3)),
             DeskLight { desk: index as u8, shown: DeskState::Free },
         ));
         let dir = (at - command).normalize();
@@ -287,10 +288,10 @@ impl DeskState {
     pub fn glow(self) -> LinearRgba {
         match self {
             DeskState::Free => LinearRgba::BLACK,
-            DeskState::Working => LinearRgba::rgb(0.08, 1.15, 2.4),
-            DeskState::Waiting => LinearRgba::rgb(4.0, 2.2, 0.4),
-            DeskState::Done => LinearRgba::rgb(0.4, 3.6, 1.6),
-            DeskState::Failed => LinearRgba::rgb(4.0, 0.6, 0.8),
+            DeskState::Working => LinearRgba::rgb(0.3, 4.6, 9.0),
+            DeskState::Waiting => LinearRgba::rgb(9.0, 5.0, 0.9),
+            DeskState::Done => LinearRgba::rgb(0.9, 8.0, 3.6),
+            DeskState::Failed => LinearRgba::rgb(9.0, 1.4, 1.8),
         }
     }
 }
