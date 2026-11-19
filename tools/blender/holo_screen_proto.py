@@ -533,7 +533,7 @@ def ship():
 def blackhole():
     # the familiar look: a black core, a thin photon ring, a flat accretion disc
     # (white-hot inside, orange, fading out, streaked) seen from a little above, and
-    # the disc's far side bent over and under the core by its gravity
+    # the disc's far side bent over and under the core by its gravity (no outer ring: the user dropped it)
     stops = [(0.0, (1.0, 0.95, 0.8, 1.0)), (0.15, (1.0, 0.7, 0.3, 0.9)), (0.45, (1.0, 0.38, 0.08, 0.55)),
              (1.0, (0.6, 0.1, 0.05, 0.0))]
     disc_mat = radial_material("disc", stops, 5.0, inner=0.085, outer=0.28, rings=40.0)
@@ -547,7 +547,6 @@ def blackhole():
     h.location = (0, 0.02, 0)
     ring = part(tor, M_HOT, (0, -0.002, 0), major_radius=0.083, minor_radius=0.0025, major_segments=96)
     facing_camera(ring)
-    part(tor, M_VIOLET, (0, 0.03, 0), major_radius=0.26, minor_radius=0.0012, major_segments=128).rotation_euler = (math.radians(90 + TILT), 0, 0)
     return (0, 0)
 
 
