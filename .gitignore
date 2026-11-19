@@ -2,3 +2,7 @@ target/
 .DS_Store
 .claude/worktrees/
 .claude/settings.local.json
+
+# Visual overhaul images: local only (large); the reference pack lives in ~/Downloads/agent-room-visual-overhaul.
+docs/agent-room-visual-overhaul/reference/
+docs/agent-room-visual-overhaul/baseline/

@@ -1,6 +1,6 @@
 {
-  "exposure_ev100": 9.7,
-  "ambient_brightness": 25.0,
+  "exposure_ev100": 8.9,
+  "ambient_brightness": 45.0,
   "ambient_color": "#1A3A7A",
   "key_lux": 1800.0,
   "key_color": "#9CC2FF",
@@ -8,11 +8,14 @@
   "spot_scale": 1.0,
   "point_scale": 1.0,
   "emissive_scale": 1.0,
-  "post_saturation": 1.15,
+  "post_saturation": 1.0,
   "temperature": -0.05,
   "midtones_contrast": 1.06,
-  "shadows_saturation": 1.15,
+  "shadows_saturation": 1.0,
   "highlights_saturation": 0.95,
   "vignette": 0.3,
+  "bloom_intensity": 0.12,
+  "bloom_spread": 0.2,
+  "bloom_threshold": 1.0,
   "sky_color": "#020A1E"
 }

@@ -36,6 +36,13 @@ pub struct Look {
     pub highlights_saturation: f32,
     /// 0 none, 1 black corners.
     pub vignette: f32,
+    /// Glow halo strength; 0 turns bloom off.
+    pub bloom_intensity: f32,
+    /// How wide the halo spreads: 0 tight around the strips, 1 a wide haze.
+    pub bloom_spread: f32,
+    /// Only light brighter than this (scene units after exposure) blooms, so the
+    /// room's surfaces never haze over.
+    pub bloom_threshold: f32,
     pub sky_color: String,
 }
 
@@ -57,6 +64,9 @@ impl Default for Look {
             shadows_saturation: 1.15,
             highlights_saturation: 0.95,
             vignette: 0.3,
+            bloom_intensity: 0.12,
+            bloom_spread: 0.2,
+            bloom_threshold: 1.0,
             sky_color: "#020A1E".into(),
         }
     }
@@ -140,6 +150,19 @@ pub fn apply(
         grading,
         Vignette { intensity: look.vignette, ..default() },
     ));
+    if look.bloom_intensity > 0.0 {
+        use bevy::post_process::bloom::{Bloom, BloomCompositeMode, BloomPrefilter};
+        commands.entity(entity).insert(Bloom {
+            intensity: look.bloom_intensity,
+            low_frequency_boost: look.bloom_spread,
+            high_pass_frequency: 0.4 + 0.6 * look.bloom_spread,
+            prefilter: BloomPrefilter { threshold: look.bloom_threshold, threshold_softness: 0.4 },
+            composite_mode: BloomCompositeMode::Additive,
+            ..Bloom::NATURAL
+        });
+    } else {
+        commands.entity(entity).remove::<bevy::post_process::bloom::Bloom>();
+    }
     for mut light in &mut sun {
         light.illuminance = look.key_lux;
         light.color = Look::color(&look.key_color);

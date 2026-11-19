@@ -229,7 +229,7 @@ pub fn build(kit: &mut Kit) {
         (command + Vec3::new(0.0, 3.8, -0.4), Color::srgb(0.35, 0.8, 1.0), 350_000.0, 9.0),
         (teleporter_spot() + Vec3::Y * 1.2, Color::srgb(0.3, 0.75, 1.0), 300_000.0, 6.0),
     ] {
-        kit.commands.spawn((PointLight { color, intensity: lumens, range, ..default() }, Transform::from_translation(at), crate::look::BaseIntensity(lumens)));
+        kit.commands.spawn((PointLight { color, intensity: lumens, range, contact_shadows_enabled: true, ..default() }, Transform::from_translation(at), crate::look::BaseIntensity(lumens)));
     }
     for index in 0..DESKS.len() {
         let at = Spot::Desk(index as u8).center();

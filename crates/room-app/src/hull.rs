@@ -116,6 +116,8 @@ pub fn build(kit: &mut Kit) {
                 radius: radius * 0.6,
                 inner_angle: 0.35,
                 outer_angle: 0.85,
+                shadow_maps_enabled: true,
+                contact_shadows_enabled: true,
                 ..default()
             },
             Transform::from_translation(centre - Vec3::Y * 0.1).looking_at(Vec3::new(at.x, 0.0, at.y), Vec3::Z),

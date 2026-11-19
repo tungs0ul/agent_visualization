@@ -128,6 +128,8 @@ fn main() -> AppExit {
         .init_resource::<notify::Bells>()
         .init_resource::<replay::Replay>()
         .insert_resource(look::Look::built_in())
+        // Deferred shading: screen-space reflections need it (PLAN.md M30 phase 2).
+        .insert_resource(bevy::pbr::DefaultOpaqueRendererMethod::deferred())
         .init_resource::<usage::Usage>()
         .init_resource::<wins::Wins>()
         .init_resource::<view3d::BrightHolos>()

@@ -9,6 +9,8 @@ the user for the full text if a detail is missing here.
   image; those were not provided.
 - `tools/look_metrics.py`: written here (the brief's version was not provided). No
   dependencies; run `python3 -I tools/look_metrics.py <shot.png>`.
+- `reference/` and `baseline/` are local only (git-ignored, large PNGs). The reference
+  pack is in ~/Downloads/agent-room-visual-overhaul; copy it here to run the metrics.
 - `baseline/phase0_hero.png`: the build before the overhaul (commit bf522aa).
 
 ## Ground rules (brief section 0)

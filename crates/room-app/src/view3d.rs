@@ -159,7 +159,17 @@ pub fn build(
             ..default()
         },
         Tonemapping::TonyMcMapface,
-        Msaa::Sample4,
+        // Best look first (the user, 2026-11-19: "I don't care for the performance now"):
+        // deferred shading for floor reflections, ambient occlusion, contact shadows and
+        // temporal anti-aliasing, which needs multisampling off. Bloom comes from the
+        // look settings (`look::apply`).
+        (
+            Msaa::Off,
+            bevy::anti_alias::taa::TemporalAntiAliasing::default(),
+            bevy::pbr::ScreenSpaceAmbientOcclusion::default(),
+            bevy::pbr::ScreenSpaceReflections { thickness: 0.4, linear_steps: 24, ..default() },
+            bevy::pbr::ContactShadows::default(),
+        ),
         Transform::from_translation(FULL_EYE).looking_at(FULL_LOOK, Vec3::Y),
         // What polished metal reflects (PLAN.md M29): a generated bridge-like
         // surround, filtered by Bevy once at start.
@@ -170,9 +180,8 @@ pub fn build(
         },
     ));
     commands.spawn((
-        // Illuminance and colour come from the look settings (`look::apply`); no shadow
-        // maps: the user chose the plain look over the heavier graphics presets.
-        DirectionalLight { illuminance: 1800.0, shadow_maps_enabled: false, ..default() },
+        // Illuminance and colour come from the look settings (`look::apply`).
+        DirectionalLight { illuminance: 1800.0, shadow_maps_enabled: true, contact_shadows_enabled: true, ..default() },
         Transform::from_rotation(Quat::from_euler(EulerRot::YXZ, -0.6, -0.95, 0.0)),
         CascadeShadowConfigBuilder { num_cascades: 1, maximum_distance: 30.0, ..default() }.build(),
     ));

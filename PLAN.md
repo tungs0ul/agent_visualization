@@ -2107,3 +2107,19 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   overhaul/` (PROMPT.md, reference images, crops, tools). Metrics (tools/look_metrics.py
   with a scratch venv for numpy/pillow): 7/7 within tolerance, was 1/7; glow share
   6.6% vs 10.4%. Screens: baseline/phase1_hero.png, phase1_compare.png.
+- 2026-11-19, Claude Opus 5.5: M30 phase 2 (lighting and reflections), first pass. The
+  user: "I don't care for the performance now, just give me the best look first". The
+  camera now uses deferred shading (`DefaultOpaqueRendererMethod::deferred()` in
+  main.rs), TAA with MSAA off, SSAO, screen-space reflections (thickness 0.4, 24
+  steps) and contact shadows. The key light and the ceiling spots cast shadow maps.
+  Bloom comes back tight: `bloom_intensity` 0.12, `bloom_spread` 0.2, `bloom_threshold`
+  1.0 (additive, so only strips above the threshold get a halo, no haze), all in
+  look.json. Exposure ev100 is 8.9 (was 9.7), ambient 45, post/shadow saturation 1.0
+  to compensate for the darker SSAO and shadows. Metrics: 5/7 within tolerance, median
+  0.144 against 0.198 and dark share 52% against 36% (both too dark). The reference
+  pack and baseline PNGs were removed from the two unpushed commits (filter-branch)
+  and are now git-ignored, so they stay local only. The amber floor strip at the
+  front right was already there in phase 1. Screens: baseline/phase2_hero.png and
+  phase2_compare.png (local). **Next:** user verdict on the bloom; then framing
+  (camera higher and steeper, less empty ceiling), core glow and desk screen-wash
+  lights, then phase 3 (HUD).
