@@ -521,34 +521,108 @@ def sun():
     return (TILT, 0)
 
 
+def rim_face(name="rimface"):
+    """Smooth translucent blue whose edges glow cyan (by how much the surface turns
+    away from the viewer): a hologram outline without wireframe lines."""
+    mt, nt = emit(name, BLUE, 1.0, alpha=0.5)
+    em = [n for n in nt.nodes if n.type == "EMISSION"][0]
+    mix = [n for n in nt.nodes if n.type == "MIX_SHADER"][0]
+    lw = nt.nodes.new("ShaderNodeLayerWeight")
+    lw.inputs["Blend"].default_value = 0.25
+    pw = nt.nodes.new("ShaderNodeMath")
+    pw.operation = "POWER"
+    pw.inputs[1].default_value = 2.0
+    nt.links.new(lw.outputs["Facing"], pw.inputs[0])
+    col = nt.nodes.new("ShaderNodeMix")
+    col.data_type = "RGBA"
+    col.inputs["A"].default_value = (*BLUE, 1)
+    col.inputs["B"].default_value = (0.3, 0.9, 1.0, 1)
+    nt.links.new(pw.outputs[0], col.inputs["Factor"])
+    nt.links.new(col.outputs["Result"], em.inputs["Color"])
+    st = nt.nodes.new("ShaderNodeMapRange")
+    st.inputs["To Min"].default_value, st.inputs["To Max"].default_value = 2.5, 9.0
+    nt.links.new(pw.outputs[0], st.inputs["Value"])
+    nt.links.new(st.outputs["Result"], em.inputs["Strength"])
+    al = nt.nodes.new("ShaderNodeMapRange")
+    al.inputs["To Min"].default_value, al.inputs["To Max"].default_value = 0.45, 0.95
+    nt.links.new(pw.outputs[0], al.inputs["Value"])
+    nt.links.new(al.outputs["Result"], mix.inputs[0])
+    return mt
+
+
+def flat(points, thick, mat, wire=None, rot_z=0.0, mirror_y=False):
+    """A thin flat plate from (x, z) outline points (y is the thickness), e.g. a fin
+    or a wing; with `wire`, its glowing outline only."""
+    me = bpy.data.meshes.new("plate")
+    n = len(points)
+    verts = [(x, y, z) for y in (-thick / 2, thick / 2) for x, z in points]
+    faces = [tuple(range(n)), tuple(range(2 * n - 1, n - 1, -1))]
+    faces += [(i, i + n, (i + 1) % n + n, (i + 1) % n) for i in range(n)]
+    me.from_pydata(verts, [], faces)
+    ob = bpy.data.objects.new("plate", me)
+    sc.collection.objects.link(ob)
+    ob.rotation_euler = (0, 0, math.radians(rot_z))
+    ob.data.materials.append(mat)
+    if wire:
+        mm = ob.modifiers.new("w", "WIREFRAME")
+        mm.thickness = wire
+    ob.parent = pivot
+    return ob
+
+
 def station():
-    # a hub, a ring on four spokes, a truss with two solar wings
-    both(cyl, vertices=16, radius=0.045, depth=0.12)
-    part(tor, M_EDGE, major_radius=0.2, minor_radius=0.018, major_segments=48, minor_segments=8)
-    part(tor, M_FACE, major_radius=0.2, minor_radius=0.017, major_segments=48, minor_segments=8)
+    # a hub, a ring on four spokes, a truss with two solar wings; smooth glowing
+    # surfaces, no wireframe (as the approved rocket)
+    rim = rim_face("station")
+    part(cyl, rim, vertices=48, radius=0.045, depth=0.12)
+    for z in (-0.06, 0.06):
+        part(tor, M_EDGE, (0, 0, z), major_radius=0.045, minor_radius=0.002, major_segments=48)
+    part(tor, rim, major_radius=0.2, minor_radius=0.02, major_segments=96, minor_segments=24)
+    for r in (0.18, 0.22):
+        part(tor, M_LINE, major_radius=r, minor_radius=0.0015, major_segments=96)
     for k in range(4):
         a = k * 90 + 45
-        part(cube, M_LINE, (0.11 * math.cos(math.radians(a)), 0.11 * math.sin(math.radians(a)), 0),
-             (0.16, 0.006, 0.006), (0, 0, a), size=1)
-    part(cube, M_WHITE, (0, 0, 0), (0.008, 0.008, 0.46), size=1)
+        part(cyl, M_LINE, (0.11 * math.cos(math.radians(a)), 0.11 * math.sin(math.radians(a)), 0),
+             rot=(0, 90, a), vertices=12, radius=0.004, depth=0.15)
+    part(cyl, M_WHITE, vertices=12, radius=0.004, depth=0.46)
     for z in (-0.2, 0.2):
-        both(cube, (0, 0, z), (0.24, 0.004, 0.07), size=1, wire=0.002)
-        for i in range(1, 6):
-            part(cube, M_LINE_DIM, (-0.12 + i * 0.04, -0.003, z), (0.002, 0.002, 0.07), size=1)
-    part(ico, M_AMBER, (0.2, 0, 0), radius=0.012, subdivisions=2)
+        part(cube, rim, (0, 0, z), (0.24, 0.004, 0.07), size=1)
+        part(cube, M_EDGE, (0, 0, z), (0.24, 0.004, 0.07), size=1, wire=0.0025)
+        for i in (1, 2, 3):
+            part(cube, M_LINE_DIM, (-0.12 + i * 0.06, -0.003, z), (0.0015, 0.002, 0.066), size=1)
+    part(ico, M_AMBER, (0.2, 0, 0), radius=0.01, subdivisions=2)
+    part(ico, M_AMBER, (-0.2, 0, 0), radius=0.01, subdivisions=2)
     return (TILT + 60, 15)
 
 
 def ship():
-    # a long hull with a cockpit, swept wings and two engines glowing cyan
-    both(cone, (0.04, 0, 0), rot=(0, 90, 0), vertices=6, radius1=0.07, radius2=0.012, depth=0.42, wire=0.004)
-    both(cube, (-0.05, 0, 0), (0.18, 0.12, 0.05), size=1, wire=0.004)
+    # a sleek hull, a cockpit, swept wings, a tail fin and two engines glowing cyan;
+    # smooth glowing surfaces, outlines only on the flat parts (as the approved rocket)
+    rim = rim_face("ship")
+    part(uvs, rim, (0.0, 0, 0), (1.0, 0.26, 0.18), segments=48, ring_count=24, radius=0.26)
+    part(uvs, M_WHITE, (0.1, 0, 0.035), (1.0, 0.55, 0.4), segments=24, ring_count=12, radius=0.05)
+    part(tor, M_EDGE, (-0.12, 0, 0), (1, 1, 1), (0, 90, 0), major_radius=0.05, minor_radius=0.002, major_segments=48)
     for sy in (-1, 1):
-        both(cube, (-0.05, sy * 0.13, -0.005), (0.14, 0.16, 0.008), (0, 0, sy * 25), size=1, wire=0.003)
-        part(cyl, M_EDGE, (-0.15, sy * 0.045, 0), rot=(0, 90, 0), vertices=12, radius=0.025, depth=0.07)
-        part(cyl, M_HOT, (-0.19, sy * 0.045, 0), rot=(0, 90, 0), vertices=12, radius=0.02, depth=0.01)
-        part(cone, M_LINE, (-0.24, sy * 0.045, 0), rot=(0, -90, 0), vertices=12, radius1=0.02, radius2=0.0, depth=0.09)
-    part(uvs, M_WHITE, (0.1, 0, 0.03), (1.6, 1, 0.6), segments=16, ring_count=8, radius=0.025)
+        # wings: flat plates in the hull's plane, swept back
+        pts = [(0.06, sy * 0.04), (-0.12, sy * 0.04), (-0.17, sy * 0.2), (-0.1, sy * 0.2)]
+        for mat, wire in ((M_FACE, None), (M_EDGE, 0.0025)):
+            me = bpy.data.meshes.new("wing")
+            t = 0.004
+            verts = [(x, y, z) for z in (-t / 2, t / 2) for x, y in pts]
+            me.from_pydata(verts, [], [(0, 1, 2, 3), (7, 6, 5, 4), (0, 4, 5, 1), (1, 5, 6, 2), (2, 6, 7, 3), (3, 7, 4, 0)])
+            ob = bpy.data.objects.new("wing", me)
+            sc.collection.objects.link(ob)
+            ob.data.materials.append(mat)
+            if wire:
+                ob.modifiers.new("w", "WIREFRAME").thickness = wire
+            ob.parent = pivot
+        # engines on the wing roots
+        part(cyl, rim, (-0.17, sy * 0.07, 0), rot=(0, 90, 0), vertices=32, radius=0.022, depth=0.09)
+        part(tor, M_EDGE, (-0.215, sy * 0.07, 0), rot=(0, 90, 0), major_radius=0.022, minor_radius=0.0025, major_segments=32)
+        part(cyl, M_HOT, (-0.217, sy * 0.07, 0), rot=(0, 90, 0), vertices=24, radius=0.017, depth=0.004)
+        part(cone, M_LINE, (-0.26, sy * 0.07, 0), rot=(0, -90, 0), vertices=24, radius1=0.017, radius2=0.0, depth=0.08)
+    flat([(-0.06, 0.04), (-0.2, 0.04), (-0.22, 0.11), (-0.17, 0.11)], 0.004, M_FACE)
+    flat([(-0.06, 0.04), (-0.2, 0.04), (-0.22, 0.11), (-0.17, 0.11)], 0.004, M_EDGE, wire=0.0025)
     return (TILT + 22, -28)
 
 
