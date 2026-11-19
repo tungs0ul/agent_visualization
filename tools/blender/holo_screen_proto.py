@@ -329,12 +329,29 @@ def crate():
 
 def rocket():
     # upright, nose up, three fins, a porthole ring, an orange exhaust plume
-    both(cyl, (0, 0, 0.0), vertices=16, radius=0.06, depth=0.3)
-    both(cone, (0, 0, 0.2), vertices=16, radius1=0.06, radius2=0.0, depth=0.1)
+    # body and nose: smooth translucent faces, no wireframe (its vertical lines looked
+    # busy, the user said); rings mark the base, a band and the nose seam instead
+    part(cyl, M_FACE, (0, 0, 0.0), vertices=48, radius=0.06, depth=0.3)
+    part(cone, M_FACE, (0, 0, 0.2), vertices=48, radius1=0.06, radius2=0.0, depth=0.1)
+    for z in (-0.15, 0.15):
+        part(tor, M_EDGE, (0, 0, z), major_radius=0.06, minor_radius=0.0025, major_segments=48)
+    # three swept triangular fins, translucent with glowing outlines
     for k in range(3):
-        a = k * 120
-        both(cube, (0.075 * math.sin(math.radians(a)), 0.075 * math.cos(math.radians(a)), -0.11),
-             (0.05, 0.006, 0.09), (0, 0, -a + 90), size=1, wire=0.003)
+        a = k * 120 + 90
+        for mat, wire in ((M_FACE, None), (M_EDGE, 0.003)):
+            me = bpy.data.meshes.new("fin")
+            t = 0.003
+            pts = [(0.058, -0.07), (0.058, -0.15), (0.118, -0.185), (0.1, -0.12)]
+            verts = [(x, y, z) for y in (-t, t) for x, z in pts]
+            me.from_pydata(verts, [], [(0, 1, 2, 3), (7, 6, 5, 4), (0, 4, 5, 1), (1, 5, 6, 2), (2, 6, 7, 3), (3, 7, 4, 0)])
+            ob = bpy.data.objects.new("fin", me)
+            sc.collection.objects.link(ob)
+            ob.rotation_euler = (0, 0, math.radians(a))
+            ob.data.materials.append(mat)
+            if wire:
+                mm = ob.modifiers.new("w", "WIREFRAME")
+                mm.thickness = wire
+            ob.parent = pivot
     part(tor, M_WHITE, (0, 0, 0.07), rot=(90, 0, 0), major_radius=0.022, minor_radius=0.003)
     for z in (-0.06, 0.12):
         part(tor, M_LINE, (0, 0, z), major_radius=0.061, minor_radius=0.002, major_segments=32)
