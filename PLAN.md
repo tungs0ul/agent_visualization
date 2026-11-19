@@ -989,6 +989,15 @@ None of these is in the backlog above. The user picks.
 11. **Commit or open a PR from the writing desk** (M): git and `gh`. Moves the app from
     watching to doing, so the user decides.
 
+### M30: Visual overhaul to the target concept art (requested 2026-11-19, phase 0 done)
+
+The user's "Agent Room: Visual Overhaul Brief" with a target image; summary, target,
+metrics tool and baseline in `docs/agent-room-visual-overhaul/`. Nine phases, a report
+and the user's review after each. Phase 0 (audit) is done; see the handoff log.
+Decisions needed from the user before phase 1 (asked 2026-11-19): HUD stays egui
+(restyled) or moves to bevy_ui; the brief's always-on ambient motion and TAA against
+the always-on power budget (V2.md); the missing annotated image, crops and palette.
+
 ### M28: Mission control from the "Starship Mission Control 2.0" brief (requested 2026-11-19, done 2026-11-19)
 
 The user answered the triage below with "just do everything": all of "Take", and
@@ -2067,3 +2076,21 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   After that, not yet seen (display asleep): a glossier, less metallic floor
   (environment.py), brighter fixtures and stronger reflections. Next: judge the floor
   reflections and light pools on screen; consider SSR on High; measure power.
+
+- 2026-11-19, Claude Opus 5.5: M30 phase 0 (audit). Bevy 0.20.1. Camera: Camera3d,
+  TonyMcMapface, Bloom NATURAL at 0.22, MSAA 4 (High: SSAO + FXAA, MSAA off), no
+  Exposure, ColorGrading or DebandDither; forward rendering. Lights: one shadowed
+  directional key, GlobalAmbientLight 190 (0.48,0.64,1.0), cyan point lights at the
+  core and teleporter, five ceiling spot lights (`hull.rs`), eight amber desk lamps;
+  a generated cubemap as GeneratedEnvironmentMapLight. Materials: glTF from Blender
+  scripts (`tools/blender/`) plus StandardMaterials made in code (`world3d`, `hull`,
+  `space`), no custom shaders. UI: egui (bevy_egui), not bevy_ui. Agent state: `Model`
+  (sessions, agents, poses, `work.rs` calls and files, todos), `usage` (tokens,
+  context, limits), `activity`, `log`. The boxes before "Command", "Replay", "Chat"
+  and "Activity" were glyphs missing from egui's fonts (✦ ⏯ 💬 ▲ ▼); now plain words
+  (an icon font is phase 3). The yellow floor bar is the trophy shelf (`view3d::
+  celebrate`, a gold cube per finished turn), not debug. Baseline metrics (median L
+  0.31 vs 0.23, dark share 7% vs 31%, saturation 0.53 vs 0.74, glow 6.9% vs 14.2%,
+  dark colour #1B2E43 vs #0B2146). Not built yet from phase 0: look config with hot
+  reload, inspector, hero screenshot flag, FPS overlay (screenshot env vars and the
+  busy-session replay serve for now).

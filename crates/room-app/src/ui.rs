@@ -180,7 +180,7 @@ pub fn draw(
                     .inner_margin(egui::Margin::symmetric(8, 4))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new(format!("⏯ REPLAY · {name}")).small().strong().color(crate::palette::AMBER));
+                            ui.label(egui::RichText::new(format!("REPLAY · {name}")).small().strong().color(crate::palette::AMBER));
                             if ui.small_button("Controls").on_hover_text("Replay controls (H)").clicked() {
                                 open.0 = Some(Console::Replay);
                             }
@@ -1267,7 +1267,7 @@ fn activity_console(
     use crate::palette::{AMBER, CYAN, RED, TEXT, TEXT_DIM};
     let id = session.map(|session| session.id.as_str());
     ui.horizontal(|ui| {
-        let arrow = if feed.open.is_some() { "▼ Activity" } else { "▲ Activity" };
+        let arrow = if feed.open.is_some() { "Activity – hide" } else { "Activity" };
         if ui.small_button(egui::RichText::new(arrow).color(CYAN)).on_hover_text("Show or hide the activity console").clicked() {
             feed.open = if feed.open.is_some() { None } else { Some(FeedTab::Live) };
         }

@@ -81,12 +81,12 @@ impl Console {
         match self {
             Console::Settings => "⚙ Settings",
             Console::History => "📖 History",
-            Console::Chat => "💬 Chat",
+            Console::Chat => "Chat",
             Console::Diff => "± Changes",
             Console::Commands => "▶ Commands",
             Console::Launch => "✚ New session",
             Console::Stats => "📊 Today",
-            Console::Replay => "⏯ Replay",
+            Console::Replay => "Replay",
         }
     }
 

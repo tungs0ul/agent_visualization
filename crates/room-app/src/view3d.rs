@@ -690,7 +690,7 @@ pub fn labels(
                     .inner_margin(egui::Margin::symmetric(8, 4))
                     .show(ui, |ui| {
                         ui.set_max_width(360.0);
-                        ui.label(egui::RichText::new("✦ Command").strong().color(color));
+                        ui.label(egui::RichText::new("Command").strong().color(color));
                         if let Some(mission) = &mission {
                             ui.label(egui::RichText::new(mission).small().color(crate::palette::TEXT));
                         }
