@@ -204,6 +204,8 @@ fn handle(stream: UnixStream, senders: &Senders, waker: &Waker) {
         Ok(event) => event,
         Err(err) => return warn!("bad hook event: {err}"),
     };
+    // Kept for mission replay (PLAN.md M28), on this thread so the app never waits on it.
+    crate::replay::record(&event.session_id, &envelope.hook);
     let reply = envelope.needs_reply.then(|| ReplyHandle(reader.into_inner()));
     if senders.events.send(Incoming { event, reply }).is_ok()
         && let Some(wake) = waker.get()

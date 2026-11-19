@@ -21,14 +21,24 @@ pub enum Console {
     Launch,
     /// Today's numbers (the wall screen).
     Stats,
+    /// Play a recorded session back (PLAN.md M28).
+    Replay,
 }
 
 /// The holographic display on the left wall (`environment.py`, "Holo").
 const WALL_SCREEN: Vec3 = Vec3::new(-9.7, 2.2, -2.6);
 
 impl Console {
-    pub const ALL: [Console; 7] =
-        [Console::Settings, Console::History, Console::Chat, Console::Diff, Console::Commands, Console::Launch, Console::Stats];
+    pub const ALL: [Console; 8] = [
+        Console::Settings,
+        Console::History,
+        Console::Chat,
+        Console::Diff,
+        Console::Commands,
+        Console::Replay,
+        Console::Launch,
+        Console::Stats,
+    ];
 
     /// Opens from the command station (its sign and model). The teleporter and the
     /// wall screen have their own.
@@ -62,6 +72,7 @@ impl Console {
             Console::Commands => "Commands",
             Console::Launch => "New session",
             Console::Stats => "Today",
+            Console::Replay => "Mission replay",
         }
     }
 
@@ -75,6 +86,7 @@ impl Console {
             Console::Commands => "▶ Commands",
             Console::Launch => "✚ New session",
             Console::Stats => "📊 Today",
+            Console::Replay => "⏯ Replay",
         }
     }
 
@@ -88,13 +100,14 @@ impl Console {
             Console::Commands => Some(egui::Key::R),
             Console::Launch => Some(egui::Key::O),
             Console::Stats => Some(egui::Key::T),
+            Console::Replay => Some(egui::Key::H),
         }
     }
 
     /// Size of the hologram, in logical pixels (height 0: fit the content).
     fn size(self) -> egui::Vec2 {
         match self {
-            Console::Settings | Console::Launch => egui::vec2(320.0, 0.0),
+            Console::Settings | Console::Launch | Console::Replay => egui::vec2(380.0, 0.0),
             Console::History | Console::Stats => egui::vec2(380.0, 420.0),
             Console::Chat | Console::Diff | Console::Commands => egui::vec2(460.0, 480.0),
         }

@@ -43,15 +43,14 @@ pub fn draw(
     mut chat: Desk,
     mut markdown: ResMut<MarkdownCache>,
     mut panel: ResMut<PanelPrefs>,
-    mut styled: Local<bool>,
-    mut was_open: Local<Option<Console>>,
-    mut feed: Local<Feed>,
+    mut state: Local<UiState>,
+    mut replay: ResMut<crate::replay::Replay>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
     // Panels in the room's theme (PLAN.md M14).
-    if !*styled {
+    if !state.styled {
         ctx.set_visuals(visuals());
-        *styled = true;
+        state.styled = true;
     }
     let mut root = egui::Ui::new(
         ctx.clone(),
@@ -126,13 +125,13 @@ pub fn draw(
         // The folder's changes are read each time the writing desk's console opens.
         let shown_cwd = model.shown().and_then(|session| session.cwd.clone());
         let stale = chat.diff.cwd != shown_cwd;
-        if open.is(Console::Diff) && (*was_open != Some(Console::Diff) || stale) {
+        if open.is(Console::Diff) && (state.was_open != Some(Console::Diff) || stale) {
             match &shown_cwd {
                 Some(cwd) => chat.diff.load(cwd, chat.server.waker.clone()),
                 None => *chat.diff = crate::diff::DiffView::default(),
             }
         }
-        *was_open = open.0;
+        state.was_open = open.0;
         if let Some(console) = open.0
             && let Some(spot) = in_room.console_spot(&camera, console)
         {
@@ -156,6 +155,7 @@ pub fn draw(
                 Console::Launch => console::hologram(ctx, console, spot, |ui| {
                     launched = launch_console(ui, &mut chat.chats, &model, chat.server.waker.clone());
                 }),
+                Console::Replay => console::hologram(ctx, console, spot, |ui| replay_console(ui, &mut replay)),
                 Console::Stats => console::hologram(ctx, console, spot, |ui| {
                     stats_console(ui, &chat.activity.day, &chat.usage, &model);
                 }),
@@ -167,13 +167,37 @@ pub fn draw(
             }
         }
     }
+    // While a replay owns the room, say so, with a way out (PLAN.md M28).
+    if let Some(play) = replay.active.as_ref() {
+        let name = play.name.clone();
+        egui::Area::new("replay-badge".into())
+            .anchor(egui::Align2::LEFT_TOP, egui::vec2(8.0, 64.0))
+            .show(ctx, |ui| {
+                egui::Frame::new()
+                    .fill(crate::palette::GLASS)
+                    .stroke(egui::Stroke::new(1.0, crate::palette::AMBER))
+                    .corner_radius(6.0)
+                    .inner_margin(egui::Margin::symmetric(8, 4))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new(format!("⏯ REPLAY · {name}")).small().strong().color(crate::palette::AMBER));
+                            if ui.small_button("Controls").on_hover_text("Replay controls (H)").clicked() {
+                                open.0 = Some(Console::Replay);
+                            }
+                            if ui.small_button("Exit").on_hover_text("Back to what is happening now").clicked() {
+                                replay.request = Some(crate::replay::Request::Stop);
+                            }
+                        });
+                    });
+            });
+    }
     // The activity console along the bottom (PLAN.md M28): one line, or tabs.
     if !mode.mini {
         let shown = model.shown();
         let height = ctx.viewport_rect().height() * 0.36;
         egui::Panel::bottom("activity")
             .frame(egui::Frame::new().fill(crate::palette::GLASS).inner_margin(egui::Margin::symmetric(10, 4)))
-            .show(&mut root, |ui| activity_console(ui, &mut feed, lines, shown, &chat.usage, final_answer.as_ref(), height));
+            .show(&mut root, |ui| activity_console(ui, &mut state.feed, lines, shown, &chat.usage, final_answer.as_ref(), height));
     }
     let window_size = UVec2::new(window.physical_width(), window.physical_height());
     fit_camera(&mut camera, root.available_rect_before_wrap(), window.scale_factor(), window_size);
@@ -1054,6 +1078,80 @@ fn permission_cards(
 
 fn colored_button(text: &str, fill: egui::Color32) -> egui::Button<'_> {
     egui::Button::new(egui::RichText::new(text).color(egui::Color32::WHITE).strong()).fill(fill)
+}
+
+/// What `draw` keeps between frames.
+#[derive(Default)]
+pub struct UiState {
+    styled: bool,
+    was_open: Option<Console>,
+    feed: Feed,
+}
+
+/// Mission replay (PLAN.md M28): the recorded sessions to pick from, and while one
+/// plays, play/pause, speed, a timeline to jump on, and Exit back to live.
+fn replay_console(ui: &mut egui::Ui, replay: &mut crate::replay::Replay) {
+    use crate::palette::{AMBER, CYAN, TEXT_DIM};
+    use crate::replay::{Request, SPEEDS};
+    if let Some(play) = replay.active.as_mut() {
+        ui.label(egui::RichText::new(format!("Replaying {}", play.name)).strong().color(CYAN));
+        let clock = |ms: u64| format!("{}:{:02}", ms / 60_000, ms / 1000 % 60);
+        ui.label(
+            egui::RichText::new(format!("{} / {} · event {} of {}", clock(play.clock), clock(play.length()), play.played(), play.total()))
+                .small()
+                .color(TEXT_DIM),
+        );
+        let mut at = play.clock as f32;
+        let slider = ui.add(egui::Slider::new(&mut at, 0.0..=play.length().max(1) as f32).show_value(false));
+        let mut seek = None;
+        if slider.changed() {
+            seek = Some(at as u64);
+        }
+        ui.horizontal(|ui| {
+            let (icon, hover) = if play.playing { ("⏸ Pause", "Pause") } else { ("▶ Play", "Play") };
+            if ui.button(icon).on_hover_text(hover).clicked() {
+                if !play.playing && play.played() >= play.total() {
+                    seek = Some(0);
+                }
+                play.playing = !play.playing;
+            }
+            for speed in SPEEDS {
+                if ui.selectable_label(play.speed == speed, format!("{speed}×")).clicked() {
+                    play.speed = speed;
+                }
+            }
+        });
+        if let Some(to) = seek {
+            replay.request = Some(Request::Seek(to));
+        }
+        ui.separator();
+        if ui.button("⏹ Exit replay").on_hover_text("Back to what is happening now").clicked() {
+            replay.request = Some(Request::Stop);
+        }
+        ui.label(egui::RichText::new("Live sessions keep running; they show again when you exit.").small().color(TEXT_DIM));
+        return;
+    }
+    if let Some(error) = &replay.error {
+        ui.label(egui::RichText::new(error).color(AMBER));
+    }
+    let missions = crate::replay::missions();
+    if missions.is_empty() {
+        ui.label(egui::RichText::new("No recorded sessions yet. Agent Room records every session it sees from now on.").weak());
+        return;
+    }
+    ui.label(egui::RichText::new("Recorded sessions (kept 30 days, only on this Mac):").small().color(TEXT_DIM));
+    egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
+        for mission in missions.iter().take(40) {
+            let ago = mission.modified.elapsed().map_or_else(|_| "now".to_owned(), |age| crate::hud::ago_secs(age.as_secs()));
+            ui.horizontal(|ui| {
+                if ui.button("▶").on_hover_text("Replay this session").clicked() {
+                    replay.request = Some(Request::Start(mission.path.clone()));
+                }
+                ui.label(egui::RichText::new(&mission.name).strong());
+                ui.label(egui::RichText::new(format!("{ago} ago · {} KB", mission.bytes / 1024 + 1)).small().color(TEXT_DIM));
+            });
+        }
+    });
 }
 
 /// The activity console's state: folded to one line, or open on a tab.

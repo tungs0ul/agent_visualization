@@ -67,11 +67,16 @@ fn elapsed(since: Instant) -> String {
 
 /// "12s", "3m", "2h": how long ago.
 pub fn ago(at: Instant) -> String {
-    let secs = at.elapsed().as_secs();
+    ago_secs(at.elapsed().as_secs())
+}
+
+/// "42s", "5m", "3h", "2d".
+pub fn ago_secs(secs: u64) -> String {
     match secs {
         0..60 => format!("{secs}s"),
         60..3600 => format!("{}m", secs / 60),
-        _ => format!("{}h", secs / 3600),
+        3600..86_400 => format!("{}h", secs / 3600),
+        _ => format!("{}d", secs / 86_400),
     }
 }
 

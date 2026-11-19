@@ -17,6 +17,7 @@ mod mini;
 mod model;
 mod notify;
 mod palette;
+mod replay;
 mod report;
 mod repo;
 mod server;
@@ -82,6 +83,7 @@ const IDLE_3D_FOR: Duration = Duration::from_secs(30);
 const COUNTDOWN_TICK: Duration = Duration::from_millis(250);
 
 fn main() -> AppExit {
+    replay::prune();
     let server = match Server::start() {
         Ok(server) => server,
         Err(err) => {
@@ -122,6 +124,7 @@ fn main() -> AppExit {
         .init_resource::<notify::Toasts>()
         .init_resource::<notify::Bells>()
         .init_resource::<world3d::Cruise>()
+        .init_resource::<replay::Replay>()
         .init_resource::<usage::Usage>()
         .init_resource::<wins::Wins>()
         .init_resource::<view3d::BrightHolos>()
@@ -146,7 +149,7 @@ fn main() -> AppExit {
             (
                 (window::place_in_corner, window::hotkeys, mini::toggle, mini::drag, mini::apply_mode, mini::settle_redraw, window::remember_geometry)
                     .chain(),
-                (receive_events, chat::dev_chat, chat::read_chats, end_dead_sessions),
+                (receive_events, replay::tick, chat::dev_chat, chat::read_chats, end_dead_sessions),
                 settle_permissions,
                 hud::title,
                 (view3d::sync, view3d::desk_lights, view3d::teleporter, view3d::deliver, view3d::links, view3d::context_tank, view3d::celebrate, world3d::daylight, world3d::cruise, view3d::activity_holograms, view3d::light_trails, hud::trace, view3d::camera_input, view3d::frame).chain(),
@@ -208,7 +211,11 @@ fn receive_events(
     mut wins: ResMut<wins::Wins>,
     mut activity: ResMut<activity::Activity>,
     window: Single<&Window, With<bevy::window::PrimaryWindow>>,
+    mut replay: ResMut<replay::Replay>,
 ) {
+    // During a mission replay the room shows the replay; live events go on into the
+    // parked live model (PLAN.md M28).
+    let model = replay.live_model(&mut model);
     let now = Instant::now();
     for limits in server.limits.try_iter() {
         usage.report_limits(limits);
@@ -416,8 +423,13 @@ fn end_dead_sessions(
     mut model: ResMut<Model>,
     chats: Res<chat::Chats>,
     mut bells: ResMut<notify::Bells>,
+    replay: Res<replay::Replay>,
     mut last: Local<Option<Instant>>,
 ) {
+    // A replay's sessions carry the pids of long-gone processes: leave them be.
+    if replay.active.is_some() {
+        return;
+    }
     let now = Instant::now();
     if last.is_some_and(|at| now - at < DEAD_CHECK_EVERY) {
         return;
