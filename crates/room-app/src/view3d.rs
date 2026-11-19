@@ -169,7 +169,7 @@ pub fn build(
         // surround, filtered by Bevy once at start.
         bevy::light::GeneratedEnvironmentMapLight {
             environment_map: images.add(crate::space::environment(64)),
-            intensity: 900.0,
+            intensity: 1600.0,
             ..default()
         },
     ));

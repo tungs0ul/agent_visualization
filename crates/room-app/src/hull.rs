@@ -97,8 +97,8 @@ pub fn build(kit: &mut Kit) {
     // Recessed round fixtures, each a real spot light: the big one over the command
     // core, the others over the crew desks.
     let command = Spot::Command.center();
-    let mut fixtures = vec![(Vec2::new(command.x, command.z), 1.7, 1_800_000.0)];
-    fixtures.extend([(-4.0, -0.9), (4.0, -0.9), (-4.6, 3.2), (4.6, 3.2)].map(|(x, z)| (Vec2::new(x, z), 1.1, 1_100_000.0)));
+    let mut fixtures = vec![(Vec2::new(command.x, command.z), 1.7, 4_000_000.0)];
+    fixtures.extend([(-4.0, -0.9), (4.0, -0.9), (-4.6, 3.2), (4.6, 3.2)].map(|(x, z)| (Vec2::new(x, z), 1.1, 2_600_000.0)));
     let disc = kit.glow(ICY * 14.0);
     let ring = kit.glow(CYAN * 7.0);
     for (at, radius, lumens) in fixtures {

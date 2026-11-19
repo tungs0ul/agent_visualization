@@ -2056,3 +2056,14 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   (the display slept before the last probe). Not done from the briefs: AAA geometry
   (detailed walls, ceiling, floor modules), volumetric light, SSR reflections,
   hologram scanlines; power not measured with the new effects.
+- 2026-11-19, Claude Opus 5.5: the user rejected the lightning ("I AM TALKING ABOUT
+  LIGHTING, NOT LIGHTNING") and called the look bland: `fx.rs` (bolts, sparks, beam,
+  reactor, particles, pulses) is removed. The bridge is now a ship interior
+  (`hull.rs`): upper walls to a 7.5 m ceiling, the back opened into a tall framed
+  window, ceiling beams with light strips and five recessed round fixtures with real
+  spot lights, amber lamps under the desks; the camera sits inside under the ceiling
+  with a 56° view. Seen on screen (fb00097): ceiling and fixtures across the top, the
+  tall window with the ringed planet and the textured blue planet, strips on walls.
+  After that, not yet seen (display asleep): a glossier, less metallic floor
+  (environment.py), brighter fixtures and stronger reflections. Next: judge the floor
+  reflections and light pools on screen; consider SSR on High; measure power.
