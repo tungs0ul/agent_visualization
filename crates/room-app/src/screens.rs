@@ -1,9 +1,9 @@
 //! The crew desks' screen art (PROMPT_03 B; the user: "it is a star ship and you
 //! display code? some display graph, some display planet"). Each desk shows starship
-//! illustrations painted here once at start: a big focal graphic on dark navy with
-//! small gauges round it and one accent colour, so no two desks look alike. The
-//! Blender desk (`stations.py` `build_desk_console`) has only the screen glass and
-//! frames; these textured panels sit just in front of them.
+//! illustrations painted here once at start: a big focal graphic on translucent
+//! luminous blue glass with a bright cyan edge, small gauges round it and one accent
+//! colour, so no two desks look alike. They are frameless holograms as in the target
+//! (crops 07, 08); the Blender desk (`stations.py`) has only their emitters.
 
 use bevy::prelude::*;
 
@@ -12,9 +12,11 @@ use crate::world3d::{DESKS, Kit, Spot};
 /// Where a desk's screens are, relative to the desk centre (glTF space), their size,
 /// yaw and tilt in degrees. Keep in step with `stations.py` `build_desk_console`.
 const SCREENS: [(Vec3, Vec2, f32, f32); 3] = [
-    (Vec3::new(0.0, 1.45, -0.355), Vec2::new(1.5, 0.75), 0.0, -6.0),
-    (Vec3::new(-0.98, 1.32, -0.195), Vec2::new(0.42, 0.62), 28.0, -4.0),
-    (Vec3::new(0.98, 1.32, -0.195), Vec2::new(0.42, 0.62), -28.0, -4.0),
+    // the main screen's lower edge sits on the projector bar (top 0.81 m)
+    (Vec3::new(0.0, 1.2, -0.355), Vec2::new(1.5, 0.75), 0.0, -6.0),
+    // side panels float a few cm over their emitters at the desk ends
+    (Vec3::new(-0.98, 1.1, -0.195), Vec2::new(0.36, 0.54), 28.0, -4.0),
+    (Vec3::new(0.98, 1.1, -0.195), Vec2::new(0.36, 0.54), -28.0, -4.0),
 ];
 
 /// The big illustrations a main screen can show.
@@ -65,7 +67,7 @@ pub fn build(kit: &mut Kit, images: &mut Assets<Image>) {
         for ((at, size, yaw, tilt), texture) in SCREENS.into_iter().zip(textures) {
             let material = kit.materials.add(StandardMaterial {
                 // Unlit and a touch over 1: the art glows (and blooms a little) by itself.
-                base_color: Color::LinearRgba(LinearRgba::new(4.5, 4.5, 4.5, 1.0)),
+                base_color: Color::LinearRgba(LinearRgba::new(3.2, 3.2, 3.2, 1.0)),
                 base_color_texture: Some(texture),
                 alpha_mode: AlphaMode::Blend,
                 unlit: true,
@@ -201,8 +203,8 @@ impl Canvas {
         }
     }
 
-    /// Glass behind everything (a dark navy panel, a touch brighter in the middle),
-    /// a faint grid and scanlines, then out to sRGB bytes.
+    /// Glass behind everything (translucent luminous blue, brighter in the middle, a
+    /// bright cyan edge), a faint grid and scanlines, then out to sRGB bytes.
     fn finish(self) -> Image {
         let (w, h) = (self.w, self.h);
         crate::space::image(w as u32, h as u32, self.bytes())
@@ -214,14 +216,19 @@ impl Canvas {
         for (i, (rgb, alpha)) in self.rgb.iter().zip(&self.alpha).enumerate() {
             let (x, y) = ((i % w) as f32, (i / w) as f32);
             let u = Vec2::new(x / w as f32 - 0.5, y / h as f32 - 0.45);
-            let centre = (1.0 - (u.length() * 1.6).min(1.0)).powi(2);
-            let mut glass = Vec3::new(0.002, 0.008, 0.03) + Vec3::new(0.003, 0.014, 0.05) * centre;
+            let centre = (1.0 - (u.length() * 1.5).min(1.0)).powi(2);
+            let mut glass = Vec3::new(0.002, 0.012, 0.05) + Vec3::new(0.004, 0.022, 0.075) * centre;
             // grid every 32 px and a scanline every third row
             let grid = ((x as usize).is_multiple_of(32) || (y as usize).is_multiple_of(32)) as u8 as f32;
-            glass += DIM * 0.05 * grid;
-            let scan = if (y as usize).is_multiple_of(3) { 0.82 } else { 1.0 };
+            glass += AZURE * 0.04 * grid;
+            // the hologram's bright edge: 2 px of cyan and a soft inner falloff
+            let edge = x.min(y).min(w as f32 - 1.0 - x).min(h as f32 - 1.0 - y);
+            let rim = if edge < 2.0 { 1.0 } else { (1.0 - (edge - 2.0) / 10.0).clamp(0.0, 1.0).powi(2) * 0.18 };
+            glass += CYAN * rim;
+            let scan = if (y as usize).is_multiple_of(3) { 0.85 } else { 1.0 };
             let lit = (glass + *rgb) * scan;
-            let a = (0.94 + 0.06 * alpha).min(1.0);
+            // see-through glass, opaque where the art is
+            let a = (0.72 + 0.28 * alpha + rim * 0.3).min(1.0);
             for channel in [lit.x, lit.y, lit.z] {
                 let mapped = channel / (1.0 + channel * 0.35);
                 bytes.push((linear_to_srgb(mapped.min(1.0)) * 255.0) as u8);

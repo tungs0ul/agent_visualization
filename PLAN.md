@@ -2209,14 +2209,17 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   category), camera rig limits.
 - 2026-11-19, Claude Opus 5.5: re-measured the build from the last entry: 8/12
   (edge_density 0.147, flat_tiles 26%, warm 0.004 too high, white_hardware 0.009).
-  User: "The monitor on the desk should look better". Desk monitors are now real
-  monitors (`stations.py` `monitor`): charcoal bezel 3 cm proud of the art, white
-  clear-coated back shell with a rear hump, a cyan light line and amber tab on the top
-  bezel, three status LEDs, and a white neck with a cyan strip down to the desk (main
-  screen to the projector bar). The art (`screens.rs`) is on dark navy glass with a
-  centre glow, a 32 px grid, scanlines, an inner border, a header (title, words, a
-  status pill in the accent colour) and a footer tick scale with readouts; the old
-  luminous blue base is gone. `cargo test -p room-app dump_screens -- --ignored` with
-  `AGENT_ROOM_SCREENS_DUMP=<dir>` writes every screen texture as PNG. Not yet seen in
-  the app (display off). Next: check on screen; tone down amber (pad arcs, chevrons);
+  User: "The monitor on the desk should look better", then showed the target again
+  ("This is what we wanted"). A first try with bezels, white back shells and stands
+  was wrong: the target's screens (crops 07, 08) are frameless holograms. Now the
+  main screen rises from the projector bar (centre 1.2 m) and the side panels
+  (0.36x0.54) float over small graphite emitters with a cyan lens (`stations.py`
+  `holo_emitter`). The art (`screens.rs`) is on translucent luminous blue glass
+  (alpha 0.72, brighter in the middle), a 2 px bright cyan edge with an inner glow,
+  a 32 px grid, scanlines, a header (title, words, an accent status pill) and a
+  footer tick scale with readouts; unlit multiplier 3.2 (was 4.5).
+  `cargo test -p room-app dump_screens -- --ignored` with
+  `AGENT_ROOM_SCREENS_DUMP=<dir>` writes every screen texture as PNG. Checked in a
+  Blender render of the desk with the dumped textures; not yet seen in the app
+  (display off). Next: check on screen; tone down amber (pad arcs, chevrons);
   white hardware; then the rest of D, E, screen art by tool category, camera limits.
