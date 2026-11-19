@@ -65,7 +65,7 @@ pub fn build(kit: &mut Kit, images: &mut Assets<Image>) {
         for ((at, size, yaw, tilt), texture) in SCREENS.into_iter().zip(textures) {
             let material = kit.materials.add(StandardMaterial {
                 // Unlit and a touch over 1: the art glows (and blooms a little) by itself.
-                base_color: Color::LinearRgba(LinearRgba::new(1.6, 1.6, 1.6, 1.0)),
+                base_color: Color::LinearRgba(LinearRgba::new(3.2, 3.2, 3.2, 1.0)),
                 base_color_texture: Some(texture),
                 alpha_mode: AlphaMode::Blend,
                 unlit: true,
@@ -175,7 +175,7 @@ impl Canvas {
         for (rgb, alpha) in self.rgb.iter().zip(&self.alpha) {
             // #06122C at 0.8 under the art.
             let lit = Vec3::new(0.0024, 0.006, 0.024) + *rgb;
-            let a = (0.8 + 0.2 * alpha).min(1.0);
+            let a = (0.92 + 0.08 * alpha).min(1.0);
             for channel in [lit.x, lit.y, lit.z] {
                 let mapped = channel / (1.0 + channel * 0.35);
                 bytes.push((linear_to_srgb(mapped.min(1.0)) * 255.0) as u8);
