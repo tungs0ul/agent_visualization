@@ -276,6 +276,7 @@ M_SUNFACE = emit("sunface", (1.0, 0.4, 0.05), 5.0, alpha=0.8)[0]
 M_PINK = emit("pink", (1.0, 0.1, 0.7), 7.0)[0]
 M_VIOLET = emit("violet", (0.35, 0.1, 1.0), 6.0)[0]
 M_BLACK = emit("black", (0, 0, 0), 0.0, alpha=1.0)[0]
+M_BLACK.surface_render_method = "DITHERED"   # solid: hides what is behind it
 pivot = bpy.data.objects.new("subject", None)
 sc.collection.objects.link(pivot)
 
@@ -354,18 +355,90 @@ def moon():
     return (TILT, 20)
 
 
+def radial_material(name, stops, strength, inner=0.0, outer=1.0, rings=0.0):
+    """Light by distance from the object's centre (object space, metres): `stops` is
+    a colour ramp over inner..outer, its alpha the brightness; optional fine rings
+    (streaks in an accretion disc). Pure light, see-through elsewhere."""
+    mt, nt = emit(name, (1, 1, 1), strength)
+    em = [n for n in nt.nodes if n.type == "EMISSION"][0]
+    tc = nt.nodes.new("ShaderNodeTexCoord")
+    ln = nt.nodes.new("ShaderNodeVectorMath")
+    ln.operation = "LENGTH"
+    nt.links.new(tc.outputs["Object"], ln.inputs[0])
+    mr = nt.nodes.new("ShaderNodeMapRange")
+    mr.inputs["From Min"].default_value, mr.inputs["From Max"].default_value = inner, outer
+    nt.links.new(ln.outputs["Value"], mr.inputs["Value"])
+    rp = nt.nodes.new("ShaderNodeValToRGB")
+    el = rp.color_ramp.elements
+    el[0].position, el[0].color = stops[0]
+    el[1].position, el[1].color = stops[-1]
+    for pos, col in stops[1:-1]:
+        e = el.new(pos)
+        e.color = col
+    nt.links.new(mr.outputs["Result"], rp.inputs["Fac"])
+    nt.links.new(rp.outputs["Color"], em.inputs["Color"])
+    amp = rp.outputs["Alpha"]
+    if rings:
+        wv = nt.nodes.new("ShaderNodeTexWave")
+        wv.wave_type = "RINGS"
+        wv.inputs["Scale"].default_value = rings
+        wv.inputs["Distortion"].default_value = 1.0
+        wv.inputs["Detail"].default_value = 4.0
+        nt.links.new(tc.outputs["Object"], wv.inputs["Vector"])
+        mx = nt.nodes.new("ShaderNodeMapRange")
+        mx.inputs["To Min"].default_value = 0.55
+        nt.links.new(wv.outputs["Fac"], mx.inputs["Value"])
+        m2 = nt.nodes.new("ShaderNodeMath")
+        m2.operation = "MULTIPLY"
+        nt.links.new(amp, m2.inputs[0])
+        nt.links.new(mx.outputs["Result"], m2.inputs[1])
+        amp = m2.outputs[0]
+    m3 = nt.nodes.new("ShaderNodeMath")
+    m3.operation = "MULTIPLY"
+    m3.inputs[1].default_value = strength
+    nt.links.new(amp, m3.inputs[0])
+    nt.links.new(m3.outputs[0], em.inputs["Strength"])
+    return mt
+
+
+def facing_camera(obj):
+    """Turn a flat disc (made in XY) to face the viewer: its normal along the screen's front."""
+    front = (on_screen(0, 0, 1) - on_screen(0, 0, 0)).normalized()
+    obj.rotation_mode = "QUATERNION"
+    obj.rotation_quaternion = front.to_track_quat("Z", "Y")
+
+
 def sun():
-    part(uvs, M_SUNFACE, segments=32, ring_count=16, radius=0.13)
-    part(uvs, M_HOT, segments=32, ring_count=16, radius=0.09)
-    part(uvs, M_ORANGE, segments=14, ring_count=8, radius=0.135, wire=0.0025)
-    for k in range(16):
-        a = k * 22.5
-        L = 0.07 if k % 2 else 0.11
-        r0 = 0.15
-        part(cone, M_ORANGE if k % 2 else M_AMBER,
-             (0.0 + (r0 + L / 2) * math.cos(math.radians(a)), -0.01, (r0 + L / 2) * math.sin(math.radians(a))),
-             rot=(0, 90 - a, 0), radius1=0.012, radius2=0.0, depth=L, vertices=6)
-    part(tor, M_AMBER, rot=(90, 0, 0), major_radius=0.29, minor_radius=0.0025, major_segments=96)
+    # a ball of fire: granulated surface, brighter limb, a soft corona, flame loops on
+    # the limb and a small planet on its orbit
+    mt, nt = emit("photosphere", (1, 0.5, 0.1), 2.2, alpha=1.0)
+    em = [n for n in nt.nodes if n.type == "EMISSION"][0]
+    tc = nt.nodes.new("ShaderNodeTexCoord")
+    nz = nt.nodes.new("ShaderNodeTexNoise")
+    nz.inputs["Scale"].default_value = 28.0
+    nz.inputs["Detail"].default_value = 8.0
+    nz.inputs["Roughness"].default_value = 0.7
+    nt.links.new(tc.outputs["Object"], nz.inputs["Vector"])
+    rp = nt.nodes.new("ShaderNodeValToRGB")
+    rp.color_ramp.elements[0].position, rp.color_ramp.elements[0].color = 0.35, (0.9, 0.22, 0.02, 1)
+    rp.color_ramp.elements[1].position, rp.color_ramp.elements[1].color = 0.7, (1.0, 0.85, 0.45, 1)
+    nt.links.new(nz.outputs["Fac"], rp.inputs["Fac"])
+    nt.links.new(rp.outputs["Color"], em.inputs["Color"])
+    mt.surface_render_method = "DITHERED"   # solid: hides the far half of the flame loops
+    part(uvs, mt, segments=64, ring_count=32, radius=0.12)
+    part(uvs, M_AMBER, segments=18, ring_count=10, radius=0.123, wire=0.0012)
+    corona = radial_material("corona", [(0.0, (1, 0.55, 0.15, 1.0)), (0.2, (1, 0.4, 0.08, 0.4)),
+                                        (1.0, (1, 0.25, 0.03, 0.0))], 2.0, inner=0.115, outer=0.22)
+    c = part(bpy.ops.mesh.primitive_circle_add, corona, (0, 0.03, 0), vertices=64, radius=0.22, fill_type="NGON")
+    facing_camera(c)
+    # flame loops: rings centred on the limb, half hidden behind the ball
+    for ang, r in ((40, 0.02), (75, 0.028), (110, 0.016), (145, 0.024), (200, 0.014), (330, 0.018)):
+        a = math.radians(ang)
+        loop = part(tor, M_ORANGE, major_radius=r, minor_radius=0.0025, major_segments=48)
+        facing_camera(loop)
+        loop.location = (0.12 * math.cos(a), 0.02, 0.12 * math.sin(a))   # just behind the limb
+    part(tor, M_LINE_DIM, rot=(80, 0, 10), major_radius=0.27, minor_radius=0.0018, major_segments=128)
+    part(ico, M_LINE, (0.26, -0.03, -0.05), radius=0.014, subdivisions=2)
     return (TILT, 0)
 
 
@@ -401,17 +474,23 @@ def ship():
 
 
 def blackhole():
-    # a black core, a bright photon ring round it facing the viewer, a hot accretion
-    # disc seen from a little above (its far side bent up over the core, as lensing
-    # does), and a faint violet halo
-    part(uvs, M_BLACK, segments=32, ring_count=16, radius=0.08)
-    part(tor, M_HOT, rot=(90, 0, 0), major_radius=0.086, minor_radius=0.004, major_segments=96)
-    for r, w, m in ((0.12, 0.01, M_HOT), (0.16, 0.014, M_ORANGE), (0.21, 0.01, M_AMBER), (0.26, 0.005, M_PINK)):
-        part(tor, m, (0, 0, 0), (1, 1, 0.15), (-14, 0, 0), major_radius=r, minor_radius=w, major_segments=128)
-    # the lensed far side: arcs over the top of the core
-    for r, w, m in ((0.11, 0.006, M_HOT), (0.14, 0.005, M_ORANGE)):
-        part(tor, m, (0, 0.01, 0.0), (1, 1, 0.85), (90, 0, 0), major_radius=r, minor_radius=w, major_segments=96)
-    part(tor, M_VIOLET, (0, 0.02, 0), rot=(90, 0, 0), major_radius=0.3, minor_radius=0.002, major_segments=96)
+    # the familiar look: a black core, a thin photon ring, a flat accretion disc
+    # (white-hot inside, orange, fading out, streaked) seen from a little above, and
+    # the disc's far side bent over and under the core by its gravity
+    stops = [(0.0, (1.0, 0.95, 0.8, 1.0)), (0.15, (1.0, 0.7, 0.3, 0.9)), (0.45, (1.0, 0.38, 0.08, 0.55)),
+             (1.0, (0.6, 0.1, 0.05, 0.0))]
+    disc_mat = radial_material("disc", stops, 5.0, inner=0.085, outer=0.28, rings=40.0)
+    halo_mat = radial_material("halo", stops, 5.0, inner=0.082, outer=0.15, rings=40.0)
+    part(uvs, M_BLACK, segments=48, ring_count=24, radius=0.08)
+    d = part(bpy.ops.mesh.primitive_circle_add, disc_mat, vertices=96, radius=0.3, fill_type="NGON")
+    d.rotation_euler = (math.radians(12), 0, 0)   # nearly edge-on, seen a little from above
+    # the lensed far side: a ring facing the viewer just behind the core
+    h = part(bpy.ops.mesh.primitive_circle_add, halo_mat, vertices=96, radius=0.16, fill_type="NGON")
+    facing_camera(h)
+    h.location = (0, 0.02, 0)
+    ring = part(tor, M_HOT, (0, -0.002, 0), major_radius=0.083, minor_radius=0.0025, major_segments=96)
+    facing_camera(ring)
+    part(tor, M_VIOLET, (0, 0.03, 0), major_radius=0.26, minor_radius=0.0012, major_segments=128).rotation_euler = (math.radians(90 + TILT), 0, 0)
     return (0, 0)
 
 
