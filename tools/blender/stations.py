@@ -34,10 +34,14 @@ rad = math.radians
 
 
 # ---------------------------------------------------------------- materials
-def make_material(name, color, rough, metal=0.0, emit=None, strength=0.0, alpha=1.0):
+def make_material(name, color, rough, metal=0.0, emit=None, strength=0.0, alpha=1.0, coat=0.0):
     mat = bpy.data.materials.get(name) or bpy.data.materials.new(name)
     mat.use_nodes = True
     bsdf = mat.node_tree.nodes.get("Principled BSDF")
+    if coat > 0.0:
+        # Exported as KHR_materials_clearcoat.
+        bsdf.inputs["Coat Weight"].default_value = coat
+        bsdf.inputs["Coat Roughness"].default_value = 0.08
     bsdf.inputs["Base Color"].default_value = (*color, 1.0)
     bsdf.inputs["Roughness"].default_value = rough
     bsdf.inputs["Metallic"].default_value = metal
@@ -56,23 +60,41 @@ ORANGE = (1.0, 0.38, 0.06)
 PURPLE = (0.55, 0.22, 1.0)
 GREEN = (0.15, 1.0, 0.35)
 MAT_SPECS = {
-    "Panel": dict(color=(0.3, 0.34, 0.43), rough=0.22, metal=0.75),
+    # Hardware shells: cool white #D9E2EE with a clear coat (PROMPT_03 A). Colour comes
+    # from light and glow, never from a blue-tinted base.
+    "Panel": dict(color=(0.693, 0.761, 0.855), rough=0.2, coat=0.8),
     "PanelDark": dict(color=(0.025, 0.035, 0.06), rough=0.12, metal=0.2),
-    "Trim": dict(color=(0.62, 0.68, 0.78), rough=0.18, metal=0.95),
-    "GlowCyan": dict(color=CYAN, rough=0.3, emit=CYAN, strength=2.6),
+    "Trim": dict(color=(0.323, 0.381, 0.479), rough=0.3, metal=0.9),
+    "GlowCyan": dict(color=CYAN, rough=0.3, emit=CYAN, strength=4.0),
     # Ring tubes: the brief's tier T2/T3 cyan, thin and intense with a burnt-white core.
-    "RingCyan": dict(color=CYAN, rough=0.3, emit=CYAN, strength=9.0),
-    "GlowOrange": dict(color=ORANGE, rough=0.3, emit=ORANGE, strength=2.4),
-    "GlowPurple": dict(color=PURPLE, rough=0.3, emit=PURPLE, strength=2.4),
+    "RingCyan": dict(color=CYAN, rough=0.3, emit=CYAN, strength=5.0),
+    "GlowOrange": dict(color=ORANGE, rough=0.3, emit=ORANGE, strength=7.0),
+    "GlowPurple": dict(color=PURPLE, rough=0.3, emit=PURPLE, strength=6.0),
     "GlowGreen": dict(color=GREEN, rough=0.3, emit=GREEN, strength=6.0),
     # Screen glass: dark translucent navy (#06122C, alpha 0.55); only the content on it
     # glows (PROMPT_02 step 1: no white or blown-out screens).
     "Holo": dict(color=(0.0024, 0.0060, 0.0242), rough=0.2, emit=(0.004, 0.02, 0.07), strength=1.0, alpha=0.55),
+    # Desk console parts (PROMPT_02 step 2, PROMPT_03 C).
+    "DeskGlass": dict(color=(0.0030, 0.0060, 0.0160), rough=0.16, metal=0.3),
+    "Graphite": dict(color=(0.023, 0.030, 0.051), rough=0.35, metal=0.7),
+    "Keys": dict(color=(0.02, 0.03, 0.05), rough=0.4, emit=(0.05, 0.4, 1.0), strength=0.6),
+    "GlowCyanT2": dict(color=CYAN, rough=0.3, emit=CYAN, strength=5.0),
+    "GlowCyanT3": dict(color=CYAN, rough=0.3, emit=CYAN, strength=12.0),
+    "GlowAmberT2": dict(color=(1.0, 0.33, 0.045), rough=0.3, emit=(1.0, 0.33, 0.045), strength=8.0),
+    "GlowVioletT2": dict(color=(0.254, 0.107, 1.0), rough=0.3, emit=(0.254, 0.107, 1.0), strength=7.0),
+    "DaisMetal": dict(color=(0.03, 0.04, 0.07), rough=0.28, metal=0.9),
+    "GlowPinkT2": dict(color=(1.0, 0.08, 0.69), rough=0.3, emit=(1.0, 0.08, 0.69), strength=6.0),
+    "GlowWhiteT2": dict(color=(0.9, 0.95, 1.0), rough=0.3, emit=(0.9, 0.95, 1.0), strength=4.0),
+    "HoloScreenDim": dict(color=(0.004, 0.02, 0.07), rough=0.2, emit=(0.02, 0.18, 0.6), strength=1.5),
     "HoloDark": dict(color=(0.01, 0.05, 0.08), rough=0.2, emit=(0.02, 0.25, 0.35), strength=1.0, alpha=0.6),
     "Glass": dict(color=(0.7, 0.92, 1.0), rough=0.05, alpha=0.2),
     # Pages and cursors on screens: a dim holo blue, not white.
     "Paper": dict(color=(0.01, 0.04, 0.12), rough=0.6, emit=(0.03, 0.2, 0.75), strength=0.8),
     # Pad rims: dark trim (#1A2640) so the thin ring tube is the only bright edge.
+    "Seam": dict(color=(0.002, 0.003, 0.006), rough=0.6, metal=0.3),
+    # Pad top #0D182E, metallic 0.7, roughness 0.35 (PROMPT_02 step 4): glossy enough to
+    # catch the rings, too rough to mirror lights as discs.
+    "PadTop": dict(color=(0.004, 0.009, 0.027), rough=0.35, metal=0.7),
     "PadRim": dict(color=(0.0103, 0.0185, 0.0513), rough=0.28, metal=0.85),
     "Leaf": dict(color=(0.04, 0.32, 0.13), rough=0.45),
     "Pot": dict(color=(0.9, 0.91, 0.93), rough=0.25),
@@ -475,19 +497,35 @@ def holo_screen(center, w, h, yaw=0.0, tilt=10.0, content="bars", frame="GlowCya
         for sx in (-1, 1):
             box((sx * (w / 2 - 0.035), -0.004, h / 2 + 0.012), (0.05, 0.006, 0.01), frame)
             box((sx * (w / 2 + 0.012), -0.004, -h / 2 + 0.05), (0.008, 0.006, 0.06), "GlowOrange")
-        holo_content(content, w, h, rng)
+        if content:
+            holo_content(content, w, h, rng)
 
 
 def floor_disc(cx, cy, r, h=0.04, segs=64):
     """Circular illuminated platform: white rim, dark glossy top, glowing rings."""
     disc((cx, cy, 0), r, 0.0, h, "PadRim", segs=segs, bevel=0.012, bsegs=2)
-    disc((cx, cy, 0), r - 0.1, h, h + 0.003, "PanelDark", segs=segs)
+    disc((cx, cy, 0), r - 0.1, h, h + 0.003, "PadTop", segs=segs)
     ring((cx, cy, 0), r - 0.1, r - 0.088, h - 0.002, h + 0.006, "RingCyan", segs=segs)
     ring((cx, cy, 0), r - 0.006, r + 0.004, h * 0.4, h * 0.6, "RingCyan", segs=segs)
     ring((cx, cy, 0), r * 0.42, r * 0.42 + 0.015, h, h + 0.005, "GlowCyan", segs=segs)
     for k in range(4):
         a = 45 + 90 * k
         ring((cx, cy, 0), r - 0.2, r - 0.17, h, h + 0.006, "GlowOrange", segs=6, a0=a - 12, a1=a + 12)
+    # 24 tiny inset lights round the top, alternating dim and bright, 4 bolts and 8
+    # segment cuts into the top (PROMPT_03 C).
+    for k in range(24):
+        a = math.radians(k * 15 + 7.5)
+        px, py = cx + (r - 0.2) * math.sin(a) * 0.82, cy + (r - 0.2) * math.cos(a) * 0.82
+        disc((px, py, h), 0.012, 0.0, 0.004, "GlowCyanT2" if k % 2 else "Keys", segs=10)
+    for k in range(4):
+        a = math.radians(k * 90)
+        disc((cx + (r - 0.055) * math.sin(a), cy + (r - 0.055) * math.cos(a), h - 0.004), 0.016, 0.0, 0.01, "Trim", segs=10)
+    for k in range(8):
+        a = k * 45 + 22.5
+        with at((cx, cy, h + 0.0035), (0, 0, -a)):
+            box((0, r * 0.62 + (r - 0.1 - r * 0.62) / 2, 0), (0.004, r - 0.1 - r * 0.62 - 0.03, 0.001), "Seam")
+    # The amber accent arc on the rim, front left (about 25°, PROMPT_03 A).
+    ring((cx, cy, 0), r - 0.06, r - 0.008, h, h + 0.01, "GlowAmberT2", segs=10, a0=205, a1=240)
 
 
 def glow_strip_sector(r, z, a0, a1, material, h=0.02, depth=0.012, segs=24):
@@ -526,11 +564,19 @@ def check_badge(center, r=0.07, rot=(0, 0, 0)):
 def build_main_desk():
     # three round tiers rising to 0.35 m, glowing cyan rims, orange inset rings
     top = 0.35
-    tiers = ((2.0, 0.0, 0.14), (1.62, 0.14, 0.26), (1.25, 0.26, top))
-    for r, z0, z1 in tiers:
-        disc((0, 0, 0), r, z0, z1, "Panel", segs=72, bevel=0.022, bsegs=3)
+    # Dark metal tiers, each edge a thick neon tube (PROMPT_02 step 5, PROMPT_03 A/C):
+    # cyan outside, amber in the middle, magenta and violet inside.
+    tiers = ((2.0, 0.0, 0.14, ("RingCyan",)), (1.62, 0.14, 0.26, ("GlowAmberT2",)),
+             (1.25, 0.26, top, ("GlowPinkT2", "GlowVioletT2")))
+    for r, z0, z1, tubes in tiers:
+        disc((0, 0, 0), r, z0, z1, "DaisMetal", segs=72, bevel=0.022, bsegs=3)
         zm = (z0 + z1) / 2
-        ring((0, 0, 0), r - 0.01, r + 0.006, zm - 0.009, zm + 0.009, "GlowCyan", segs=72)
+        for i, tube in enumerate(tubes):
+            dz = (i - (len(tubes) - 1) / 2) * 0.045
+            ring((0, 0, 0), r - 0.012, r + 0.028, zm + dz - 0.02, zm + dz + 0.02, tube, segs=96, bevel=0.012, bsegs=3)
+    # three partial arcs floating 5 mm over the outer tread
+    for a0, a1 in ((10, 120), (150, 290), (310, 350)):
+        ring((0, 0, 0), 1.74, 1.79, 0.145, 0.16, "GlowCyanT2", segs=24, a0=a0, a1=a1)
         for a in (180, 0):  # step lights on the riser, front and back
             ring((0, 0, 0), r - 0.01, r + 0.008, z1 - 0.035, z1 - 0.022, "GlowOrange", segs=6, a0=a - 14,
                  a1=a + 14)
@@ -666,6 +712,132 @@ def build_writing_desk():
         potted_plant((1.0, 0.18, dz), scale=0.45, seed=12, leaves=10)
         box((0.75, -0.2, dz + 0.05), (0.07, 0.07, 0.1), "Panel", bevel=0.012)
         ring((0.75, -0.2, dz), 0.03, 0.037, 0.06, 0.07, "GlowCyan", segs=16)
+
+
+# ---------------------------------------------------------------- desk console (PROMPT_02 step 2)
+DESK_L, DESK_W = 2.2, 0.85          # stadium length and depth (m)
+DESK_TOP, DESK_SLAB = 0.78, 0.10    # tabletop height and slab thickness
+FRONT_R = 3.0                       # radius of the concave operator edge
+
+
+def stadium(length, width, n_end=16, n_front=24, concave=True, inset=0.0):
+    """Top-view outline (x, y) of the desk, counter-clockwise; the operator side is -Y
+    and bends inward along a FRONT_R arc so it hugs the operator."""
+    r = width / 2 - inset
+    half = length / 2 - width / 2
+    pts = []
+    # front edge, left to right (y = -r, pushed in by the arc)
+    for i in range(n_front + 1):
+        x = -half + 2 * half * i / n_front
+        sag = (FRONT_R - math.sqrt(max(FRONT_R ** 2 - x * x, 0.0))) if concave else 0.0
+        pts.append((x, -r + (FRONT_R - math.sqrt(FRONT_R ** 2 - half ** 2)) - sag if concave else -r))
+    # right end, -90° .. 90°
+    for i in range(1, n_end):
+        a = -math.pi / 2 + math.pi * i / n_end
+        pts.append((half + r * math.cos(a), r * math.sin(a)))
+    # back edge, right to left
+    pts.append((half, r))
+    pts.append((-half, r))
+    # left end, 90° .. 270°
+    for i in range(1, n_end):
+        a = math.pi / 2 + math.pi * i / n_end
+        pts.append((-half + r * math.cos(a), r * math.sin(a)))
+    return pts
+
+
+def prism(points, z0, z1, material, bevel=0.0, segs=2):
+    bm = bmesh.new()
+    low = [bm.verts.new((x, y, z0)) for x, y in points]
+    high = [bm.verts.new((x, y, z1)) for x, y in points]
+    bm.faces.new(list(reversed(low)))
+    bm.faces.new(high)
+    n = len(points)
+    for i in range(n):
+        j = (i + 1) % n
+        bm.faces.new([low[i], low[j], high[j], high[i]])
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    return part(bm, material, bevel=bevel, segs=segs)
+
+
+def strip_along(points, z, width, height, material, closed=True, out=0.0):
+    """Thin light strip following a polyline (for underglow and the front lip LED)."""
+    n = len(points)
+    for i in range(n if closed else n - 1):
+        (x0, y0), (x1, y1) = points[i], points[(i + 1) % n]
+        dx, dy = x1 - x0, y1 - y0
+        length = math.hypot(dx, dy)
+        if length < 1e-4:
+            continue
+        nx, ny = dy / length, -dx / length
+        box(((x0 + x1) / 2 + nx * out, (y0 + y1) / 2 + ny * out, z), (length + 0.002, width, height), material,
+            rot=(0, 0, math.degrees(math.atan2(dy, dx))))
+
+
+def build_desk_console():
+    """The crew desk: a white stadium console with a concave operator edge, rounded end
+    caps with amber light slits, one centre pedestal (no drawers), a cyan underglow,
+    a front lip LED, a holo projector bar and dark holographic screens over it."""
+    floor_disc(0, -0.3, 1.45)
+    top = DESK_TOP
+    outline = stadium(DESK_L, DESK_W)
+    # tabletop slab and its dark glass inset
+    prism(outline, top - DESK_SLAB, top, "Panel", bevel=0.006, segs=3)
+    prism(stadium(DESK_L - 0.1, DESK_W - 0.1, concave=True), top - 0.006, top + 0.0005, "DeskGlass")
+    # underside: dark, with a cyan underglow strip 3 cm in from the edge, facing down
+    prism(stadium(DESK_L - 0.02, DESK_W - 0.02), top - DESK_SLAB - 0.004, top - DESK_SLAB, "PanelDark")
+    strip_along(stadium(DESK_L - 0.06, DESK_W - 0.06), top - DESK_SLAB - 0.006, 0.012, 0.004, "GlowCyanT2")
+    # front lip LED just under the concave edge
+    front = outline[:25]
+    strip_along(front, top - DESK_SLAB + 0.012, 0.004, 0.006, "GlowCyanT2", closed=False, out=0.003)
+    half = DESK_L / 2 - DESK_W / 2
+    r = DESK_W / 2
+    for sx in (-1, 1):
+        # rounded end-cap pod, floor to tabletop, following the stadium end
+        a0, a1 = (-80, 80) if sx > 0 else (100, 260)
+        with at((sx * half, 0, 0)):
+            bm = revolve([(r - 0.29, 0.0), (r - 0.01, 0.0), (r - 0.01, top - DESK_SLAB), (r - 0.29, top - DESK_SLAB)],
+                         segs=20, a0=90 - a1, a1=90 - a0)
+            part(bm, "Panel", bevel=0.005, segs=2)
+            # recessed vertical amber light slit on the outer face
+            box((sx * (r - 0.004), 0, 0.42), (0.012, 0.05, 0.3), "PanelDark")
+            box((sx * (r - 0.0), 0, 0.42), (0.006, 0.04, 0.28), "GlowAmberT2")
+            # kick plate
+            bm = revolve([(r - 0.28, 0.0), (r - 0.005, 0.0), (r - 0.005, 0.06), (r - 0.28, 0.06)],
+                         segs=20, a0=90 - a1, a1=90 - a0)
+            part(bm, "DeskGlass")
+    # centre pedestal, set back 15 cm from the front edge: grooves, a vent grille, kick plate
+    py = -r + 0.15 + 0.225 + 0.08
+    box((0, py, (top - DESK_SLAB) / 2), (1.2, 0.45, top - DESK_SLAB), "Panel", bevel=0.06, segs=4)
+    for z in (0.3, 0.46):
+        box((0, py - 0.226, z), (1.12, 0.006, 0.004), "PanelDark")
+    for i in range(10):
+        box((-0.18 + i * 0.04, py - 0.226, 0.17), (0.016, 0.006, 0.07), "PanelDark")
+    box((0, py, 0.03), (1.16, 0.43, 0.06), "DeskGlass")
+    # holo projector bar along the back edge: dark metal, emissive top
+    by = r - 0.07
+    box((0, by, top + 0.015), (1.6, 0.05, 0.03), "Graphite", bevel=0.006)
+    box((0, by, top + 0.031), (1.56, 0.03, 0.003), "GlowCyanT3")
+    # keyboard with a key grid, touch pad, buttons, tablet
+    with at((0, -0.2, top), (4, 0, 0)):
+        box((0, 0, 0.007), (0.45, 0.15, 0.012), "Graphite", bevel=0.004)
+        for row in range(4):
+            for col in range(15):
+                box((-0.196 + col * 0.028, -0.048 + row * 0.032, 0.016), (0.014 * 1.5, 0.014 * 1.5, 0.005), "Keys",
+                    bevel=0.0015, segs=1)
+    box((0.34, -0.2, top + 0.003), (0.12, 0.09, 0.004), "DeskGlass")
+    for dx, dy, sx_, sy_ in ((0, 0.045, 0.12, 0.003), (0, -0.045, 0.12, 0.003), (0.06, 0, 0.003, 0.09), (-0.06, 0, 0.003, 0.09)):
+        box((0.34 + dx, -0.2 + dy, top + 0.006), (sx_, sy_, 0.002), "GlowCyanT2")
+    for i, m in enumerate(("GlowAmberT2", "GlowPinkT2", "GlowWhiteT2", "GlowAmberT2", "GlowPinkT2")):
+        disc((-0.33 + i * 0.03, -0.24, top), 0.006, 0.0, 0.006, m, segs=12)
+    with at((-0.6, -0.17, top + 0.01), (12, 0, 14)):
+        box((0, 0, 0), (0.18, 0.12, 0.008), "Graphite", bevel=0.003)
+        box((0, 0, 0.0045), (0.16, 0.1, 0.001), "HoloScreenDim")
+    # holographic screens: a wide main screen and two side panels angled 28° in
+    # Screen glass and frames only: the app paints the starship art on them
+    # (`screens.rs`; keep these positions in step with `screens::SCREENS`).
+    holo_screen((0, by, 1.33), 1.1, 0.55, yaw=0, tilt=-6, content=None, seed=21)
+    holo_screen((-0.72, by - 0.12, 1.2), 0.32, 0.48, yaw=28, tilt=-4, content=None, seed=22)
+    holo_screen((0.72, by - 0.12, 1.2), 0.32, 0.48, yaw=-28, tilt=-4, content=None, seed=23)
 
 
 # ---------------------------------------------------------------- activity holograms
@@ -811,6 +983,7 @@ def build_document():
 STATIONS = {
     "main_desk": build_main_desk,
     "writing_desk": build_writing_desk,
+    "desk_console": build_desk_console,
     "plant": build_plant,
     "wall_panel": build_wall_panel,
     "pillar": build_pillar,

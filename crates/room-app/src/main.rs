@@ -15,6 +15,7 @@ mod director;
 mod log;
 mod look;
 mod probe;
+mod screens;
 mod mini;
 mod model;
 mod notify;

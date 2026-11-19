@@ -65,7 +65,15 @@ def make_material(name, color, rough, metal=0.0, emit=None, strength=0.0, alpha=
 
 CYAN = (0.05, 0.72, 1.0)
 MAT_SPECS = {
-    "Panel": dict(color=(0.3, 0.34, 0.43), rough=0.22, metal=0.75),
+    "Panel": dict(color=(0.023, 0.035, 0.08), rough=0.28, metal=0.9),
+    # Orrery (PROMPT_02 step 6, PROMPT_03 C): armoured bezel #2A3550, dark bowl #04203F,
+    # amber indicator lights, orange sun and teal blips.
+    "Bezel": dict(color=(0.023, 0.035, 0.084), rough=0.28, metal=0.9),
+    "Bowl": dict(color=(0.0012, 0.016, 0.051), rough=0.2, metal=0.4),
+    "Amber": dict(color=(1.0, 0.33, 0.045), rough=0.3, emit=(1.0, 0.33, 0.045), strength=8.0),
+    "Sun": dict(color=(1.0, 0.42, 0.08), rough=0.3, emit=(1.0, 0.42, 0.08), strength=14.0),
+    "Teal": dict(color=(0.05, 0.75, 0.6), rough=0.3, emit=(0.05, 0.75, 0.6), strength=7.0),
+    "Rim": dict(color=CYAN, rough=0.3, emit=CYAN, strength=9.0),
     "PanelDark": dict(color=(0.025, 0.035, 0.06), rough=0.12, metal=0.2),
     "Trim": dict(color=(0.3, 0.33, 0.38), rough=0.3, metal=0.9),
     "Energy": dict(color=CYAN, rough=0.3, emit=CYAN, strength=2.6),
@@ -216,16 +224,25 @@ def radial(a, r, z):
 # ---------------------------------------------------------------- the platform
 def build_dais():
     """Three sunken tiers with cyan rim light, read as embedded in the floor."""
-    tiers = ((1.45, -0.12, 0.08), (1.28, 0.08, 0.15), (DECK_R, 0.15, DECK_Z))
+    # The outer bezel: 12 armoured segments with 2 cm gaps, alternately 18 and 15 cm
+    # tall, a notch in each, four amber lights and a thin cyan rim tube on top.
+    for k in range(12):
+        a = 30 * k
+        height = 0.18 if k % 2 == 0 else 0.15
+        ring((0, 0, 0), 1.25, 1.5, -0.12, height - 0.12 + 0.08, "Bezel", segs=6, a0=a + 0.45, a1=a + 30 - 0.45,
+             bevel=0.008, bsegs=2)
+        box(radial(a + 15, 1.49, height - 0.06), (0.06, 0.03, 0.03), "PanelDark", rot=(0, 0, -(a + 15)))
+    for k in range(4):
+        a = 45 + 90 * k
+        box(radial(a, 1.505, 0.04), (0.05, 0.012, 0.022), "Amber", rot=(0, 0, -a))
+    ring((0, 0, 0), 1.255, 1.275, 0.135, 0.15, "Rim", segs=64)
+    disc((0, 0, 0), 1.25, -0.12, 0.08, "Bowl", segs=64)
+    tiers = ((1.28, 0.08, 0.15), (DECK_R, 0.15, DECK_Z))
     for r, z0, z1 in tiers:
         disc((0, 0, 0), r, z0, z1, "Panel", segs=48, bevel=0.016, bsegs=1)
         zm = (max(z0, 0.0) + z1) / 2
         ring((0, 0, 0), r - 0.008, r + 0.005, zm - 0.009, zm + 0.009, "Energy", segs=40)
     # graphite band and vertical fins on the lowest riser: machinery, not a plain wall
-    ring((0, 0, 0), 1.41, 1.432, -0.02, 0.055, "PanelDark", segs=48)
-    for k in range(24):
-        a = 7.5 + 15 * k
-        box(radial(a, 1.437, 0.018), (0.022, 0.03, 0.055), "Trim", rot=(0, 0, -a))
     # tread seams, so the steps read as machined plate
     for k in range(8):
         a = 22.5 + 45 * k
@@ -243,6 +260,10 @@ def build_deck():
         a = 15 + 30 * k
         box(radial(a, 0.36, DECK_Z + 0.005), (0.01, 0.42, 0.006), "Energy", rot=(0, 0, -a))
     disc((0, 0, 0), 0.085, DECK_Z + 0.002, DECK_Z + 0.01, "Energy", segs=16)
+    # radar blips: one orange sun, teal and cyan points
+    for a, r, m, size in ((205, 0.44, "Sun", 0.035), (60, 0.28, "Teal", 0.02), (130, 0.6, "Teal", 0.018),
+                          (300, 0.5, "Energy", 0.02), (20, 0.68, "Energy", 0.016)):
+        disc(radial(a, r, DECK_Z + 0.004), size, 0.0, 0.012, m, segs=14)
     # collar where the column leaves the deck
     ring((0, 0, 0), BEAM_R + 0.01, BEAM_R + 0.07, DECK_Z + 0.002, DECK_Z + 0.022, "Trim", segs=32, bevel=0.005,
          bsegs=1)

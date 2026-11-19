@@ -141,7 +141,7 @@ fn billboard(kit: &mut Kit, texture: &Handle<Image>, at: Vec3, size: f32, color:
 
 /// An RGBA image with a full mip chain and trilinear, 16x anisotropic sampling, so a
 /// texture seen small or at a grazing angle stays smooth instead of sparkling (FIX 01).
-fn image(width: u32, height: u32, pixels: Vec<u8>) -> Image {
+pub(crate) fn image(width: u32, height: u32, pixels: Vec<u8>) -> Image {
     use bevy::image::{ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
     let mut data = pixels.clone();
     let (mut level, mut w, mut h, mut levels) = (pixels.clone(), width, height, 1);

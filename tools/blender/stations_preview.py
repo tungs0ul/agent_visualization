@@ -27,6 +27,7 @@ SPOTS = {
     "bookshelf": ((0.0, 0.033, 1.3), 180),
     "lab": ((0.0, 0.053, 1.0), 180),
     "writing_desk": ((0.0, 0.043, 0.85), 180),
+    "desk_console": ((0.0, 0.043, 0.85), 180),
 }
 HOLOS = ["holo_document", "holo_editor", "holo_terminal", "holo_cards", "holo_nodes", "holo_capsule"]
 

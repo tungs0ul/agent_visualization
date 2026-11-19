@@ -2170,3 +2170,27 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   while it's above the ceiling and adds it back inside. Lights and probe cameras use
   `hull::all_layers()` so the ceiling's shadows and reflections stay. Metrics 7/7
   (median 0.22, dark 31%, glow 13%); stable. Screens (local): baseline/p02s1b_*.png.
+- 2026-11-19, Claude Opus 5.5: M30 PROMPT_03 A–C in progress (brief in docs/…/
+  PROMPT_03_detail_color_screens.md; new 12-metric look_metrics.py copied in).
+  A: white clear-coated hardware (#D9E2EE desk shells, robot shell, black visor),
+  silver #9AA6B8 / charcoal #2A3140 metal (hull trim, Blender Metal/Trim/Graphite),
+  key light #B8D4FF, a 350 lx #E8F0FF top light (`look::TopLight`, `top_lux`), amber
+  pad arcs and end-cap slits, violet wall strips, rack LEDs 70/12/10/8. Floor light
+  circles (user): the floor coat roughness is 0.35 (was 0.08, it mirrored each
+  ceiling light as a crisp disc), spot radii 0.1, and the per-desk screen-wash point
+  lights are gone (they made blobs on the glossy pads); pad tops `PadTop` rough 0.35.
+  C: `stations.py` `build_desk_console` (desk_console.glb, ~12.6k tris): white stadium
+  console with concave front, end caps with amber slits, centre pedestal with grooves
+  and vent, underglow, front lip LED, projector bar, keyboard grid, touch pad, buttons,
+  tablet; pad with 24 inset lights, bolts, segment cuts. main_desk dais: dark metal
+  tiers, thick cyan/amber/magenta+violet tubes, three floating arcs. teleporter.glb is
+  the orrery: 12 armoured bezel segments, amber lights, dark bowl, sun/teal blips, cyan
+  rim. Activity holograms float above the desk's main screen, crew desks only.
+  B (user: "it is a star ship and you display code?"): `screens.rs` paints eight
+  starship illustrations (star map, planet, radar, ship schematic, nebula, route chart,
+  crew, cargo) and four side panels in code, unlit textured quads in front of the
+  screen glass; every desk a different mix. Not yet bound to the tool category.
+  D started: 1.2 m floor panels, hazard chevrons, hex patches, spine arrows; side-wall
+  bays with silver pilasters, strips, bolts, grooves, status lights.
+  Not yet seen on screen: the screen art and D (the Mac's screen was off/locked; the
+  app renders black then). Last measured (before B/D): 7/12 metrics.

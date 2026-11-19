@@ -22,6 +22,8 @@ pub struct Look {
     pub ambient_color: String,
     pub key_lux: f32,
     pub key_color: String,
+    /// The soft white light from above.
+    pub top_lux: f32,
     pub env_intensity: f32,
     /// Multiplies every ceiling spot light's own intensity.
     pub spot_scale: f32,
@@ -53,7 +55,8 @@ impl Default for Look {
             ambient_brightness: 25.0,
             ambient_color: "#1A3A7A".into(),
             key_lux: 1800.0,
-            key_color: "#9CC2FF".into(),
+            key_color: "#B8D4FF".into(),
+            top_lux: 600.0,
             env_intensity: 500.0,
             spot_scale: 1.0,
             point_scale: 1.0,
@@ -81,6 +84,14 @@ impl Look {
         Srgba::hex(hex).map(Color::Srgba).unwrap_or(Color::WHITE)
     }
 }
+
+/// The window key light.
+#[derive(Component)]
+pub struct KeyLight;
+
+/// The soft white light from above.
+#[derive(Component)]
+pub struct TopLight;
 
 /// A light's intensity before the look's scale (so scaling twice doesn't compound).
 #[derive(Component, Clone, Copy)]
@@ -125,7 +136,8 @@ pub fn apply(
     mut commands: Commands,
     mut ambient: ResMut<GlobalAmbientLight>,
     mut camera: Query<(Entity, &mut Camera), With<crate::view3d::RoomCamera3d>>,
-    mut sun: Query<&mut DirectionalLight>,
+    mut sun: Query<&mut DirectionalLight, (With<KeyLight>, Without<TopLight>)>,
+    mut top: Query<&mut DirectionalLight, (With<TopLight>, Without<KeyLight>)>,
     mut spots: Query<(&mut SpotLight, &BaseIntensity), Without<PointLight>>,
     mut points: Query<(&mut PointLight, &BaseIntensity), Without<SpotLight>>,
     mut env: Query<&mut bevy::light::GeneratedEnvironmentMapLight>,
@@ -166,6 +178,9 @@ pub fn apply(
     for mut light in &mut sun {
         light.illuminance = look.key_lux;
         light.color = Look::color(&look.key_color);
+    }
+    for mut light in &mut top {
+        light.illuminance = look.top_lux;
     }
     for (mut spot, base) in &mut spots {
         spot.intensity = base.0 * look.spot_scale;

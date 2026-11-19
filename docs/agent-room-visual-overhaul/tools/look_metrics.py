@@ -31,6 +31,11 @@ TARGET = {
     "dark_fraction(L<0.15)": 0.358,
     "mean_saturation": 0.741,
     "glow_fraction(S>0.45,V>0.75)": 0.103,
+    "edge_density": 0.219,
+    "flat_tiles(std<0.02)": 0.18,
+    "warm_accent_fraction": 0.0021,
+    "violet_magenta_fraction": 0.0033,
+    "white_hardware_fraction": 0.031,
 }
 # Allowed relative deviation before a metric is flagged.
 TOLERANCE = {
@@ -41,6 +46,11 @@ TOLERANCE = {
     "dark_fraction(L<0.15)": 0.30,
     "mean_saturation": 0.15,
     "glow_fraction(S>0.45,V>0.75)": 0.40,
+    "edge_density": 0.25,
+    "flat_tiles(std<0.02)": 0.40,
+    "warm_accent_fraction": 0.60,
+    "violet_magenta_fraction": 0.60,
+    "white_hardware_fraction": 0.50,
 }
 # Each entry: (hint when the build is TOO HIGH, hint when it is TOO LOW)
 HINTS = {
@@ -60,6 +70,16 @@ HINTS = {
     "luma_p95": ("Highlights too bright / clipped: lower emissive tiers or exposure.",
                  "No real highlights: emissive strips need a white-hot core (raise intensity)."),
     "luma_p75": ("Upper mid-tones too bright: surfaces too light.", "Upper mid-tones too dark."),
+    "edge_density": ("Very busy image; simplify noisy textures.",
+                     "Not enough detail: add panel seams, greebles, decals, wall/ceiling modules, small lights, richer screen art."),
+    "flat_tiles(std<0.02)": ("Too many large flat, featureless areas: break up walls/floor/ceiling with panels, trims, decals, light strips.",
+                             "Almost no calm areas; let some surfaces rest."),
+    "warm_accent_fraction": ("Too much orange/amber; accents should be rare.",
+                             "No warm accents: add amber end-cap slits, amber pad arcs, orange/pink buttons, orange orrery blip, warm screen highlights."),
+    "violet_magenta_fraction": ("Too much violet/magenta.",
+                                "No violet/magenta: add magenta-violet inner dais ring, violet wall strips, purple nebula/accents on screens, multicolor rack LEDs."),
+    "white_hardware_fraction": ("Too many bright neutral surfaces.",
+                                "Hardware doesn't read white: desk shells/robot/pots must be neutral cool white lit by a near-white light, not tinted blue."),
 }
 
 HUE_BINS = [(0, 25, "red/orange"), (25, 50, "amber"), (50, 75, "yellow"), (75, 160, "green"),
@@ -106,6 +126,20 @@ def measure(im):
         "mean_saturation": float(s.mean()),
         "glow_fraction(S>0.45,V>0.75)": float(glow.mean()),
     }
+    # detail / local contrast at the reference's working resolution
+    g_im = im.convert("L").resize((1470, max(1, int(1470 * im.height / im.width))), Image.LANCZOS)
+    ga = np.asarray(g_im).astype(np.float32) / 255.0
+    gx = np.abs(np.diff(ga, axis=1))[:-1]
+    gy = np.abs(np.diff(ga, axis=0))[:, :-1]
+    m["edge_density"] = float((np.hypot(gx, gy) > 0.08).mean())
+    t = 16
+    hh, ww = ga.shape
+    tiles = ga[:hh // t * t, :ww // t * t].reshape(hh // t, t, ww // t, t).std(axis=(1, 3))
+    m["flat_tiles(std<0.02)"] = float((tiles < 0.02).mean())
+    col = (s > 0.35) & (v > 0.35)
+    m["warm_accent_fraction"] = float((col & ((h < 70) | (h > 330))).mean())
+    m["violet_magenta_fraction"] = float((col & (h >= 250) & (h <= 330)).mean())
+    m["white_hardware_fraction"] = float(((s < 0.18) & (v > 0.6)).mean())
     hues = {}
     if glow.any():
         gh = h[glow]

@@ -231,25 +231,19 @@ pub fn build(kit: &mut Kit) {
     ] {
         kit.commands.spawn((PointLight { color, intensity: lumens, range, ..default() }, Transform::from_translation(at), crate::look::BaseIntensity(lumens)));
     }
-    // Practical lights (brief 5.3): a spot straight down on the core's dais, and a
-    // soft holo-blue wash from every desk's screens onto its desk and pad.
+    // Practical light (brief 5.3): a spot straight down on the core's dais.
     let core_spot = 1_800_000.0;
     kit.commands.spawn((
-        SpotLight { color: Color::srgb_u8(0x9C, 0xD8, 0xFF), intensity: core_spot, range: 12.0, radius: 0.4, inner_angle: 0.25, outer_angle: 0.55, shadow_maps_enabled: true, ..default() },
+        SpotLight { color: Color::srgb_u8(0x9C, 0xD8, 0xFF), intensity: core_spot, range: 12.0, radius: 0.1, inner_angle: 0.25, outer_angle: 0.55, shadow_maps_enabled: true, ..default() },
         Transform::from_translation(command + Vec3::Y * 7.2).looking_at(command, Vec3::Z),
         crate::look::BaseIntensity(core_spot),
     ));
-    for index in 0..DESKS.len() {
-        let screen_wash = 90_000.0;
-        kit.commands.spawn((
-            PointLight { color: Color::srgb_u8(0x4B, 0x8D, 0xF0), intensity: screen_wash, range: 3.5, radius: 0.3, ..default() },
-            Transform::from_translation(Spot::Desk(index as u8).center() + Vec3::Y * 1.5),
-            crate::look::BaseIntensity(screen_wash),
-        ));
-    }
+    // No screen-wash point lights at the desks: on the glossy pads they showed as
+    // round blobs, not reflections (the user, 2026-11-19). The screens' glow and the
+    // interior reflection probe light the desks instead.
     for index in 0..DESKS.len() {
         let at = Spot::Desk(index as u8).center();
-        kit.model("models/stations/writing_desk.glb", at);
+        kit.model("models/stations/desk_console.glb", at);
         // The desk's own light over the floor ring, coloured by its robot's state
         // (`view3d::desk_lights`).
         let light = kit.materials.add(StandardMaterial { base_color: Color::BLACK, emissive: DeskState::Free.glow(), ..default() });

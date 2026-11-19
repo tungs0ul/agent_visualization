@@ -19,6 +19,8 @@ const BACK_HALF: f32 = 7.5;
 const SIDE_X: f32 = 10.1;
 const CORNER_R: f32 = 2.6;
 const FRONT_Z: f32 = 5.0;
+/// Width of one wall bay (PROMPT_03 D).
+const BAY: f32 = 2.4;
 
 /// The brief's glow colours (linear): cyan #38C8FF for strips and rings, azure
 /// #2E8BFF for the ceiling strips and fixture discs. Never white: the tonemapper burns
@@ -36,12 +38,20 @@ pub fn build(kit: &mut Kit) {
         perceptual_roughness: 0.45,
         ..default()
     });
+    // Frames, mullions and beams in silver #9AA6B8 (PROMPT_03 A): neutral metal that
+    // reflects the cyan strips rather than being blue itself.
     let trim = kit.materials.add(StandardMaterial {
-        base_color: Color::srgb_u8(0x1A, 0x26, 0x40),
-        metallic: 0.85,
-        perceptual_roughness: 0.28,
+        base_color: Color::srgb_u8(0x9A, 0xA6, 0xB8),
+        metallic: 0.9,
+        perceptual_roughness: 0.3,
         ..default()
     });
+    let groove = kit.materials.add(StandardMaterial { base_color: Color::srgb_u8(0x05, 0x0A, 0x16), perceptual_roughness: 0.7, ..default() });
+    let bolt = kit.materials.add(StandardMaterial { base_color: Color::srgb_u8(0x2A, 0x31, 0x40), metallic: 0.9, perceptual_roughness: 0.35, ..default() });
+    let amber = kit.glow(LinearRgba::rgb(1.0, 0.33, 0.045) * 6.0);
+    let green = kit.glow(LinearRgba::rgb(0.03, 0.75, 0.2) * 5.0);
+    // A few short violet #8A5CFF strips in the side wall bands (crop 13).
+    let violet = kit.glow(LinearRgba::rgb(0.254, 0.107, 1.0) * 5.0);
     let strip = kit.glow(CYAN * 2.4);
     let white = kit.glow(AZURE * 2.6);
     let mid = (WALL_TOP + CEILING) / 2.0;
@@ -78,6 +88,38 @@ pub fn build(kit: &mut Kit) {
         kit.mesh(Cuboid::new(0.3, tall, length), hull.clone(), Transform::from_xyz(side * SIDE_X, mid, z));
         for y in [WALL_TOP + 0.5, CEILING - 0.5] {
             kit.mesh(Cuboid::new(0.02, 0.04, length - 0.2), strip.clone(), Transform::from_xyz(side * (SIDE_X - 0.17), y, z));
+        }
+        // 2.4 m bays (PROMPT_03 D): a silver pilaster with a vertical light strip and
+        // bolts between bays, two panel grooves across each, and a status light
+        // cluster on every other bay, so no stretch of wall is bare.
+        let face = side * (SIDE_X - 0.16);
+        let first = BACK_Z + CORNER_R;
+        let bays = ((FRONT_Z - first) / BAY).round().max(1.0) as usize;
+        let bay = (FRONT_Z - first) / bays as f32;
+        for k in 0..=bays {
+            let z = first + k as f32 * bay;
+            kit.mesh(Cuboid::new(0.14, tall, 0.2), trim.clone(), Transform::from_xyz(face, mid, z));
+            kit.mesh(Cuboid::new(0.02, tall - 0.4, 0.035), strip.clone(), Transform::from_xyz(face - side * 0.075, mid, z));
+            for y in [WALL_TOP + 0.25, CEILING - 0.25] {
+                kit.mesh(Cuboid::new(0.03, 0.05, 0.05), bolt.clone(), Transform::from_xyz(face - side * 0.075, y, z - 0.06));
+                kit.mesh(Cuboid::new(0.03, 0.05, 0.05), bolt.clone(), Transform::from_xyz(face - side * 0.075, y, z + 0.06));
+            }
+            if k == bays {
+                continue;
+            }
+            let centre = z + bay / 2.0;
+            for y in [WALL_TOP + 1.35, WALL_TOP + 2.15] {
+                kit.mesh(Cuboid::new(0.015, 0.025, bay - 0.4), groove.clone(), Transform::from_xyz(face + side * 0.005, y, centre));
+            }
+            if k % 2 == 0 {
+                for (i, light) in [amber.clone(), strip.clone(), green.clone()].into_iter().enumerate() {
+                    kit.mesh(Cuboid::new(0.02, 0.05, 0.08), light, Transform::from_xyz(face - side * 0.005, WALL_TOP + 1.7, centre - 0.15 + i as f32 * 0.15));
+                }
+            }
+        }
+        for (k, y) in [WALL_TOP + 0.8, WALL_TOP + 1.0].into_iter().enumerate() {
+            let along = z - 1.5 + k as f32 * 2.2;
+            kit.mesh(Cuboid::new(0.02, 0.05, 1.2), violet.clone(), Transform::from_xyz(side * (SIDE_X - 0.17), y, along));
         }
     }
 
@@ -120,7 +162,8 @@ pub fn build(kit: &mut Kit) {
                 color: FIXTURE_LIGHT,
                 intensity: lumens,
                 range: 16.0,
-                radius: radius * 0.6,
+                // A small source: a big one paints a round disc on the glossy floor.
+                radius: 0.1,
                 inner_angle: 0.35,
                 outer_angle: 0.85,
                 shadow_maps_enabled: true,

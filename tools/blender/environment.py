@@ -58,7 +58,9 @@ def make_material(name, color, rough, metal=0.0, emit=None, strength=0.0, alpha=
     if coat > 0.0:
         # Exported as KHR_materials_clearcoat; Bevy reads it into `clearcoat`.
         bsdf.inputs["Coat Weight"].default_value = coat
-        bsdf.inputs["Coat Roughness"].default_value = 0.08
+        # A soft coat: a sharp one mirrors each ceiling light as a crisp disc on the
+        # floor, which reads as a pasted circle from above (the user, 2026-11-19).
+        bsdf.inputs["Coat Roughness"].default_value = 0.35
     bsdf.inputs["Base Color"].default_value = (*color, 1.0)
     bsdf.inputs["Roughness"].default_value = rough
     bsdf.inputs["Metallic"].default_value = metal
@@ -81,18 +83,25 @@ MATS = {m.name: m for m in [
     make_material("FloorB", (0.0044, 0.0103, 0.0331), 0.24, metal=0.75, coat=0.4),
     make_material("FloorC", (0.0044, 0.0103, 0.0331), 0.36, metal=0.75, coat=0.4),
     make_material("FloorAlt", (0.006, 0.014, 0.042), 0.28, metal=0.75, coat=0.4),
+    # Floor decals: dim amber hazard paint, faint grey stencil, faint cyan arrows.
+    make_material("Hazard", (0.35, 0.16, 0.03), 0.5, emit=(1.0, 0.42, 0.08), strength=0.5),
+    make_material("Decal", (0.03, 0.045, 0.08), 0.5),
+    make_material("DecalCyan", (0.02, 0.2, 0.4), 0.4, emit=(0.04, 0.58, 1.0), strength=1.5),
     # Dark trim (#1A2640) for bezels round the floor rings.
-    make_material("Trim", (0.0103, 0.0185, 0.0513), 0.28, metal=0.85),
+    # Charcoal #2A3140 and silver #9AA6B8 metal (PROMPT_03 A): neutral, so they pick up
+    # the cyan strips' reflections instead of being blue themselves.
+    make_material("Trim", (0.023, 0.030, 0.051), 0.3, metal=0.9),
     # Ring tubes: thin, intense cyan (#38C8FF tier T2/T3).
-    make_material("RingCyan", (0.04, 0.58, 1.0), 0.3, emit=(0.04, 0.58, 1.0), strength=9.0),
+    make_material("RingCyan", (0.04, 0.58, 1.0), 0.3, emit=(0.04, 0.58, 1.0), strength=5.0),
     make_material("Seam", (0.008, 0.009, 0.012), 0.6, metal=0.3),
     make_material("Pad", (0.0018, 0.006, 0.0242), 0.35, metal=0.7),
     make_material("Panel", (0.006, 0.0159, 0.0513), 0.45, metal=0.5),
-    make_material("Metal", (0.42, 0.5, 0.62), 0.28, metal=1.0),
-    make_material("Graphite", (0.02, 0.03, 0.055), 0.35, metal=0.6),
+    make_material("Metal", (0.323, 0.381, 0.479), 0.3, metal=0.9),
+    make_material("Graphite", (0.023, 0.030, 0.051), 0.35, metal=0.7),
     make_material("GlowCyan", CYAN, 0.3, emit=CYAN, strength=2.8),
-    make_material("GlowPurple", PURPLE, 0.3, emit=PURPLE, strength=2.0),
-    make_material("GlowOrange", ORANGE, 0.3, emit=ORANGE, strength=2.2),
+    make_material("GlowPurple", PURPLE, 0.3, emit=PURPLE, strength=6.0),
+    make_material("GlowOrange", ORANGE, 0.3, emit=ORANGE, strength=7.0),
+    make_material("GlowGreen", (0.15, 1.0, 0.35), 0.3, emit=(0.15, 1.0, 0.35), strength=5.0),
     make_material("Glass", (0.12, 0.18, 0.26), 0.04, alpha=0.15),
     make_material("Holo", (0.02, 0.2, 1.0), 0.2, emit=(0.03, 0.24, 1.0), strength=3.0, alpha=0.75),
     make_material("Leaf", (0.06, 0.32, 0.12), 0.5),
@@ -198,8 +207,19 @@ floor_coll = bpy.data.collections.new("floor")
 scene.collection.children.link(floor_coll)
 fb = Builder("Floor")
 
-XS_F = [-10.1, -7.5, -5.0, -2.5, 0.0, 2.5, 5.0, 7.5, 10.1]
-YS_F = [-6.5, -5.0, -2.5, 0.0, 2.5, 5.0, 6.95]
+# 1.2 m panels (PROMPT_03 D), clipped to the room's edges.
+def _grid(lo, hi, step=1.2):
+    out, v = [lo], math.ceil(lo / step) * step
+    while v < hi - 0.3:
+        if v - out[-1] > 0.3:
+            out.append(round(v, 3))
+        v += step
+    out.append(hi)
+    return out
+
+
+XS_F = _grid(-10.1, 10.1)
+YS_F = _grid(-6.5, 6.95)
 GAP, CH, THICK = 0.007, 0.012, 0.08
 
 
@@ -222,6 +242,38 @@ for i in range(len(XS_F) - 1):
         outer = i in (0, len(XS_F) - 2) or j in (0, len(YS_F) - 2)
         floor_panel(XS_F[i], YS_F[j], XS_F[i + 1], YS_F[j + 1], "FloorAlt" if outer else ("Floor", "FloorB", "FloorC")[(i * 2 + j) % 3])
 rect(fb, -10.1, -6.5, 10.1, 6.95, -0.03, "Seam")
+
+# Floor decals (PROMPT_03 D): low-saturation amber hazard chevrons along the side
+# walls, small hex-grid patches, and arrows pointing along the floor traces.
+def chevron(cx, cy, size, angle, mat, z=0.0015):
+    c, s_ = math.cos(angle), math.sin(angle)
+    def p(u, v):
+        return Vector((cx + u * c - v * s_, cy + u * s_ + v * c, z))
+    w = size * 0.28
+    fb.face([p(-size / 2, -size / 2), p(-size / 2 + w, -size / 2), p(w, 0), p(0, 0)], mat)
+    fb.face([p(0, 0), p(w, 0), p(-size / 2 + w, size / 2), p(-size / 2, size / 2)], mat)
+
+
+for sx in (-1, 1):
+    for k in range(10):
+        chevron(sx * 9.55, -5.6 + k * 0.32, 0.22, math.pi / 2 if sx > 0 else -math.pi / 2, "Hazard")
+    for k in range(10):
+        chevron(sx * 9.55, 3.0 + k * 0.32, 0.22, math.pi / 2 if sx > 0 else -math.pi / 2, "Hazard")
+
+
+def hex_patch(cx, cy, rows=4, cols=6, r=0.09):
+    for i in range(cols):
+        for j in range(rows):
+            x = cx + i * r * 1.5
+            y = cy + j * r * math.sqrt(3) + (r * math.sqrt(3) / 2 if i % 2 else 0)
+            annulus(fb, x, y, r * 0.86, r * 0.92, 0.0015, "Decal", seg=6, rot=0.0)
+
+
+for cx, cy in ((-8.6, 5.6), (7.4, 5.6), (-8.8, -2.2), (7.6, -2.6), (-1.6, 5.9), (0.6, -5.9)):
+    hex_patch(cx, cy)
+# arrows along the spine trace from the core to the front
+for k in range(6):
+    chevron(0.0, -1.0 - k * 0.55, 0.18, -math.pi / 2, "DecalCyan")
 
 # Centre: one seamless polished disc with a glow edge and a hexagon inlay around it.
 Z1, Z2, Z3 = 0.002, 0.004, 0.006
@@ -509,8 +561,9 @@ for k in range(3):
     wall_box(rb, s, 0.5, 2.7, 2.74, 0.02, 0.66, "Metal")
     for row in range(14):
         z = 0.3 + row * 0.16
-        mat = "GlowOrange" if (row * 7 + k * 3) % 11 == 0 else (
-            "GlowPurple" if (row + k) % 6 == 0 else "GlowCyan")
+        # About 70% cyan, 12% amber, 10% violet, 8% green (PROMPT_03 A).
+        pick = (row * 7 + k * 5) % 25
+        mat = "GlowOrange" if pick < 3 else ("GlowPurple" if pick < 6 else ("GlowGreen" if pick < 8 else "GlowCyan"))
         wall_box(rb, s - 0.18, 0.16, z, z + 0.018, 0.64, 0.65, mat, top=False)
         wall_box(rb, s + 0.28, 0.03, z, z + 0.018, 0.64, 0.65, "GlowCyan", top=False)
 rb.finish(shell_coll)

@@ -183,14 +183,23 @@ pub fn build(
         // Illuminance and colour come from the look settings (`look::apply`).
         DirectionalLight { illuminance: 1800.0, shadow_maps_enabled: true, ..default() },
         crate::hull::all_layers(),
+        crate::look::KeyLight,
         Transform::from_rotation(Quat::from_euler(EulerRot::YXZ, -0.6, -0.95, 0.0)),
         CascadeShadowConfigBuilder { num_cascades: 1, maximum_distance: 30.0, ..default() }.build(),
+    ));
+    // A soft near-white light from straight above (#E8F0FF, PROMPT_03 A), so white
+    // hardware gets a bright neutral top face; blue comes from glow and rim light.
+    commands.spawn((
+        DirectionalLight { illuminance: 600.0, color: Color::srgb_u8(0xE8, 0xF0, 0xFF), shadow_maps_enabled: false, ..default() },
+        Transform::from_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2 + 0.15)),
+        crate::look::TopLight,
     ));
     commands.insert_resource(GlobalAmbientLight { color: Color::srgb(0.48, 0.64, 1.0), brightness: 190.0, ..default() });
     let mut kit = crate::world3d::Kit { commands: &mut commands, assets: &assets, meshes: &mut meshes, materials: &mut materials };
     crate::world3d::build(&mut kit);
     crate::hull::build(&mut kit);
     crate::space::build(&mut kit, &mut images);
+    crate::screens::build(&mut kit, &mut images);
 }
 
 
@@ -940,16 +949,16 @@ pub fn activity_holograms(
             commands.entity(entity).despawn();
             continue;
         }
-        let Some((_, _, robot_at)) = robot else { continue };
+        let Some((_, avatar, _)) = robot else { continue };
         shown.insert(holo.of, holo.pose);
         holo.age += time.delta_secs();
         let grow = (holo.age / 0.35).min(1.0);
         let bob = 0.02 * (time.elapsed_secs() * 1.6 + (holo.of.to_bits() % 97) as f32).sin();
-        // A screen floating in front of the robot at chest height, tilted up to the
-        // camera, below its face: the robot works at it, you read it.
-        let front = robot_at.rotation * Vec3::new(0.0, 0.0, HOLO_FRONT) * robot_at.scale.x;
-        at.translation = robot_at.translation + front + Vec3::Y * (HOLO_LIFT * robot_at.scale.y + bob);
-        at.rotation = robot_at.rotation * Quat::from_rotation_x(-0.3);
+        // Above the desk's main screen, rising out of it (PROMPT_03 B, crop 07), on
+        // active crew desks only: no floating cards in front of the robots.
+        let Some(desk) = avatar.desk else { continue };
+        at.translation = Spot::Desk(desk).center() + Vec3::new(0.0, HOLO_ABOVE_SCREEN + bob, -0.36);
+        at.rotation = Quat::from_rotation_y(time.elapsed_secs() * 0.25);
         at.scale = Vec3::splat(grow * HOLO_SIZE);
     }
     for (robot, avatar, _) in &avatars {
@@ -957,6 +966,9 @@ pub fn activity_holograms(
             continue;
         }
         let Some(file) = holo_for(avatar.pose) else { continue };
+        if avatar.desk.is_none() {
+            continue;
+        }
         let holo = commands
             .spawn((
                 ActivityHolo { of: robot, pose: avatar.pose, age: 0.0 },
@@ -1004,10 +1016,9 @@ const HOLO_LINES: usize = 4;
 /// Seconds for all lines to write, hold and clear.
 const LINE_CYCLE: f32 = 4.0;
 
-/// Where the activity screen floats, in robot heights (`HOLO_LIFT` up to its bottom
-/// edge, `HOLO_FRONT` out in front), and its size.
-const HOLO_FRONT: f32 = 0.5;
-const HOLO_LIFT: f32 = 0.34;
+/// Height of the activity hologram over a crew desk (just above its main screen),
+/// and its size.
+const HOLO_ABOVE_SCREEN: f32 = 1.95;
 const HOLO_SIZE: f32 = 0.95;
 
 /// Brighter copies of the holograms' materials, made once per material.

@@ -40,10 +40,14 @@ scene.render.fps = FPS
 scene.render.fps_base = 1.0
 
 # ---------------------------------------------------------------- materials
-def make_material(name, color, rough, metal=0.0, emit=None, strength=0.0):
+def make_material(name, color, rough, metal=0.0, emit=None, strength=0.0, coat=0.0):
     mat = bpy.data.materials.new(name)
     mat.use_nodes = True
     bsdf = mat.node_tree.nodes.get("Principled BSDF")
+    if coat > 0.0:
+        # Exported as KHR_materials_clearcoat.
+        bsdf.inputs["Coat Weight"].default_value = coat
+        bsdf.inputs["Coat Roughness"].default_value = 0.08
     bsdf.inputs["Base Color"].default_value = (*color, 1.0)
     bsdf.inputs["Roughness"].default_value = rough
     bsdf.inputs["Metallic"].default_value = metal
@@ -54,8 +58,9 @@ def make_material(name, color, rough, metal=0.0, emit=None, strength=0.0):
 
 
 MATS = [
-    make_material("Shell", (0.92, 0.92, 0.93), 0.28),
-    make_material("Visor", (0.012, 0.016, 0.035), 0.06),
+    # Glossy white clear-coated shell, black glass visor (brief 3.5, PROMPT_03 A).
+    make_material("Shell", (0.92, 0.92, 0.93), 0.2, coat=0.8),
+    make_material("Visor", (0.006, 0.007, 0.01), 0.04, coat=1.0),
     make_material("Eyes", (0.05, 0.65, 1.0), 0.3, emit=(0.05, 0.65, 1.0), strength=4.0),
     make_material("Accent", (0.05, 0.75, 1.0), 0.3, emit=(0.05, 0.75, 1.0), strength=4.0),
     make_material("Joint", (0.55, 0.57, 0.6), 0.45),
