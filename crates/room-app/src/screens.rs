@@ -12,9 +12,9 @@ use crate::world3d::{DESKS, Kit, Spot};
 /// Where a desk's screens are, relative to the desk centre (glTF space), their size,
 /// yaw and tilt in degrees. Keep in step with `stations.py` `build_desk_console`.
 const SCREENS: [(Vec3, Vec2, f32, f32); 3] = [
-    (Vec3::new(0.0, 1.33, -0.355), Vec2::new(1.1, 0.55), 0.0, -6.0),
-    (Vec3::new(-0.72, 1.2, -0.235), Vec2::new(0.32, 0.48), 28.0, -4.0),
-    (Vec3::new(0.72, 1.2, -0.235), Vec2::new(0.32, 0.48), -28.0, -4.0),
+    (Vec3::new(0.0, 1.45, -0.355), Vec2::new(1.5, 0.75), 0.0, -6.0),
+    (Vec3::new(-0.98, 1.32, -0.195), Vec2::new(0.42, 0.62), 28.0, -4.0),
+    (Vec3::new(0.98, 1.32, -0.195), Vec2::new(0.42, 0.62), -28.0, -4.0),
 ];
 
 /// The big illustrations a main screen can show.
@@ -65,7 +65,7 @@ pub fn build(kit: &mut Kit, images: &mut Assets<Image>) {
         for ((at, size, yaw, tilt), texture) in SCREENS.into_iter().zip(textures) {
             let material = kit.materials.add(StandardMaterial {
                 // Unlit and a touch over 1: the art glows (and blooms a little) by itself.
-                base_color: Color::LinearRgba(LinearRgba::new(3.2, 3.2, 3.2, 1.0)),
+                base_color: Color::LinearRgba(LinearRgba::new(4.5, 4.5, 4.5, 1.0)),
                 base_color_texture: Some(texture),
                 alpha_mode: AlphaMode::Blend,
                 unlit: true,
@@ -173,8 +173,9 @@ impl Canvas {
     fn finish(self) -> Image {
         let mut bytes = Vec::with_capacity(self.w * self.h * 4);
         for (rgb, alpha) in self.rgb.iter().zip(&self.alpha) {
-            // #06122C at 0.8 under the art.
-            let lit = Vec3::new(0.0024, 0.006, 0.024) + *rgb;
+            // A luminous blue panel under the art, like the reference's screens
+            // (dark navy read as switched off).
+            let lit = Vec3::new(0.008, 0.035, 0.13) + *rgb;
             let a = (0.92 + 0.08 * alpha).min(1.0);
             for channel in [lit.x, lit.y, lit.z] {
                 let mapped = channel / (1.0 + channel * 0.35);

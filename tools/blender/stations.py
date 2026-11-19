@@ -62,13 +62,14 @@ GREEN = (0.15, 1.0, 0.35)
 MAT_SPECS = {
     # Hardware shells: cool white #D9E2EE with a clear coat (PROMPT_03 A). Colour comes
     # from light and glow, never from a blue-tinted base.
-    "Panel": dict(color=(0.693, 0.761, 0.855), rough=0.2, coat=0.8),
+    # A faint neutral self-glow keeps the shells reading white in the blue room.
+    "Panel": dict(color=(0.78, 0.8, 0.84), rough=0.2, coat=0.8, emit=(0.9, 0.92, 0.95), strength=0.5),
     "PanelDark": dict(color=(0.025, 0.035, 0.06), rough=0.12, metal=0.2),
     "Trim": dict(color=(0.323, 0.381, 0.479), rough=0.3, metal=0.9),
     "GlowCyan": dict(color=CYAN, rough=0.3, emit=CYAN, strength=4.0),
     # Ring tubes: the brief's tier T2/T3 cyan, thin and intense with a burnt-white core.
     "RingCyan": dict(color=CYAN, rough=0.3, emit=CYAN, strength=5.0),
-    "GlowOrange": dict(color=ORANGE, rough=0.3, emit=ORANGE, strength=7.0),
+    "GlowOrange": dict(color=ORANGE, rough=0.3, emit=ORANGE, strength=3.0),
     "GlowPurple": dict(color=PURPLE, rough=0.3, emit=PURPLE, strength=6.0),
     "GlowGreen": dict(color=GREEN, rough=0.3, emit=GREEN, strength=6.0),
     # Screen glass: dark translucent navy (#06122C, alpha 0.55); only the content on it
@@ -80,7 +81,7 @@ MAT_SPECS = {
     "Keys": dict(color=(0.02, 0.03, 0.05), rough=0.4, emit=(0.05, 0.4, 1.0), strength=0.6),
     "GlowCyanT2": dict(color=CYAN, rough=0.3, emit=CYAN, strength=5.0),
     "GlowCyanT3": dict(color=CYAN, rough=0.3, emit=CYAN, strength=12.0),
-    "GlowAmberT2": dict(color=(1.0, 0.33, 0.045), rough=0.3, emit=(1.0, 0.33, 0.045), strength=8.0),
+    "GlowAmberT2": dict(color=(1.0, 0.33, 0.045), rough=0.3, emit=(1.0, 0.33, 0.045), strength=5.0),
     "GlowVioletT2": dict(color=(0.254, 0.107, 1.0), rough=0.3, emit=(0.254, 0.107, 1.0), strength=7.0),
     "DaisMetal": dict(color=(0.03, 0.04, 0.07), rough=0.28, metal=0.9),
     "GlowPinkT2": dict(color=(1.0, 0.08, 0.69), rough=0.3, emit=(1.0, 0.08, 0.69), strength=6.0),
@@ -835,9 +836,9 @@ def build_desk_console():
     # holographic screens: a wide main screen and two side panels angled 28° in
     # Screen glass and frames only: the app paints the starship art on them
     # (`screens.rs`; keep these positions in step with `screens::SCREENS`).
-    holo_screen((0, by, 1.33), 1.1, 0.55, yaw=0, tilt=-6, content=None, seed=21)
-    holo_screen((-0.72, by - 0.12, 1.2), 0.32, 0.48, yaw=28, tilt=-4, content=None, seed=22)
-    holo_screen((0.72, by - 0.12, 1.2), 0.32, 0.48, yaw=-28, tilt=-4, content=None, seed=23)
+    holo_screen((0, by, 1.45), 1.5, 0.75, yaw=0, tilt=-6, content=None, seed=21)
+    holo_screen((-0.98, by - 0.16, 1.32), 0.42, 0.62, yaw=28, tilt=-4, content=None, seed=22)
+    holo_screen((0.98, by - 0.16, 1.32), 0.42, 0.62, yaw=-28, tilt=-4, content=None, seed=23)
 
 
 # ---------------------------------------------------------------- activity holograms

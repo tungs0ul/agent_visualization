@@ -48,15 +48,21 @@ impl Spot {
     }
 
     /// Where a robot stands to work here and the way it faces (radians about y).
-    /// Robots face the camera with the holograms floating behind them, so you see
-    /// both the robot and what it works on (as in the user's reference image).
+    /// At the command core robots face the camera. At a crew desk the robot stands
+    /// by the desk's end, half turned to its screens, so it no longer hides the desk
+    /// and you see its face and its screens together (the user, 2026-11-19).
     pub fn work_spot(self, slot: usize) -> (Vec3, f32) {
-        let side = [0.0, -0.75, 0.75, -1.5, 1.5][slot % 5];
-        let (front, height) = match self {
-            Spot::Command => (0.0, 0.35),
-            Spot::Desk(_) => (0.85, 0.043),
-        };
-        (self.center() + Vec3::new(side, height, front), 0.0)
+        match self {
+            Spot::Command => {
+                let side = [0.0, -0.75, 0.75, -1.5, 1.5][slot % 5];
+                (self.center() + Vec3::new(side, 0.35, 0.0), 0.0)
+            }
+            Spot::Desk(_) => {
+                let side = if slot % 2 == 0 { 1.0 } else { -1.0 };
+                let along = 0.45 + 0.35 * (slot / 2) as f32;
+                (self.center() + Vec3::new(side * 1.3, 0.043, along), -side * 0.6)
+            }
+        }
     }
 }
 

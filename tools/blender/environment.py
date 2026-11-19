@@ -83,6 +83,7 @@ MATS = {m.name: m for m in [
     make_material("FloorB", (0.0044, 0.0103, 0.0331), 0.24, metal=0.75, coat=0.4),
     make_material("FloorC", (0.0044, 0.0103, 0.0331), 0.36, metal=0.75, coat=0.4),
     make_material("FloorAlt", (0.006, 0.014, 0.042), 0.28, metal=0.75, coat=0.4),
+    make_material("Bolt", (0.25, 0.28, 0.33), 0.35, metal=0.9),
     # Floor decals: dim amber hazard paint, faint grey stencil, faint cyan arrows.
     make_material("Hazard", (0.35, 0.16, 0.03), 0.5, emit=(1.0, 0.42, 0.08), strength=0.5),
     make_material("Decal", (0.03, 0.045, 0.08), 0.5),
@@ -241,6 +242,17 @@ for i in range(len(XS_F) - 1):
     for j in range(len(YS_F) - 1):
         outer = i in (0, len(XS_F) - 2) or j in (0, len(YS_F) - 2)
         floor_panel(XS_F[i], YS_F[j], XS_F[i + 1], YS_F[j + 1], "FloorAlt" if outer else ("Floor", "FloorB", "FloorC")[(i * 2 + j) % 3])
+        # Panel detail (PROMPT_03 D): an inset groove outline on alternate panels and
+        # a bolt in each corner, so no 1.2 m square is a flat colour.
+        x0, y0, x1, y1 = XS_F[i], YS_F[j], XS_F[i + 1], YS_F[j + 1]
+        if (x1 - x0) > 0.6 and (y1 - y0) > 0.6:
+            if (i + j) % 2 == 0:
+                m = 0.16
+                for a, b, c, d in ((x0 + m, y0 + m, x1 - m, y0 + m + 0.012), (x0 + m, y1 - m - 0.012, x1 - m, y1 - m),
+                                   (x0 + m, y0 + m, x0 + m + 0.012, y1 - m), (x1 - m - 0.012, y0 + m, x1 - m, y1 - m)):
+                    rect(fb, a, b, c, d, 0.0008, "Seam")
+            for bx, by in ((x0 + 0.06, y0 + 0.06), (x1 - 0.06, y0 + 0.06), (x0 + 0.06, y1 - 0.06), (x1 - 0.06, y1 - 0.06)):
+                rect(fb, bx - 0.014, by - 0.014, bx + 0.014, by + 0.014, 0.001, "Bolt")
 rect(fb, -10.1, -6.5, 10.1, 6.95, -0.03, "Seam")
 
 # Floor decals (PROMPT_03 D): low-saturation amber hazard chevrons along the side
@@ -465,6 +477,19 @@ for a, c in zip(RIBS, RIBS[1:]):
         continue
     for z0, z1 in BANDS:
         ribbon(wb, a + 0.2, c - 0.2, z0, z1, -0.02, 0.03, "Panel", top=False)
+    # Bay detail (PROMPT_03 D): vent slots low, two grooves and a status light cluster
+    # in the middle band, a light cove high, so no wall stretch is bare.
+    mid, half = (a + c) / 2, (c - a) / 2 - 0.3
+    if half > 0.2:
+        for k in range(6):
+            z = 0.5 + k * 0.07
+            wall_box(wb, mid, min(half, 0.4), z, z + 0.025, 0.03, 0.036, "Graphite")
+        for z in (1.95, 2.45):
+            wall_box(wb, mid, half, z, z + 0.014, 0.03, 0.036, "Graphite")
+        if int(mid * 10) % 2 == 0:
+            for k, m in enumerate(("GlowCyan", "GlowOrange", "GlowGreen")):
+                wall_box(wb, mid - 0.15 + k * 0.15, 0.04, 2.15, 2.2, 0.03, 0.04, m)
+        wall_box(wb, mid, half, 3.9, 3.925, 0.03, 0.045, "GlowCyan")
 
 # baseboard with a cove light, top band, and the partial ceiling overhang
 ribbon(wb, 0.0, S_END, 0.0, 0.22, -0.02, 0.12, "Graphite")

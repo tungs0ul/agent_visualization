@@ -2194,3 +2194,16 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   bays with silver pilasters, strips, bolts, grooves, status lights.
   Not yet seen on screen: the screen art and D (the Mac's screen was off/locked; the
   app renders black then). Last measured (before B/D): 7/12 metrics.
+- 2026-11-19, Claude Opus 5.5 (stopped at the usage limit): user said "yes do it" to
+  (1) bigger brighter screens, (2) robots not hiding desks, (3) part D, (4) part E,
+  (5) per-activity screen art. Done: 1 (main 1.5×0.75, sides 0.42×0.62, luminous blue
+  panel base, unlit ×4.5), 2 (`Spot::work_spot` for desks: robot at the desk end, ±1.3 m,
+  half turned to the screens), part of 3 (floor panel grooves and bolts, lower-wall
+  vents, grooves, status lights, light coves), colour grading post 1.1 / highlights
+  1.4, exposure 9.1, top light 1300 lx, white shells with a faint 0.5 self-glow, amber
+  dimmed. Last clean measurement (before the self-glow): 9/12 — edge_density 0.151,
+  flat_tiles 25%, white_hardware 0.8% still fail. The final shots had a Commands
+  console open (a key press reached the test window), so the self-glow change is
+  unmeasured. Left: re-measure, remaining D (mullions, back ledge, racks, ceiling
+  coffers), E (cube-sphere planet, atmosphere, nebula sky), 5 (screen art by tool
+  category), camera rig limits.

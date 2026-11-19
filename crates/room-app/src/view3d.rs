@@ -1018,7 +1018,7 @@ const LINE_CYCLE: f32 = 4.0;
 
 /// Height of the activity hologram over a crew desk (just above its main screen),
 /// and its size.
-const HOLO_ABOVE_SCREEN: f32 = 1.95;
+const HOLO_ABOVE_SCREEN: f32 = 2.15;
 const HOLO_SIZE: f32 = 0.95;
 
 /// Brighter copies of the holograms' materials, made once per material.
