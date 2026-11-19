@@ -229,7 +229,23 @@ pub fn build(kit: &mut Kit) {
         (command + Vec3::new(0.0, 3.8, -0.4), Color::srgb(0.35, 0.8, 1.0), 350_000.0, 9.0),
         (teleporter_spot() + Vec3::Y * 1.2, Color::srgb(0.3, 0.75, 1.0), 300_000.0, 6.0),
     ] {
-        kit.commands.spawn((PointLight { color, intensity: lumens, range, contact_shadows_enabled: true, ..default() }, Transform::from_translation(at), crate::look::BaseIntensity(lumens)));
+        kit.commands.spawn((PointLight { color, intensity: lumens, range, ..default() }, Transform::from_translation(at), crate::look::BaseIntensity(lumens)));
+    }
+    // Practical lights (brief 5.3): a spot straight down on the core's dais, and a
+    // soft holo-blue wash from every desk's screens onto its desk and pad.
+    let core_spot = 1_800_000.0;
+    kit.commands.spawn((
+        SpotLight { color: Color::srgb_u8(0x9C, 0xD8, 0xFF), intensity: core_spot, range: 12.0, radius: 0.4, inner_angle: 0.25, outer_angle: 0.55, shadow_maps_enabled: true, ..default() },
+        Transform::from_translation(command + Vec3::Y * 7.2).looking_at(command, Vec3::Z),
+        crate::look::BaseIntensity(core_spot),
+    ));
+    for index in 0..DESKS.len() {
+        let screen_wash = 90_000.0;
+        kit.commands.spawn((
+            PointLight { color: Color::srgb_u8(0x4B, 0x8D, 0xF0), intensity: screen_wash, range: 3.5, radius: 0.3, ..default() },
+            Transform::from_translation(Spot::Desk(index as u8).center() + Vec3::Y * 1.5),
+            crate::look::BaseIntensity(screen_wash),
+        ));
     }
     for index in 0..DESKS.len() {
         let at = Spot::Desk(index as u8).center();

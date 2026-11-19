@@ -244,7 +244,7 @@ use the documented fallback.
 
 ### 5.2 Main camera components (starting values)
 
-- `Camera3d`, `Hdr` (or `hdr: true`), and `Msaa::Off`, which is required for deferred, SSAO and TAA.
+- `Camera3d`, `Hdr` (or `hdr: true`). **Default: forward rendering with `Msaa::Sample4`.** `Msaa::Off` is only for the High preset (deferred, TAA). See 5.5. The SSAO, SSR, TAA and contact-shadow items below are **High preset only**.
 - `Tonemapping::TonyMcMapface`. Compare it with `Tonemapping::AgX` side by side and keep whichever keeps the cyan halos more saturated.
 - `DebandDither::Enabled`. **This is important:** large dark navy gradients band without it.
 - `Exposure { ev100: 9.7 }`. Tune between 9.2 and 10.5.
@@ -285,13 +285,17 @@ Only the key light and the core spot cast shadows. Everything else is shadowless
 3. **Baked lightmaps for static geometry (high impact, Phase 8).** Bake diffuse direct and indirect lighting (colour off, lighting only) in Blender Cycles for the room shell, floor and static props. Emissive strips then cast real soft light on floors and walls. Store the lightmaps on UV channel 2, export as HDR or KTX2 (rgba16f), and attach Bevy's `Lightmap` component to the matching mesh entities after scene spawn (match by node name). Tune `StandardMaterial::lightmap_exposure`. Don't double-light: lights that are baked shouldn't also be dynamic on the same surfaces, apart from the key light's specular.
 4. **Optional, High preset only:** a subtle room-bounded `VolumetricFog` + `FogVolume` (a box around the core, low density, blue tint), with `VolumetricLight` on the core spot. This gives a soft haze and light shafts around the hologram.
 
-### 5.5 Quality presets
+### 5.5 Quality presets (revised after FIX 01: temporal effects caused speckle and flicker)
 
-| Preset | SSAO | SSR | AA | Contact shadows | Volumetric haze | RectLights | Bloom |
-|---|---|---|---|---|---|---|---|
-| Low | Medium | off (probe only) | SMAA | off | off | PointLight fallback | on |
-| Medium (default) | High | on | TAA + CAS | on | off | on | on |
-| High | High | on | TAA + CAS | on | on | on | on |
+| Preset | Rendering | AA | SSAO | SSR | Contact shadows | Volumetric haze | Reflections | Bloom |
+|---|---|---|---|---|---|---|---|---|
+| Low | forward | MSAA 4× | off | off | off | off | baked probe | on |
+| **Medium (default)** | forward | MSAA 4× (+ SMAA if needed) | off | off | off | off | baked probe | on |
+| High (opt-in, continuous rendering only) | deferred | TAA (no CAS) | High | on | on | optional | probe + SSR | on |
+
+**Rule:** any effect that relies on temporal accumulation (SSAO noise, SSR, contact shadows, temporal shadow filtering, TAA) only goes in High.
+Add these effects one at a time, and each one must pass a stability test: two screenshots 0.5 s apart, no speckle at 2× zoom.
+In every preset, the app must render continuously while the window is focused.
 
 Expose the preset in Settings and persist it.
 

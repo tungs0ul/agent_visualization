@@ -101,7 +101,7 @@ fn main() -> AppExit {
     let mut app = App::new();
     app
         // Sleep until input or a hook event arrives (PLAN.md 6).
-        .insert_resource(WinitSettings::desktop_app())
+        .insert_resource(WinitSettings { focused_mode: UpdateMode::Continuous, ..WinitSettings::desktop_app() })
         .insert_resource(ClearColor(Color::srgb(0.02, 0.02, 0.06)))
         // When the window changes size (mini mode, resizing) one frame can still mix the
         // old and new sizes; wgpu rejects it and Bevy would quit. Skip that frame instead;
@@ -128,8 +128,6 @@ fn main() -> AppExit {
         .init_resource::<notify::Bells>()
         .init_resource::<replay::Replay>()
         .insert_resource(look::Look::built_in())
-        // Deferred shading: screen-space reflections need it (PLAN.md M30 phase 2).
-        .insert_resource(bevy::pbr::DefaultOpaqueRendererMethod::deferred())
         .init_resource::<usage::Usage>()
         .init_resource::<wins::Wins>()
         .init_resource::<view3d::BrightHolos>()
@@ -161,6 +159,7 @@ fn main() -> AppExit {
                 pace_updates,
                 log_frame_rate.run_if(|| std::env::var_os("AGENT_ROOM_FPS_LOG").is_some()),
                 window::take_screenshots,
+                window::log_resolution,
             )
                 .chain(),
         )
@@ -542,13 +541,14 @@ fn pace_updates(
         return;
     }
     *current = wanted;
-    *settings = match wanted {
-        Some((focused, unfocused)) => WinitSettings {
-            focused_mode: UpdateMode::reactive(focused),
-            unfocused_mode: UpdateMode::reactive_low_power(unfocused),
-        },
-        None => WinitSettings::desktop_app(),
+    // Focused: every frame (FIX 01: a reactive window shows a stale, stuttering image).
+    // In the background it keeps saving power.
+    let unfocused_mode = match wanted {
+        Some((_, unfocused)) => UpdateMode::reactive_low_power(unfocused),
+        None => WinitSettings::desktop_app().unfocused_mode,
     };
+    *settings = WinitSettings { focused_mode: UpdateMode::Continuous, unfocused_mode };
+    info!("update mode: focused {:?}, unfocused {:?}", settings.focused_mode, settings.unfocused_mode);
 }
 
 #[cfg(test)]

@@ -139,14 +139,44 @@ fn billboard(kit: &mut Kit, texture: &Handle<Image>, at: Vec3, size: f32, color:
 
 // ---------------------------------------------------------------- textures
 
+/// An RGBA image with a full mip chain and trilinear, 16x anisotropic sampling, so a
+/// texture seen small or at a grazing angle stays smooth instead of sparkling (FIX 01).
 fn image(width: u32, height: u32, pixels: Vec<u8>) -> Image {
-    Image::new(
+    use bevy::image::{ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
+    let mut data = pixels.clone();
+    let (mut level, mut w, mut h, mut levels) = (pixels.clone(), width, height, 1);
+    while w > 1 || h > 1 {
+        let (nw, nh) = ((w / 2).max(1), (h / 2).max(1));
+        let mut next = vec![0u8; (nw * nh * 4) as usize];
+        for y in 0..nh {
+            for x in 0..nw {
+                for c in 0..4 {
+                    let at = |px: u32, py: u32| level[((py.min(h - 1) * w + px.min(w - 1)) * 4 + c) as usize] as u32;
+                    let sum = at(2 * x, 2 * y) + at(2 * x + 1, 2 * y) + at(2 * x, 2 * y + 1) + at(2 * x + 1, 2 * y + 1);
+                    next[((y * nw + x) * 4 + c) as usize] = ((sum + 2) / 4) as u8;
+                }
+            }
+        }
+        data.extend_from_slice(&next);
+        (level, w, h, levels) = (next, nw, nh, levels + 1);
+    }
+    let mut image = Image::new(
         Extent3d { width, height, depth_or_array_layers: 1 },
         TextureDimension::D2,
         pixels,
         TextureFormat::Rgba8UnormSrgb,
         RenderAssetUsages::RENDER_WORLD,
-    )
+    );
+    image.data = Some(data);
+    image.texture_descriptor.mip_level_count = levels;
+    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+        mag_filter: ImageFilterMode::Linear,
+        min_filter: ImageFilterMode::Linear,
+        mipmap_filter: ImageFilterMode::Linear,
+        anisotropy_clamp: 16,
+        ..default()
+    });
+    image
 }
 
 fn hash(x: i32, y: i32, seed: u32) -> f32 {

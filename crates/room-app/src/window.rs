@@ -240,3 +240,22 @@ pub fn take_screenshots(
     let path = mode.dir.join(format!("shot-{:03}.png", mode.taken));
     commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path));
 }
+
+/// Logs the window's logical and physical size once they settle, so a report can say
+/// what the 3D view renders at (FIX 01: the camera renders at the physical size).
+pub fn log_resolution(windows: Query<&Window, With<bevy::window::PrimaryWindow>>, mut seen: Local<Option<UVec2>>) {
+    let Ok(window) = windows.single() else { return };
+    let physical = window.physical_size();
+    if *seen == Some(physical) {
+        return;
+    }
+    *seen = Some(physical);
+    info!(
+        "window: logical {}x{}, physical {}x{}, scale factor {}",
+        window.width(),
+        window.height(),
+        physical.x,
+        physical.y,
+        window.scale_factor()
+    );
+}

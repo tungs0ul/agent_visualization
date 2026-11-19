@@ -150,25 +150,24 @@ pub fn build(
     commands.spawn((
         RoomCamera3d,
         Camera3d::default(),
-        // A wider view, so the lit ceiling shows at the top and the front desks at the
-        // bottom (PLAN.md M29).
-        Projection::Perspective(PerspectiveProjection { fov: 0.98, ..default() }),
+        // The brief's framing (section 4, FIX 01 step 3): the room fills the width, the
+        // window band near the top, the core a little above the middle.
+        Projection::Perspective(PerspectiveProjection { fov: 0.80, ..default() }),
         Camera {
             order: 0,
             clear_color: ClearColorConfig::Custom(Color::srgb(0.02, 0.02, 0.06)),
             ..default()
         },
         Tonemapping::TonyMcMapface,
-        // Best look first (the user, 2026-11-19: "I don't care for the performance now"):
-        // deferred shading for floor reflections, ambient occlusion, contact shadows and
-        // temporal anti-aliasing, which needs multisampling off. Bloom comes from the
-        // look settings (`look::apply`).
+        // A clean, stable image (FIX 01): forward shading, 4x multisampling, nothing
+        // temporal. SSAO, SSR, contact shadows and TAA made every surface speckle and
+        // flicker. HDR so bright strips keep their colour into the tonemapper; bloom
+        // comes from the look settings (`look::apply`).
         (
-            Msaa::Off,
-            bevy::anti_alias::taa::TemporalAntiAliasing::default(),
-            bevy::pbr::ScreenSpaceAmbientOcclusion::default(),
-            bevy::pbr::ScreenSpaceReflections { thickness: 0.4, linear_steps: 24, ..default() },
-            bevy::pbr::ContactShadows::default(),
+            bevy::camera::Hdr,
+            Msaa::Sample4,
+            bevy::render::view::DebandDither::Enabled,
+            bevy::light::ShadowFilteringMethod::Gaussian,
         ),
         Transform::from_translation(FULL_EYE).looking_at(FULL_LOOK, Vec3::Y),
         // What polished metal reflects (PLAN.md M29): a generated bridge-like
@@ -181,7 +180,7 @@ pub fn build(
     ));
     commands.spawn((
         // Illuminance and colour come from the look settings (`look::apply`).
-        DirectionalLight { illuminance: 1800.0, shadow_maps_enabled: true, contact_shadows_enabled: true, ..default() },
+        DirectionalLight { illuminance: 1800.0, shadow_maps_enabled: true, ..default() },
         Transform::from_rotation(Quat::from_euler(EulerRot::YXZ, -0.6, -0.95, 0.0)),
         CascadeShadowConfigBuilder { num_cascades: 1, maximum_distance: 30.0, ..default() }.build(),
     ));
@@ -682,12 +681,16 @@ pub fn labels(
     if !mode.mini {
         let color = egui::Color32::from_rgb(130, 200, 255);
         let mission = model.shown().and_then(|session| session.prompts.last()).map(|prompt| room_proto::describe::truncate(prompt.trim(), 110));
-        // Centred over the command core (the user, 2026-11-19), its foot just above
-        // the glass cylinder.
-        let above = camera.world_to_viewport(camera_at, Spot::Command.center() + Vec3::Y * 3.3).unwrap_or(Vec2::ZERO) + offset;
+        // Top centre, under the status card (brief 10.4). It must never cover the core:
+        // when the room leaves too little space above the glass cylinder, the mission
+        // line goes and the panel shrinks to one row of buttons.
+        let rect = camera.logical_viewport_rect().unwrap_or(bevy::math::Rect::new(0.0, 0.0, 800.0, 600.0));
+        let top = rect.min.y + (rect.height() * 0.155).max(140.0);
+        let cylinder_top = camera.world_to_viewport(camera_at, Spot::Command.center() + Vec3::Y * 3.2).map_or(f32::MAX, |at| at.y + offset.y);
+        let mission = mission.filter(|_| cylinder_top - top > 96.0);
         egui::Area::new("command-sign".into())
-            .fixed_pos(egui::pos2(above.x, above.y))
-            .pivot(egui::Align2::CENTER_BOTTOM)
+            .fixed_pos(egui::pos2(rect.center().x, top))
+            .pivot(egui::Align2::CENTER_TOP)
             .order(egui::Order::Middle)
             .show(ctx, |ui| {
                 egui::Frame::new()
@@ -873,10 +876,11 @@ pub fn frame(
 }
 
 /// Where the camera looks at the whole workspace from.
-/// The camera (PLAN.md M29): lower than before, so the panoramic window shows a big
-/// slice of space above the bridge. `space` places things by this eye.
-pub(crate) const FULL_EYE: Vec3 = Vec3::new(0.0, 6.0, 12.4);
-const FULL_LOOK: Vec3 = Vec3::new(0.0, 1.5, -2.6);
+/// The camera (FIX 01 step 3): just under the ceiling's front edge, looking down 24°,
+/// fitted so the window band starts near the top, the robot's head sits at about 38%
+/// and the teleporter at about 71% of the height. `space` places things by this eye.
+pub(crate) const FULL_EYE: Vec3 = Vec3::new(0.0, 7.0, 14.0);
+const FULL_LOOK: Vec3 = Vec3::new(0.0, 0.0, -1.7);
 
 /// The hologram floating beside a robot: a picture of what it is doing right now
 /// (PLAN.md M17, "the holograms are the visualisation of its mind").
@@ -1674,7 +1678,7 @@ const SPARK_SECS: f32 = 1.6;
 
 /// Where the trophy shelf starts (along the front edge, right of the teleporter) and how far
 /// apart trophies stand.
-const SHELF_AT: Vec3 = Vec3::new(1.8, 0.0, 5.6);
+const SHELF_AT: Vec3 = Vec3::new(1.8, 0.0, 4.7);
 const TROPHY_STEP: f32 = 0.34;
 
 fn trophy_spot(index: usize) -> Vec3 {
@@ -1707,7 +1711,15 @@ pub fn celebrate(
     let (cube, spark_glow, gold) = state
         .look
         .get_or_insert_with(|| {
-            let shelf = materials.add(StandardMaterial { base_color: Color::BLACK, emissive: LinearRgba::rgb(0.9, 0.6, 0.12), ..default() });
+            // A dark trim ledge with a faint cyan edge; it used to be a bright amber bar
+            // that read as a stray yellow stripe on the floor (FIX 01 step 4).
+            let shelf = materials.add(StandardMaterial {
+                base_color: Color::srgb_u8(0x1A, 0x26, 0x40),
+                emissive: LinearRgba::rgb(0.0, 0.06, 0.12),
+                metallic: 0.85,
+                perceptual_roughness: 0.3,
+                ..default()
+            });
             let length = TROPHY_STEP * crate::wins::SHELF as f32;
             commands.spawn((
                 Mesh3d(meshes.add(Cuboid::new(length, 0.03, 0.2))),

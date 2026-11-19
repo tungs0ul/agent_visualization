@@ -2123,3 +2123,23 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   phase2_compare.png (local). **Next:** user verdict on the bloom; then framing
   (camera higher and steeper, less empty ceiling), core glow and desk screen-wash
   lights, then phase 3 (HUD).
+- 2026-11-19, Claude Opus 5.5: M30 FIX 01 (the user's brief `docs/agent-room-visual-
+  overhaul/FIX_01_image_quality.md`; PROMPT.md 5.2/5.5 updated from the user's second
+  pack). The phase 2 temporal effects made every surface speckle and flicker ("like
+  1990 TV"), so they are gone: back to forward shading, Msaa::Sample4, Hdr, DebandDither,
+  Gaussian shadow filtering, tight bloom. No TAA/SSAO/SSR/contact shadows (High preset
+  only, later, one at a time with the two-frame test). Focused window renders
+  continuously (`pace_updates`); unfocused keeps the power-saving pace. `window::
+  log_resolution` logs logical/physical size (1400x891 / 2800x1782, scale 2). Code-made
+  space textures get a mip chain and 16x anisotropic sampling. Practical lights: a
+  core spot and a holo-blue screen wash per desk. Camera (0,7,14) looking at (0,0,-1.7),
+  vertical FOV 0.80 rad, fitted by a search to the brief's framing (window band ~10%,
+  robot head ~38%, teleporter ~71%, walls at the frame edges); the camera stays under
+  the ceiling so nothing outside the walls shows. Command panel back to top centre under
+  the status card; it drops its mission line when it would reach the cylinder. The
+  yellow floor bar was the trophy shelf (`celebrate`, amber emissive, outside the room):
+  now a dark trim ledge inside the front edge. Chat and Replay icons back (💬, ⟲, both
+  in egui's emoji-icon-font). Metrics 7/7, glow 7.8%, dark 33%, p95 0.82; wall and floor
+  crops identical between two frames 0.5 s apart; 60 fps (debug build, 2800x1782).
+  Screens (local): baseline/fix01_*.png. **Next:** wait for the user's review; do not
+  start phase 4.
