@@ -99,6 +99,8 @@ pub(crate) struct Avatar {
     playing: Option<Act>,
     /// Its current report has been handed over or left on the desk.
     reported: bool,
+    /// The station a sub-agent works at: where its first tool call took it.
+    home: Option<Location>,
     /// The location it is at or walking to, and since when (seconds of app time).
     at: Location,
     since: f32,
@@ -247,7 +249,8 @@ pub fn sync(
         if avatar.presence == Presence::Here {
             // Newest wins, but a robot stays a moment where it is before walking on:
             // quick tool calls one after another don't send it running back and forth.
-            let place = director::location_for(avatar.pose, avatar.who == Who::Main, avatar.at);
+            let (pose, is_main, at) = (avatar.pose, avatar.who == Who::Main, avatar.at);
+            let place = director::location_for(pose, is_main, at, &mut avatar.home);
             let place = if place != avatar.at && time.elapsed_secs() - avatar.since < DWELL_SECS { avatar.at } else { place };
             wanted.push((entity, place));
         }
@@ -374,6 +377,7 @@ pub fn sync(
                     player: None,
                     playing: None,
                     reported: false,
+                    home: None,
                     at: Location::MainDesk,
                     since: 0.0,
                 },

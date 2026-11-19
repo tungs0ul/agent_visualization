@@ -989,6 +989,25 @@ None of these is in the backlog above. The user picks.
 11. **Commit or open a PR from the writing desk** (M): git and `gh`. Moves the app from
     watching to doing, so the user decides.
 
+### M26: Robots work at their desk, walk only when it matters (requested 2026-11-19, done 2026-11-19)
+
+User asked whether robots should stay at their desk or move between stations. Research:
+motion in the periphery draws the eye and distracts (Bartram, Ware, Calvert,
+"Moticons", IJHCS 2003); Pixel Agents keeps characters at desks with a pose per tool;
+Office Claws and OpenClawfice seat working agents and move them for status. Walking on
+every tool call also trailed Claude (2.5 s dwell, 1.8 m/s) and cost frames. The user
+picked: (1) work at a home desk, the activity hologram shows the tool kind; (2) walk
+only for what deserves a look. This replaces the M17 rule "tool start: walk to its
+location".
+
+- Claude always works at its seat at the main desk (`director::location_for`).
+- A sub-agent's home is the station of its first tool call (`Avatar::home`); it uses
+  every later tool there.
+- Walks: teleporter arrive and leave; a sub-agent to the main desk for its task, its
+  report, and when it needs the user (it waves there).
+- Not built (option 3 of the proposal): walk to a station when one kind of work lasts
+  over about 10 s.
+
 ### M25: Pause, resume and stop a session (requested 2026-11-18, done 2026-11-18)
 
 User: "there is no way to stop or pause an agent, maybe we want to have feature that we
@@ -1293,6 +1312,7 @@ config file, and can remove both cleanly.
 - [x] M23 StopFailure reasons, PostCompact, PostModelSwitch, notices (2026-11-18; plugin 0.3.0)
 - [x] M24 Chat @ mentions and dropped images (2026-11-18; not yet seen on screen)
 - [x] M7 Distribution, code side (2026-11-17); publishing left to the user
+- [x] M26 Robots work at their desk, walk only when it matters (2026-11-19)
 - [x] M25 Pause, resume and stop any session (2026-11-18; plugin 0.4.0; buttons not yet seen on screen)
 
 ## 12. Handoff log
@@ -1867,3 +1887,11 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   labels and the sessions card. Unit tests for both; clippy clean, 61 tests pass.
   **Not seen on screen** (Mac locked): the user tries the 🔔 and checks the glyph
   renders.
+- 2026-11-19, Claude Opus 5.5: M26, robots work at their desk. `director::location_for`
+  now keeps Claude at its main-desk seat for every pose and gives each sub-agent a
+  home station from its first tool call (`station_for`, `Avatar::home`); sub-agents
+  walk to the main desk only for their task, their report and when they need the user.
+  Unit tests rewritten for the new rules; clippy clean, 62 tests pass. Seen on screen
+  with `scripts/replay.py` of `~/.agent-room/spike/events.jsonl` at speed 3: Claude
+  stayed at the main desk while its tools ran, sub-agents beamed in and walked to it
+  with their reports. Their short Bash calls ended before a walk to the lab showed.

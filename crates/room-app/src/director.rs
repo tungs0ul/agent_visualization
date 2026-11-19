@@ -87,21 +87,37 @@ pub fn cast(session: &SessionState, seat: usize) -> Vec<Role> {
     std::iter::once(main).chain(subs).collect()
 }
 
-/// Where a robot goes for what it is doing (PLAN.md M17), given where it is now.
-/// Every robot thinks or waits where it stands (a new message no longer sends Claude
-/// back to the centre; it says "On it!" on the spot, and a sub-agent thinking between
-/// tool calls doesn't walk over to Claude). Claude goes home when the turn ends;
-/// sub-agents getting their task or bringing a report come to the main desk (to its
-/// visitor spots).
-pub fn location_for(pose: Pose, is_main: bool, now: Location) -> Location {
+/// The station for a kind of tool work, if the pose is tool work.
+pub fn station_for(pose: Pose) -> Option<Location> {
     match pose {
-        Pose::Reading => Location::Bookshelf,
-        Pose::Web => Location::Research,
-        Pose::Typing => Location::WritingDesk,
-        Pose::Terminal => Location::Lab,
-        Pose::Thinking | Pose::Waiting => now,
-        Pose::Idle if !is_main => now,
-        Pose::Idle | Pose::Delegating | Pose::Reporting => Location::MainDesk,
+        Pose::Reading => Some(Location::Bookshelf),
+        Pose::Web => Some(Location::Research),
+        Pose::Typing => Some(Location::WritingDesk),
+        Pose::Terminal => Some(Location::Lab),
+        _ => None,
+    }
+}
+
+/// Where a robot goes for what it is doing (PLAN.md M26), given where it is now and
+/// its home station. Robots work at home and walk only for what deserves a look,
+/// because motion at the edge of vision draws the eye: a steady stream of tool calls
+/// would keep the room moving and tell the user nothing.
+///
+/// - Claude works at its seat at the main desk. Its activity hologram shows which
+///   kind of tool it uses.
+/// - A sub-agent's home is the station of its first tool call (an Explore agent ends
+///   up at the bookshelf); later tools of any kind it uses there.
+/// - Walks that mean something: a sub-agent comes to the main desk for its task, to
+///   hand over its report, and when it needs the user (it waves there). Arriving and
+///   leaving through the teleporter is `view3d`'s.
+pub fn location_for(pose: Pose, is_main: bool, now: Location, home: &mut Option<Location>) -> Location {
+    if is_main {
+        return Location::MainDesk;
+    }
+    match pose {
+        Pose::Delegating | Pose::Reporting | Pose::Waiting => Location::MainDesk,
+        Pose::Thinking | Pose::Idle => now,
+        work => station_for(work).map_or(now, |station| *home.get_or_insert(station)),
     }
 }
 
@@ -131,35 +147,46 @@ mod tests {
             .into_iter()
             .map(|role| {
                 let is_main = role.who == Who::Main;
-                (role.who, location_for(role.pose, is_main, now), role.done)
+                (role.who, location_for(role.pose, is_main, now, &mut None), role.done)
             })
             .collect()
     }
 
     #[test]
-    fn a_recorded_turn_moves_the_robots_where_the_work_happens() {
+    fn claude_works_at_its_desk_and_sub_agents_at_their_station() {
         let mut model = Model::default();
         model.apply(&event(None, json!({ "hook_event_name": "UserPromptSubmit", "prompt": "go" })));
-        // A new prompt: Claude stays wherever it stands.
-        assert_eq!(places(&model, Location::Lab), vec![(Who::Main, Location::Lab, false)]);
+        assert_eq!(places(&model, Location::MainDesk), vec![(Who::Main, Location::MainDesk, false)]);
 
+        // Claude reads and edits without leaving its seat.
         model.apply(&tool(None, "Read", json!({ "file_path": "/x/a.rs" })));
-        assert_eq!(places(&model, Location::MainDesk)[0].1, Location::Bookshelf);
+        assert_eq!(places(&model, Location::MainDesk)[0].1, Location::MainDesk);
 
-        // A sub-agent joins and works at the lab; Claude goes on editing.
+        // A sub-agent goes to the station of its work.
         model.apply(&tool(Some("a1"), "Bash", json!({ "command": "ls" })));
         model.apply(&tool(None, "Edit", json!({ "file_path": "/x/a.rs", "old_string": "a", "new_string": "b" })));
-        let now = places(&model, Location::Bookshelf);
-        assert_eq!(now[0].1, Location::WritingDesk);
+        let now = places(&model, Location::MainDesk);
+        assert_eq!(now[0].1, Location::MainDesk);
         assert_eq!(now[1], (Who::Sub("a1".into()), Location::Lab, false));
 
         // It stops: done, bringing its report to the main desk.
         model.apply(&event(Some("a1"), json!({ "hook_event_name": "SubagentStop", "last_assistant_message": "found it" })));
-        assert_eq!(places(&model, Location::WritingDesk)[1], (Who::Sub("a1".into()), Location::MainDesk, true));
+        assert_eq!(places(&model, Location::Lab)[1], (Who::Sub("a1".into()), Location::MainDesk, true));
+    }
 
-        // The turn ends: Claude walks home.
-        model.apply(&event(None, json!({ "hook_event_name": "Stop" })));
-        assert_eq!(places(&model, Location::WritingDesk)[0].1, Location::MainDesk);
+    #[test]
+    fn a_sub_agent_stays_home_whatever_tool_it_uses() {
+        let mut home = None;
+        assert_eq!(location_for(Pose::Delegating, false, Location::MainDesk, &mut home), Location::MainDesk, "comes for its task");
+        assert_eq!(location_for(Pose::Thinking, false, Location::MainDesk, &mut home), Location::MainDesk);
+        assert_eq!(location_for(Pose::Reading, false, Location::MainDesk, &mut home), Location::Bookshelf, "first tool: home");
+        assert_eq!(home, Some(Location::Bookshelf));
+        for pose in [Pose::Terminal, Pose::Typing, Pose::Web, Pose::Thinking] {
+            assert_eq!(location_for(pose, false, Location::Bookshelf, &mut home), Location::Bookshelf, "{pose:?}");
+        }
+        // What deserves a look: needing the user, the report.
+        assert_eq!(location_for(Pose::Waiting, false, Location::Bookshelf, &mut home), Location::MainDesk);
+        assert_eq!(location_for(Pose::Reporting, false, Location::Bookshelf, &mut home), Location::MainDesk);
     }
 
     #[test]
@@ -205,13 +232,10 @@ mod tests {
     }
 
     #[test]
-    fn claude_takes_a_new_message_where_it_stands() {
-        assert_eq!(location_for(Pose::Thinking, true, Location::Lab), Location::Lab);
-        assert_eq!(location_for(Pose::Waiting, true, Location::Lab), Location::Lab);
-        assert_eq!(location_for(Pose::Idle, true, Location::Lab), Location::MainDesk);
-        // Sub-agents think and wait where they are too; a report brings them over.
-        assert_eq!(location_for(Pose::Thinking, false, Location::Lab), Location::Lab);
-        assert_eq!(location_for(Pose::Reporting, false, Location::Lab), Location::MainDesk);
+    fn claude_never_leaves_its_seat() {
+        for pose in [Pose::Idle, Pose::Thinking, Pose::Reading, Pose::Terminal, Pose::Waiting, Pose::Delegating] {
+            assert_eq!(location_for(pose, true, Location::Lab, &mut None), Location::MainDesk, "{pose:?}");
+        }
     }
 
     #[test]
