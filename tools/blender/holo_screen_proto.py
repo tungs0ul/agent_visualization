@@ -409,9 +409,9 @@ def facing_camera(obj):
 
 
 def sun():
-    # A star as a scan: a swirling plasma ball, darker toward its limb like a real sun,
-    # a corona of fine streamers fading outward, two big flame arcs on the limb, and a
-    # cyan measuring ring with ticks round it (the hologram's "instrument" layer).
+    # A swirling plasma ball, darker toward its limb like a real sun, a corona of fine
+    # streamers fading outward and two flame arcs on the limb (the user dropped the
+    # measuring ring and its ticks).
     mt, nt = emit("photosphere", (1, 0.5, 0.1), 1.5, alpha=1.0)
     mt.surface_render_method = "DITHERED"   # solid: hides the far half of the arcs
     em = [n for n in nt.nodes if n.type == "EMISSION"][0]
@@ -496,24 +496,6 @@ def sun():
             facing_camera(loop)
             loop.location = (0.125 * math.cos(a), 0.02, 0.125 * math.sin(a))
 
-    # the instrument ring: cyan, with ticks every 10 deg and brackets at the cardinal points
-    ring = part(tor, M_LINE, major_radius=0.2, minor_radius=0.0015, major_segments=128)
-    facing_camera(ring)
-    ring.location = (0, -0.01, 0)
-    for k in range(36):
-        a = math.radians(k * 10)
-        L = 0.02 if k % 9 == 0 else 0.009
-        t = part(cube, M_EDGE if k % 9 == 0 else M_LINE_DIM, size=1, scale=(0.002, 0.002, L))
-        t.rotation_mode = "QUATERNION"
-        front = (on_screen(0, 0, 1) - on_screen(0, 0, 0)).normalized()
-        t.rotation_quaternion = front.to_track_quat("Y", "Z")
-        t.location = (0, 0, 0)
-        # place in the screen plane round the centre
-        right = Vector((1, 0, 0))
-        up = front.cross(right).normalized() * -1
-        pos = right * math.cos(a) * (0.2 + L / 2 + 0.004) + up * math.sin(a) * (0.2 + L / 2 + 0.004)
-        t.rotation_quaternion = (right * math.cos(a) + up * math.sin(a)).to_track_quat("Z", "Y")
-        t.location = pos + Vector((0, -0.01, 0))
     return (TILT, 0)
 
 
