@@ -29,9 +29,6 @@ from mathutils import Euler, Matrix, Vector
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 OUT_DIR = os.environ.get("STATIONS_OUT") or os.path.join(REPO, "assets", "models", "stations")
-# Prototype switch: STATIONS_NO_CONSOLE=1 builds the main desk without its console
-# (for the big command hologram, `tools/blender/command_holo_proto.py`).
-NO_CONSOLE = os.environ.get("STATIONS_NO_CONSOLE") == "1"
 ARGS = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 rad = math.radians
 
@@ -610,62 +607,31 @@ def build_main_desk():
         box((0.42 * math.sin(rad(a)), 0.42 * math.cos(rad(a)), top + 0.006), (0.1, 0.018, 0.004), "Trim",
             rot=(0, 0, -a))
 
-    if NO_CONSOLE:
-        build_main_desk_pylons()
-        return
-    # low curved console wall behind the robot (Blender +Y = glTF -Z)
-    ring((0, 0, 0), 0.97, 1.22, top, top + 0.05, "Trim", segs=40, a0=-66, a1=66, bevel=0.012)
-    ring((0, 0, 0), 1.0, 1.2, top + 0.05, top + 0.72, "PanelDark", segs=40, a0=-64, a1=64)
-    for a0, a1 in ((-64, -22.5), (-21.5, 21.5), (22.5, 64)):
-        ring((0, 0, 0), 0.975, 1.21, top + 0.07, top + 0.70, "Panel", segs=14, a0=a0, a1=a1, bevel=0.012)
-        # storage compartment door with a glowing handle
-        am = (a0 + a1) / 2
-        ring((0, 0, 0), 0.962, 0.975, top + 0.22, top + 0.58, "PanelDark", segs=8, a0=am - 13, a1=am + 13)
-        ring((0, 0, 0), 0.955, 0.965, top + 0.53, top + 0.545, "GlowCyan", segs=4, a0=am - 5, a1=am + 5)
-    glow_strip_sector(0.976, top + 0.11, -62, 62, "GlowCyan", h=0.014, depth=0.02)
-    ring((0, 0, 0), 0.9, 1.28, top + 0.72, top + 0.80, "Panel", segs=48, a0=-68, a1=68, bevel=0.025, bsegs=3)
-    ring((0, 0, 0), 0.95, 1.17, top + 0.80, top + 0.806, "PanelDark", segs=48, a0=-62, a1=62)
-    glow_strip_sector(0.91, top + 0.76, -67, 67, "GlowCyan", h=0.018, depth=0.02)
-    ring((0, 0, 0), 1.17, 1.28, top + 0.80, top + 0.93, "Panel", segs=40, a0=-66, a1=66, bevel=0.02)
-    glow_strip_sector(1.17, top + 0.88, -62, 62, "GlowOrange", h=0.012, depth=0.01)
-    # embedded control surfaces
-    for a in (-16, -8, 8, 16):
-        x, y = 1.03 * math.sin(rad(a)), 1.03 * math.cos(rad(a))
-        box((x, y, top + 0.809), (0.06, 0.04, 0.006), "GlowOrange" if a == 8 else "Trim", rot=(0, 0, -a),
-            bevel=0.003)
-    for a in (-24, 24):
-        x, y = 1.06 * math.sin(rad(a)), 1.06 * math.cos(rad(a))
-        disc((x, y, top + 0.806), 0.05, 0.0, 0.006, "Trim", segs=24)
-        ring((x, y, top + 0.806), 0.035, 0.045, 0.004, 0.009, "GlowCyan", segs=24)
-    # floating holo panels: big one at the back, one left, one right (chest/head height)
-    holo_screen((0, 1.2, top + 1.36), 1.05, 0.58, yaw=0, tilt=-8, content="bars", seed=1)
-    for a, c, s in ((-64, "graph", 2), (64, "lines", 3)):
-        r = 1.05
-        holo_screen((r * math.sin(rad(a)), r * math.cos(rad(a)), top + 1.1), 0.58, 0.4, yaw=-a * 0.55, tilt=-6,
-                    content=c, seed=s)
-        disc((r * math.sin(rad(a)), r * math.cos(rad(a)), top), 0.07, 0.0, 0.03, "Trim", segs=24, bevel=0.008)
-        disc((r * math.sin(rad(a)), r * math.cos(rad(a)), top), 0.045, 0.03, 0.036, "GlowCyan", segs=24)
-    for a, kind, z in ((-34, "file", 1.2), (34, "code", 1.2), (0, "tool", 1.72)):
-        r = 1.18
-        holo_icon((r * math.sin(rad(a)), r * math.cos(rad(a)), top + z), kind, 0.14, rot=(0, 0, -a))
-    # hologram projector on the left of the desk
-    pa = -50
-    with at((1.08 * math.sin(rad(pa)), 1.08 * math.cos(rad(pa)), top + 0.80)):
-        disc((0, 0, 0), 0.08, 0.0, 0.04, "Trim", segs=32, bevel=0.01)
-        disc((0, 0, 0), 0.055, 0.04, 0.05, "GlowCyan", segs=32)
-        lathe((0, 0, 0), [(0, 0.05), (0.03, 0.05), (0.11, 0.26), (0, 0.26)], "Holo", segs=32)
-        sphere((0, 0, 0.31), (0.05, 0.05, 0.05), "GlowPurple", seg=20, rings_=10)
-        ring((0, 0, 0), 0.085, 0.095, 0.305, 0.315, "GlowCyan", segs=32, rot=(20, 0, 0))
-    # inbox tray on the front edge at x = +0.6
-    tr = 1.05
-    ta = math.degrees(math.asin(0.6 / tr))
-    with at((0.6, tr * math.cos(rad(ta)), top + 0.806), (0, 0, -ta)):
-        box((0, 0, 0.01), (0.34, 0.24, 0.02), "Trim", bevel=0.006)
-        box((0, 0, 0.021), (0.3, 0.2, 0.004), "PanelDark")
-        for sx in (-1, 1):
-            box((sx * 0.165, 0, 0.035), (0.012, 0.24, 0.03), "Panel", bevel=0.004)
-        box((0, 0.115, 0.035), (0.34, 0.012, 0.03), "Panel", bevel=0.004)
-        box((0, -0.122, 0.012), (0.26, 0.006, 0.008), "GlowOrange")
+    # No console (the user, 2026-11-19): Claude's big hologram stands behind the robot
+    # instead, built in the app (`command_holo.rs`). The dais carries only its three
+    # projectors and the inbox pedestal.
+    # hologram projectors on the middle tier behind the pad; keep in step with
+    # `command_holo.rs` `PROJECTORS`
+    for a in (-40, 0, 40):
+        with at((1.3 * math.sin(rad(a)), 1.3 * math.cos(rad(a)), 0.26), (0, 0, -a)):
+            disc((0, 0, 0), 0.08, 0.0, 0.07, "Trim", segs=32, bevel=0.012)
+            ring((0, 0, 0), 0.08, 0.086, 0.03, 0.04, "GlowCyan", segs=32)
+            disc((0, 0, 0), 0.05, 0.07, 0.085, "PanelDark", segs=32, bevel=0.006)
+            disc((0, 0, 0), 0.036, 0.085, 0.09, "GlowCyan", segs=32)
+    # inbox pedestal on the middle tier, front left: sub-agents leave their reports
+    # here when Claude is away (`world3d::inbox`, keep in step)
+    ia = -110
+    with at((1.44 * math.sin(rad(ia)), 1.44 * math.cos(rad(ia)), 0.26), (0, 0, -ia - 180)):
+        disc((0, 0, 0), 0.13, 0.0, 0.04, "Trim", segs=32, bevel=0.01)
+        disc((0, 0, 0), 0.05, 0.04, 0.5, "Panel", segs=16, bevel=0.01)
+        ring((0, 0, 0), 0.05, 0.056, 0.1, 0.44, "GlowCyan", segs=1, a0=168, a1=192)
+        with at((0, 0, 0.5)):
+            box((0, 0, 0.01), (0.34, 0.24, 0.02), "Trim", bevel=0.006)
+            box((0, 0, 0.021), (0.3, 0.2, 0.004), "PanelDark")
+            for sx in (-1, 1):
+                box((sx * 0.165, 0, 0.035), (0.012, 0.24, 0.03), "Panel", bevel=0.004)
+            box((0, 0.115, 0.035), (0.34, 0.012, 0.03), "Panel", bevel=0.004)
+            box((0, -0.122, 0.012), (0.26, 0.006, 0.008), "GlowOrange")
     build_main_desk_pylons()
 
 

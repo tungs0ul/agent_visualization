@@ -200,6 +200,7 @@ pub fn build(
     crate::hull::build(&mut kit);
     crate::space::build(&mut kit, &mut images);
     crate::screens::build(&mut kit, &mut images);
+    crate::command_holo::build(&mut kit, &mut images);
 }
 
 
@@ -565,7 +566,10 @@ pub fn deliver(
     let at_desk: Vec<String> = avatars
         .iter()
         .filter(|(avatar, at)| {
-            avatar.who == Who::Main && avatar.presence == Presence::Here && at.translation.xz().length() < 2.0 && at.translation.y > 0.3
+            avatar.who == Who::Main
+                && avatar.presence == Presence::Here
+                && at.translation.xz().distance(Spot::Command.center().xz()) < 2.0
+                && at.translation.y > 0.3
         })
         .map(|(avatar, _)| avatar.session.clone())
         .collect();
@@ -693,12 +697,12 @@ pub fn labels(
         let color = egui::Color32::from_rgb(130, 200, 255);
         let mission = model.shown().and_then(|session| session.prompts.last()).map(|prompt| room_proto::describe::truncate(prompt.trim(), 110));
         // Top centre, under the status card (brief 10.4). It must never cover the core:
-        // when the room leaves too little space above the glass cylinder, the mission
+        // when the room leaves too little space above the command hologram, the mission
         // line goes and the panel shrinks to one row of buttons.
         let rect = camera.logical_viewport_rect().unwrap_or(bevy::math::Rect::new(0.0, 0.0, 800.0, 600.0));
         let top = rect.min.y + (rect.height() * 0.155).max(140.0);
-        let cylinder_top = camera.world_to_viewport(camera_at, Spot::Command.center() + Vec3::Y * 3.2).map_or(f32::MAX, |at| at.y + offset.y);
-        let mission = mission.filter(|_| cylinder_top - top > 96.0);
+        let holo_top = camera.world_to_viewport(camera_at, crate::command_holo::top()).map_or(f32::MAX, |at| at.y + offset.y);
+        let mission = mission.filter(|_| holo_top - top > 96.0);
         egui::Area::new("command-sign".into())
             .fixed_pos(egui::pos2(rect.center().x, top))
             .pivot(egui::Align2::CENTER_TOP)
@@ -756,7 +760,7 @@ pub fn labels(
     if !mode.mini
         && let Some(session) = model.shown()
         && session.todos.iter().any(|(_, state)| *state != crate::model::TodoState::Done)
-        && let Ok(spot) = camera.world_to_viewport(camera_at, Spot::Command.center() + Vec3::new(0.0, 3.3, -1.0))
+        && let Ok(spot) = camera.world_to_viewport(camera_at, crate::command_holo::top() + Vec3::Y * 0.2)
     {
         plan_board(ctx, spot + offset, &session.todos);
     }

@@ -67,9 +67,11 @@ impl Spot {
     }
 }
 
-/// Where the command station's inbox tray is (sub-agents leave documents there).
+/// Where the command station's inbox tray is (sub-agents leave documents there): on
+/// a pedestal on the dais's middle tier, front left (`stations.py` `build_main_desk`,
+/// 1.44 m out at -110°).
 pub fn inbox() -> Vec3 {
-    Spot::Command.center() + Vec3::new(0.6, 1.2, -0.86)
+    Spot::Command.center() + Vec3::new(-1.353, 0.8, 0.49)
 }
 
 /// The teleporter (`tools/blender/teleporter.py`): every agent arrives and leaves
