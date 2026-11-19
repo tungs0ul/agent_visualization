@@ -2244,3 +2244,11 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   at 1.21 m over the bar, sides at x ±0.94, 1.24 m over the arms. Activity holograms
   float at 1.92 m (was 2.15). Preview (local): baseline/p05_desk.png. Not yet seen in
   the app (Mac locked).
+- 2026-11-19, Claude Opus 5.5: user: the planets still look bad. Redone after the
+  target's crops 12 and 13 (2048 px sprites): the big planet is all blues (deep ocean,
+  bright shallows, blue-grey land), white cloud streaks, sparse lights on the night
+  side and a strong white-cyan limb, lit from above and in front; it sits low on the
+  right (glass point 5.5, -1.5, radius 4.5 on the glass), so only its glowing upper
+  part shows above the sill. The moon is replaced by `terra`, a small planet with tan
+  continents and blue oceans, lit from the upper right, in the left window. Preview
+  (local): baseline/p06_planets.png. Not yet seen in the app (Mac locked).

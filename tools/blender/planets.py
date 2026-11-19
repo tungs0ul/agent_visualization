@@ -9,9 +9,11 @@ what's behind it. The atmosphere is painted in 2D over the render (`atmosphere`)
 as a camera-facing quad with premultiplied
 blending (`space.rs`), 2.6 planet radii wide (the camera's ortho scale here).
 
-- ocean: a blue world, continents, cloud swirls, city lights on the night side and a
-  bright cyan atmosphere, lit from the upper left (the target's big planet).
-- moon: a small grey cratered moon, rim-lit from the right.
+- ocean: the target's big planet (crop 12): a blue world, blue-grey land, white cloud
+  streaks, sparse lights on the night side and a bright white-cyan limb, lit from
+  above. The app shows only its upper part through the window.
+- terra: the target's small planet (crop 13): blue oceans, tan continents, light
+  clouds, lit from the upper right with a blue rim.
 """
 
 import math
@@ -24,7 +26,7 @@ from mathutils import Vector
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 OUT = os.path.join(REPO, "assets", "textures", "space")
 ARGS = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
-SIZE = 1024
+SIZE = 2048
 FRAME = 2.6                       # ortho scale: the sprite is 2.6 radii wide
 
 
@@ -103,9 +105,18 @@ class Nodes:
         self.link(src, r.inputs["Fac"])
         return r
 
-    def noise(self, scale, detail, rough, distort=0.0, w=0.0):
+    def noise(self, scale, detail, rough, distort=0.0, w=0.0, stretch=None):
         coord = self.t.nodes.new("ShaderNodeTexCoord")
         nz = self.n("ShaderNodeTexNoise")
+        if stretch is not None:
+            mp = self.t.nodes.new("ShaderNodeMapping")
+            mp.inputs["Scale"].default_value = stretch
+            self.link(coord.outputs["Object"], mp.inputs["Vector"])
+            nz.noise_dimensions = "4D"
+            for k, v in (("Scale", scale), ("Detail", detail), ("Roughness", rough), ("Distortion", distort), ("W", w)):
+                nz.inputs[k].default_value = v
+            self.link(mp.outputs["Vector"], nz.inputs["Vector"])
+            return nz
         nz.noise_dimensions = "4D"
         nz.inputs["Scale"].default_value = scale
         nz.inputs["Detail"].default_value = detail
@@ -162,50 +173,48 @@ class Nodes:
         return self.mat
 
 
-# sun from the upper left and a little in front (camera looks along +Y)
-DAY = (-0.7, -0.3, 0.6)
+DAY = (-0.3, -0.5, 0.85)         # big planet: sun above and in front
+TERRA_SUN = (0.8, -0.2, 0.55)     # small planet: sun upper right
 
 
-def ocean():
-    # surface: deep ocean, shallows, continents; city lights on night-side land
+def world(sun_dir, land_stops, cloud_cut, cloud_stretch, lights, ocean_rough=0.45):
+    """Surface sphere (land and ocean colours from `land_stops`), a cloud sphere, the
+    sun and a faint blue fill."""
     s = Nodes("surface")
-    land = s.noise(1.6, 14, 0.62, distort=0.25, w=3.1)
-    col = s.ramp(land.outputs["Fac"], [
-        (0.0, (0.004, 0.018, 0.09)), (0.48, (0.01, 0.05, 0.2)), (0.535, (0.02, 0.16, 0.32)),
-        (0.545, (0.06, 0.13, 0.1)), (0.62, (0.11, 0.17, 0.12)), (0.72, (0.3, 0.27, 0.2)), (1.0, (0.4, 0.37, 0.3))])
+    land = s.noise(1.8, 14, 0.62, distort=0.3, w=3.1)
+    col = s.ramp(land.outputs["Fac"], land_stops)
     is_land = s.ramp(land.outputs["Fac"], [(0.53, (0, 0, 0)), (0.56, (1, 1, 1))])
     bsdf = s.n("ShaderNodeBsdfPrincipled")
     s.link(col.outputs["Color"], bsdf.inputs["Base Color"])
     rough = s.n("ShaderNodeMapRange")
-    rough.inputs["To Min"].default_value, rough.inputs["To Max"].default_value = 0.5, 0.9
+    rough.inputs["To Min"].default_value, rough.inputs["To Max"].default_value = ocean_rough, 0.9
     bw = s.n("ShaderNodeRGBToBW")
     s.link(is_land.outputs["Color"], bw.inputs["Color"])
     s.link(bw.outputs["Val"], rough.inputs["Value"])
     s.link(rough.outputs["Result"], bsdf.inputs["Roughness"])
-    # city lights: fine noise on land, only at night
-    city = s.noise(60, 4, 0.5, w=7.0)
-    spots = s.ramp(city.outputs["Fac"], [(0.64, (0, 0, 0)), (0.72, (0.5, 0.5, 0.5))])
-    night = s.n("ShaderNodeMath")
-    night.operation = "SUBTRACT"
-    night.inputs[0].default_value = 1.0
-    s.link(s.sunside(DAY), night.inputs[1])
-    m1, m2 = s.n("ShaderNodeMath"), s.n("ShaderNodeMath")
-    m1.operation = m2.operation = "MULTIPLY"
-    sb = s.n("ShaderNodeRGBToBW")
-    s.link(spots.outputs["Color"], sb.inputs["Color"])
-    s.link(sb.outputs["Val"], m1.inputs[0])
-    s.link(bw.outputs["Val"], m1.inputs[1])
-    s.link(m1.outputs["Value"], m2.inputs[0])
-    s.link(night.outputs["Value"], m2.inputs[1])
-    bsdf.inputs["Emission Color"].default_value = (1.0, 0.62, 0.3, 1)
-    s.link(m2.outputs["Value"], bsdf.inputs["Emission Strength"])
+    if lights:
+        city = s.noise(70, 4, 0.5, w=7.0)
+        spots = s.ramp(city.outputs["Fac"], [(0.64, (0, 0, 0)), (0.72, (0.6, 0.6, 0.6))])
+        night = s.n("ShaderNodeMath")
+        night.operation = "SUBTRACT"
+        night.inputs[0].default_value = 1.0
+        s.link(s.sunside(sun_dir), night.inputs[1])
+        m1, m2 = s.n("ShaderNodeMath"), s.n("ShaderNodeMath")
+        m1.operation = m2.operation = "MULTIPLY"
+        sb = s.n("ShaderNodeRGBToBW")
+        s.link(spots.outputs["Color"], sb.inputs["Color"])
+        s.link(sb.outputs["Val"], m1.inputs[0])
+        s.link(bw.outputs["Val"], m1.inputs[1])
+        s.link(m1.outputs["Value"], m2.inputs[0])
+        s.link(night.outputs["Value"], m2.inputs[1])
+        bsdf.inputs["Emission Color"].default_value = (0.75, 0.88, 1.0, 1)
+        s.link(m2.outputs["Value"], bsdf.inputs["Emission Strength"])
     s.link(bsdf.outputs[0], s.out.inputs["Surface"])
     sphere("planet", 1.0, s.mat)
 
-    # clouds: swirled noise, white, on a slightly larger sphere
     c = Nodes("clouds")
-    cn = c.noise(3.2, 15, 0.62, distort=0.55, w=11.0)
-    cm = c.ramp(cn.outputs["Fac"], [(0.5, (0, 0, 0)), (0.66, (1, 1, 1))])
+    cn = c.noise(3.0, 15, 0.64, distort=0.6, w=11.0, stretch=cloud_stretch)
+    cm = c.ramp(cn.outputs["Fac"], [(cloud_cut, (0, 0, 0)), (cloud_cut + 0.15, (1, 1, 1))])
     cb = c.n("ShaderNodeBsdfPrincipled", Roughness=0.9)
     cb.inputs["Base Color"].default_value = (0.95, 0.97, 1.0, 1)
     tr = c.n("ShaderNodeBsdfTransparent")
@@ -217,40 +226,30 @@ def ocean():
     c.link(cb.outputs[0], mix.inputs[2])
     c.link(mix.outputs[0], c.out.inputs["Surface"])
     sphere("clouds", 1.008, c.mat)
-
-    sun(DAY, 4.5, (1.0, 0.97, 0.92))
-    # a faint blue fill so the night side isn't pure black
-    sun((0.6, -0.5, -0.4), 0.06, (0.4, 0.6, 1.0))
+    sun(sun_dir, 4.5, (1.0, 0.98, 0.95))
+    sun((0.3, -0.8, -0.4), 0.12, (0.35, 0.55, 1.0))
 
 
-def moon():
-    s = Nodes("moon")
-    vor = s.n("ShaderNodeTexVoronoi")
-    vor.inputs["Scale"].default_value = 7.0
-    coord = s.t.nodes.new("ShaderNodeTexCoord")
-    s.link(coord.outputs["Object"], vor.inputs["Vector"])
-    crater = s.ramp(vor.outputs["Distance"], [(0.0, (0, 0, 0)), (0.35, (0.3, 0.3, 0.3)), (0.42, (1, 1, 1)), (0.6, (0.6, 0.6, 0.6))])
-    nz = s.noise(5, 12, 0.6, w=2.0)
-    col = s.ramp(nz.outputs["Fac"], [(0.3, (0.16, 0.17, 0.2)), (0.7, (0.42, 0.43, 0.47))])
-    bump = s.n("ShaderNodeBump", Strength=0.6, Distance=0.05)
-    cbw = s.n("ShaderNodeRGBToBW")
-    s.link(crater.outputs["Color"], cbw.inputs["Color"])
-    s.link(cbw.outputs["Val"], bump.inputs["Height"])
-    bsdf = s.n("ShaderNodeBsdfPrincipled", Roughness=0.95)
-    s.link(col.outputs["Color"], bsdf.inputs["Base Color"])
-    s.link(bump.outputs["Normal"], bsdf.inputs["Normal"])
-    s.link(bsdf.outputs[0], s.out.inputs["Surface"])
-    sphere("moon", 1.0, s.mat)
-    rim = (0.9, 0.3, 0.2)
-    sun(rim, 5.0, (0.85, 0.92, 1.0))
-    sun((-0.5, -0.6, 0.3), 0.15, (0.5, 0.6, 1.0))
+def ocean():
+    # all blues, as in the target: deep ocean, bright shallows, blue-grey land
+    world(DAY, [
+        (0.0, (0.002, 0.012, 0.07)), (0.47, (0.006, 0.04, 0.2)), (0.53, (0.02, 0.15, 0.45)),
+        (0.545, (0.06, 0.14, 0.28)), (0.65, (0.1, 0.2, 0.34)), (1.0, (0.22, 0.3, 0.42))],
+        cloud_cut=0.5, cloud_stretch=(1.0, 1.0, 3.5), lights=True, ocean_rough=0.6)
+
+
+def terra():
+    world(TERRA_SUN, [
+        (0.0, (0.004, 0.02, 0.1)), (0.5, (0.01, 0.07, 0.25)), (0.535, (0.03, 0.18, 0.4)),
+        (0.545, (0.35, 0.22, 0.1)), (0.66, (0.55, 0.38, 0.2)), (1.0, (0.7, 0.58, 0.4))],
+        cloud_cut=0.56, cloud_stretch=(1.0, 1.0, 2.0), lights=False, ocean_rough=0.65)
 
 
 # The atmosphere, painted in 2D over the render: a thin bright limb and a soft halo
 # fading outward, strongest towards the sun. (colour, sun direction, limb, halo)
 AIR = {
-    "ocean": ((0.3, 0.78, 1.0), DAY, 2.2, 0.6),
-    "moon": ((0.55, 0.75, 1.0), (0.9, 0.3, 0.2), 0.7, 0.12),
+    "ocean": ((0.45, 0.85, 1.0), DAY, 3.2, 0.9),
+    "terra": ((0.4, 0.75, 1.0), TERRA_SUN, 1.6, 0.35),
 }
 
 
@@ -308,6 +307,6 @@ def render(name, build):
 
 
 os.makedirs(OUT, exist_ok=True)
-for name, build in (("ocean", ocean), ("moon", moon)):
+for name, build in (("ocean", ocean), ("terra", terra)):
     if not ARGS or name in ARGS:
         render(name, build)

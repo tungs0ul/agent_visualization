@@ -1,5 +1,5 @@
 //! The view out of the panoramic window (PLAN.md M29, the user's starship reference):
-//! a big cloudy blue planet with a glowing atmosphere, a small moon, nebula clouds,
+//! a big cloudy blue planet with a glowing atmosphere, a small planet, nebula clouds,
 //! asteroids and a few distant ships. Everything is built once at start (the planets
 //! are sprites rendered in Blender, the clouds noise textures made here) and never
 //! redrawn on its own: it costs nothing while the view dozes.
@@ -29,12 +29,13 @@ fn facing_camera(at: Vec3) -> Quat {
 }
 
 pub fn build(kit: &mut Kit, images: &mut Assets<Image>) {
-    // The big blue planet, low on the right, lit from the upper left, and a small moon
-    // up on the left: sprites rendered once in Blender (`tools/blender/planets.py`).
-    let (at, reach) = through_window(5.0, 3.2, -48.0);
-    planet_sprite(kit, images, include_bytes!("../../../assets/textures/space/ocean.png"), at, 3.0 * reach);
-    let (at, reach) = through_window(-4.8, 5.8, -85.0);
-    planet_sprite(kit, images, include_bytes!("../../../assets/textures/space/moon.png"), at, 0.55 * reach);
+    // The big blue planet fills the lower right, only its glowing upper part above the
+    // window sill (the target's crop 12), and a small tan-and-blue planet sits in the
+    // left window (crop 13). Sprites rendered once in Blender (`tools/blender/planets.py`).
+    let (at, reach) = through_window(5.5, -1.5, -48.0);
+    planet_sprite(kit, images, include_bytes!("../../../assets/textures/space/ocean.png"), at, 4.5 * reach);
+    let (at, reach) = through_window(-4.6, 3.0, -85.0);
+    planet_sprite(kit, images, include_bytes!("../../../assets/textures/space/terra.png"), at, 0.75 * reach);
 
     // Nebula clouds far behind: soft additive billboards in purple, blue and cyan.
     let cloud = images.add(cloud_texture(256, 7));
