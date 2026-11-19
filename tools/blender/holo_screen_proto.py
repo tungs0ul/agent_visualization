@@ -554,39 +554,69 @@ def flat(points, thick, mat, wire=None, rot_z=0.0, mirror_y=False):
 
 
 def station():
-    # a modular station like the ones in orbit today: a stack of cylinder modules joined
-    # by round nodes (front to back), a long truss across it, two pairs of long solar
-    # wings at each end of the truss and small radiators; smooth glowing surfaces
+    # A modular orbital station, with the detail that makes real ones read as real:
+    # a lattice truss, solar wings of dark cells on a central mast, modules of
+    # different sizes with side branches, a capsule docked at the front, ribbed
+    # radiators. Mostly dim lines; bright edges only on a few key outlines.
     rim = rim_face("station")
-    # modules along y (depth), nodes between them
-    for y, L in ((-0.13, 0.1), (0.0, 0.12), (0.14, 0.1)):
-        part(cyl, rim, (0, y, 0), rot=(90, 0, 0), vertices=40, radius=0.032, depth=L)
+    M_CELL = emit("cells", (0.02, 0.12, 0.45), 1.6, alpha=0.7)[0]
+    # main stack along y (front to back): modules of different radii, nodes between
+    for y, L, r in ((-0.13, 0.1, 0.028), (0.0, 0.12, 0.034), (0.15, 0.12, 0.03)):
+        part(cyl, rim, (0, y, 0), rot=(90, 0, 0), vertices=40, radius=r, depth=L)
         for e in (-1, 1):
-            part(tor, M_EDGE, (0, y + e * L / 2, 0), rot=(90, 0, 0), major_radius=0.032, minor_radius=0.0018, major_segments=40)
-    for y in (-0.065, 0.07):
-        part(uvs, rim, (0, y, 0), segments=32, ring_count=16, radius=0.038)
-    # a small module up and a docking port down on the middle node
-    part(cyl, rim, (0, 0.07, 0.06), vertices=32, radius=0.022, depth=0.06)
-    part(tor, M_EDGE, (0, 0.07, 0.09), major_radius=0.022, minor_radius=0.0018, major_segments=32)
-    part(cyl, M_WHITE, (0, -0.19, 0), rot=(90, 0, 0), vertices=24, radius=0.012, depth=0.02)
-    # truss across (x), slim and bright
-    part(cube, M_LINE, (0, 0.0, 0.0), (0.62, 0.012, 0.012), size=1)
-    part(cube, M_EDGE, (0, 0.0, 0.0), (0.62, 0.012, 0.012), size=1, wire=0.0015)
-    # solar wings: at each truss end, one up and one down, long and narrow
-    for x in (-0.3, -0.22, 0.22, 0.3):
+            part(tor, M_EDGE, (0, y + e * L / 2, 0), rot=(90, 0, 0), major_radius=r, minor_radius=0.0016, major_segments=40)
+        part(tor, M_LINE_DIM, (0, y, 0), rot=(90, 0, 0), major_radius=r + 0.001, minor_radius=0.001, major_segments=40)
+    for y in (-0.065, 0.075):
+        part(uvs, rim, (0, y, 0), segments=32, ring_count=16, radius=0.04)
+    # side branches on the front node, a lab module up on the back node
+    for sx in (-1, 1):
+        part(cyl, rim, (sx * 0.075, -0.065, 0), rot=(0, 90, 0), vertices=32, radius=0.022, depth=0.07)
+        part(tor, M_EDGE, (sx * 0.11, -0.065, 0), rot=(0, 90, 0), major_radius=0.022, minor_radius=0.0015, major_segments=32)
+    part(cyl, rim, (0, 0.075, 0.07), vertices=32, radius=0.026, depth=0.08)
+    part(tor, M_EDGE, (0, 0.075, 0.11), major_radius=0.026, minor_radius=0.0015, major_segments=32)
+    # a capsule docked at the front: a short cylinder and a cone heat shield
+    part(cyl, rim, (0, -0.205, 0), rot=(90, 0, 0), vertices=32, radius=0.02, depth=0.04)
+    part(cone, rim, (0, -0.24, 0), rot=(90, 0, 0), vertices=32, radius1=0.0, radius2=0.026, depth=0.03)
+    # lattice truss across (x): two rails and zigzag struts
+    L = 0.66
+    for z in (-0.008, 0.008):
+        _bar((-L / 2, 0.02, z), (L / 2, 0.02, z), 0.002, M_LINE)
+    n = 22
+    for i in range(n):
+        x0, x1 = -L / 2 + i * L / n, -L / 2 + (i + 1) * L / n
+        z0, z1 = (-0.008, 0.008) if i % 2 == 0 else (0.008, -0.008)
+        _bar((x0, 0.02, z0), (x1, 0.02, z1), 0.0012, M_LINE_DIM)
+    # solar wings: a mast with a blanket of cells either side, two up and two down
+    for x in (-0.31, -0.23, 0.23, 0.31):
         for sz in (-1, 1):
-            c = (x, 0.0, sz * 0.13)
-            part(cube, M_FACE, c, (0.06, 0.003, 0.22), size=1)
-            part(cube, M_EDGE, c, (0.06, 0.003, 0.22), size=1, wire=0.0018)
-            for k in (-1, 1):
-                part(cube, M_LINE_DIM, (x, -0.002, sz * 0.13 + k * 0.055), (0.058, 0.002, 0.0015), size=1)
-            part(cube, M_LINE_DIM, (x, -0.002, sz * 0.13), (0.0015, 0.002, 0.21), size=1)
-        part(ico, M_AMBER, (x, -0.01, 0), radius=0.007, subdivisions=2)
-    # radiators: small white panels near the middle, edge-on-ish
-    for x in (-0.11, 0.11):
-        part(cube, M_WHITE, (x, 0.02, -0.06), (0.05, 0.002, 0.08), rot=(0, 0, 30), size=1, wire=0.0015)
+            zc = sz * 0.14
+            _bar((x, 0.02, sz * 0.012), (x, 0.02, sz * 0.26), 0.0015, M_LINE)
+            for side in (-1, 1):
+                cx = x + side * 0.016
+                part(cube, M_CELL, (cx, 0.02, zc), (0.028, 0.002, 0.23), size=1)
+                part(cube, M_LINE, (cx, 0.02, zc), (0.028, 0.002, 0.23), size=1, wire=0.001)
+                for k in range(1, 10):
+                    part(cube, M_LINE_DIM, (cx, 0.018, zc - 0.115 + k * 0.023), (0.027, 0.001, 0.0008), size=1)
+        part(ico, M_AMBER, (x, 0.012, 0), radius=0.006, subdivisions=2)
+    # radiators: ribbed white panels hanging below the truss near the middle
+    for x in (-0.12, 0.12):
+        for k in range(3):
+            part(cube, M_WHITE, (x + (k - 1) * 0.022, 0.03, -0.08), (0.018, 0.002, 0.1), rot=(0, 0, 20), size=1, wire=0.0012)
     pivot.scale = (0.8, 0.8, 0.8)
-    return (TILT + 18, 28)
+    return (26, 35, -10)
+
+
+def _bar(a, b, r, mat):
+    """A thin glowing rod from a to b (subject frame)."""
+    a, b = Vector(a), Vector(b)
+    bpy.ops.mesh.primitive_cylinder_add(vertices=8, radius=r, depth=(b - a).length)
+    c = bpy.context.object
+    c.rotation_mode = "QUATERNION"
+    c.rotation_quaternion = (b - a).to_track_quat("Z", "Y")
+    c.location = (a + b) / 2
+    c.data.materials.append(mat)
+    c.parent = pivot
+    return c
 
 
 def ship():
