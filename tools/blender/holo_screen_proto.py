@@ -409,36 +409,111 @@ def facing_camera(obj):
 
 
 def sun():
-    # a ball of fire: granulated surface, brighter limb, a soft corona, flame loops on
-    # the limb and a small planet on its orbit
-    mt, nt = emit("photosphere", (1, 0.5, 0.1), 2.2, alpha=1.0)
+    # A star as a scan: a swirling plasma ball, darker toward its limb like a real sun,
+    # a corona of fine streamers fading outward, two big flame arcs on the limb, and a
+    # cyan measuring ring with ticks round it (the hologram's "instrument" layer).
+    mt, nt = emit("photosphere", (1, 0.5, 0.1), 1.5, alpha=1.0)
+    mt.surface_render_method = "DITHERED"   # solid: hides the far half of the arcs
     em = [n for n in nt.nodes if n.type == "EMISSION"][0]
     tc = nt.nodes.new("ShaderNodeTexCoord")
     nz = nt.nodes.new("ShaderNodeTexNoise")
-    nz.inputs["Scale"].default_value = 28.0
-    nz.inputs["Detail"].default_value = 8.0
-    nz.inputs["Roughness"].default_value = 0.7
+    nz.noise_dimensions = "4D"
+    for k, v in (("Scale", 9.0), ("Detail", 10.0), ("Roughness", 0.65), ("Distortion", 2.2), ("W", 4.0)):
+        nz.inputs[k].default_value = v
     nt.links.new(tc.outputs["Object"], nz.inputs["Vector"])
     rp = nt.nodes.new("ShaderNodeValToRGB")
-    rp.color_ramp.elements[0].position, rp.color_ramp.elements[0].color = 0.35, (0.9, 0.22, 0.02, 1)
-    rp.color_ramp.elements[1].position, rp.color_ramp.elements[1].color = 0.7, (1.0, 0.85, 0.45, 1)
+    el = rp.color_ramp.elements
+    el[0].position, el[0].color = 0.3, (0.5, 0.03, 0.0, 1)
+    el[1].position, el[1].color = 0.75, (1.0, 0.75, 0.15, 1)
+    e = el.new(0.5)
+    e.color = (1.0, 0.25, 0.0, 1)
     nt.links.new(nz.outputs["Fac"], rp.inputs["Fac"])
-    nt.links.new(rp.outputs["Color"], em.inputs["Color"])
-    mt.surface_render_method = "DITHERED"   # solid: hides the far half of the flame loops
+    # limb darkening: dimmer where the surface turns away from the viewer
+    lw = nt.nodes.new("ShaderNodeLayerWeight")
+    lw.inputs["Blend"].default_value = 0.35
+    inv = nt.nodes.new("ShaderNodeMapRange")
+    inv.inputs["To Min"].default_value, inv.inputs["To Max"].default_value = 1.0, 0.35
+    nt.links.new(lw.outputs["Facing"], inv.inputs["Value"])
+    mul = nt.nodes.new("ShaderNodeMix")
+    mul.data_type = "RGBA"
+    mul.blend_type = "MULTIPLY"
+    mul.inputs["Factor"].default_value = 1.0
+    nt.links.new(rp.outputs["Color"], mul.inputs["A"])
+    nt.links.new(inv.outputs["Result"], mul.inputs["B"])
+    nt.links.new(mul.outputs["Result"], em.inputs["Color"])
     part(uvs, mt, segments=64, ring_count=32, radius=0.12)
-    part(uvs, M_AMBER, segments=18, ring_count=10, radius=0.123, wire=0.0012)
-    corona = radial_material("corona", [(0.0, (1, 0.55, 0.15, 1.0)), (0.2, (1, 0.4, 0.08, 0.4)),
-                                        (1.0, (1, 0.25, 0.03, 0.0))], 2.0, inner=0.115, outer=0.22)
-    c = part(bpy.ops.mesh.primitive_circle_add, corona, (0, 0.03, 0), vertices=64, radius=0.22, fill_type="NGON")
+
+    # corona: a disc behind the ball, light = radial falloff x streaks by angle
+    cm, cn = emit("corona", (1, 0.5, 0.12), 1.0)
+    cem = [n for n in cn.nodes if n.type == "EMISSION"][0]
+    ctc = cn.nodes.new("ShaderNodeTexCoord")
+    sep = cn.nodes.new("ShaderNodeSeparateXYZ")
+    cn.links.new(ctc.outputs["Object"], sep.inputs[0])
+    ang = cn.nodes.new("ShaderNodeMath")
+    ang.operation = "ARCTAN2"
+    cn.links.new(sep.outputs["Y"], ang.inputs[0])
+    cn.links.new(sep.outputs["X"], ang.inputs[1])
+    streak = cn.nodes.new("ShaderNodeTexNoise")
+    streak.noise_dimensions = "1D"
+    streak.inputs["Scale"].default_value = 3.5
+    streak.inputs["Detail"].default_value = 6.0
+    cn.links.new(ang.outputs[0], streak.inputs["W"])
+    sr = cn.nodes.new("ShaderNodeMapRange")
+    sr.inputs["From Min"].default_value, sr.inputs["From Max"].default_value = 0.35, 0.75
+    sr.inputs["To Min"].default_value = 0.15
+    cn.links.new(streak.outputs["Fac"], sr.inputs["Value"])
+    ln = cn.nodes.new("ShaderNodeVectorMath")
+    ln.operation = "LENGTH"
+    cn.links.new(ctc.outputs["Object"], ln.inputs[0])
+    rr = cn.nodes.new("ShaderNodeMapRange")
+    rr.inputs["From Min"].default_value, rr.inputs["From Max"].default_value = 0.118, 0.27
+    rr.inputs["To Min"].default_value, rr.inputs["To Max"].default_value = 1.0, 0.0
+    cn.links.new(ln.outputs["Value"], rr.inputs["Value"])
+    pw = cn.nodes.new("ShaderNodeMath")
+    pw.operation = "POWER"
+    pw.inputs[1].default_value = 2.2
+    cn.links.new(rr.outputs["Result"], pw.inputs[0])
+    m1 = cn.nodes.new("ShaderNodeMath")
+    m1.operation = "MULTIPLY"
+    cn.links.new(pw.outputs[0], m1.inputs[0])
+    cn.links.new(sr.outputs["Result"], m1.inputs[1])
+    m2 = cn.nodes.new("ShaderNodeMath")
+    m2.operation = "MULTIPLY"
+    m2.inputs[1].default_value = 4.0
+    cn.links.new(m1.outputs[0], m2.inputs[0])
+    cn.links.new(m2.outputs[0], cem.inputs["Strength"])
+    c = part(bpy.ops.mesh.primitive_circle_add, cm, vertices=96, radius=0.27, fill_type="NGON")
     facing_camera(c)
-    # flame loops: rings centred on the limb, half hidden behind the ball
-    for ang, r in ((40, 0.02), (75, 0.028), (110, 0.016), (145, 0.024), (200, 0.014), (330, 0.018)):
-        a = math.radians(ang)
-        loop = part(tor, M_ORANGE, major_radius=r, minor_radius=0.0025, major_segments=48)
-        facing_camera(loop)
-        loop.location = (0.12 * math.cos(a), 0.02, 0.12 * math.sin(a))   # just behind the limb
-    part(tor, M_LINE_DIM, rot=(80, 0, 10), major_radius=0.27, minor_radius=0.0018, major_segments=128)
-    part(ico, M_LINE, (0.26, -0.03, -0.05), radius=0.014, subdivisions=2)
+    c.location = (0, 0.03, 0)
+
+    # two big flame arcs, their feet on the limb (a ring just behind the limb, its
+    # inner half hidden by the ball)
+    M_FLAME = emit("flame", (1.0, 0.22, 0.0), 5.0)[0]
+    for ang_deg, r, w in ((58, 0.04, 0.0035), (205, 0.028, 0.003)):
+        a = math.radians(ang_deg)
+        for rad, mat, ww in ((r, M_FLAME, w),):
+            loop = part(tor, mat, major_radius=rad, minor_radius=ww, major_segments=64)
+            facing_camera(loop)
+            loop.location = (0.125 * math.cos(a), 0.02, 0.125 * math.sin(a))
+
+    # the instrument ring: cyan, with ticks every 10 deg and brackets at the cardinal points
+    ring = part(tor, M_LINE, major_radius=0.2, minor_radius=0.0015, major_segments=128)
+    facing_camera(ring)
+    ring.location = (0, -0.01, 0)
+    for k in range(36):
+        a = math.radians(k * 10)
+        L = 0.02 if k % 9 == 0 else 0.009
+        t = part(cube, M_EDGE if k % 9 == 0 else M_LINE_DIM, size=1, scale=(0.002, 0.002, L))
+        t.rotation_mode = "QUATERNION"
+        front = (on_screen(0, 0, 1) - on_screen(0, 0, 0)).normalized()
+        t.rotation_quaternion = front.to_track_quat("Y", "Z")
+        t.location = (0, 0, 0)
+        # place in the screen plane round the centre
+        right = Vector((1, 0, 0))
+        up = front.cross(right).normalized() * -1
+        pos = right * math.cos(a) * (0.2 + L / 2 + 0.004) + up * math.sin(a) * (0.2 + L / 2 + 0.004)
+        t.rotation_quaternion = (right * math.cos(a) + up * math.sin(a)).to_track_quat("Z", "Y")
+        t.location = pos + Vector((0, -0.01, 0))
     return (TILT, 0)
 
 
