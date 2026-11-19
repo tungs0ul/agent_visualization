@@ -2162,3 +2162,11 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   median 0.189, dark 39%, glow 12%, p95 0.72; walls/floor identical across 0.5 s;
   49–56 fps debug. Orbiting ±40° shows outside the shell (camera rig limits are step 8).
   Screens (local): baseline/p02s1_*.png. **Next:** user review, then step 2 (desk console).
+- 2026-11-19, Claude Opus 5.5: the user chose the reference's steep view over the
+  brief's framing numbers ("yes do it"). Camera (0,12.2,15.4) → (0,0,-1.4), FOV 0.70,
+  36° down: robot head ~32%, teleporter ~76%, floor front edge ~95% (no dark band).
+  The camera is above the ceiling, so the ceiling parts live on render layer 1
+  (`hull::CEILING_LAYER`); `hull::cutaway` leaves that layer out of the main camera
+  while it's above the ceiling and adds it back inside. Lights and probe cameras use
+  `hull::all_layers()` so the ceiling's shadows and reflections stay. Metrics 7/7
+  (median 0.22, dark 31%, glow 13%); stable. Screens (local): baseline/p02s1b_*.png.

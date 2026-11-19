@@ -152,7 +152,7 @@ pub fn build(
         Camera3d::default(),
         // The brief's framing (section 4, FIX 01 step 3): the room fills the width, the
         // window band near the top, the core a little above the middle.
-        Projection::Perspective(PerspectiveProjection { fov: 0.785, ..default() }),
+        Projection::Perspective(PerspectiveProjection { fov: 0.70, ..default() }),
         Camera {
             order: 0,
             clear_color: ClearColorConfig::Custom(Color::srgb(0.02, 0.02, 0.06)),
@@ -170,6 +170,7 @@ pub fn build(
             bevy::light::ShadowFilteringMethod::Gaussian,
         ),
         Transform::from_translation(FULL_EYE).looking_at(FULL_LOOK, Vec3::Y),
+        bevy::camera::visibility::RenderLayers::layer(0),
         // What polished metal reflects (PLAN.md M29): a generated bridge-like
         // surround, filtered by Bevy once at start.
         bevy::light::GeneratedEnvironmentMapLight {
@@ -181,6 +182,7 @@ pub fn build(
     commands.spawn((
         // Illuminance and colour come from the look settings (`look::apply`).
         DirectionalLight { illuminance: 1800.0, shadow_maps_enabled: true, ..default() },
+        crate::hull::all_layers(),
         Transform::from_rotation(Quat::from_euler(EulerRot::YXZ, -0.6, -0.95, 0.0)),
         CascadeShadowConfigBuilder { num_cascades: 1, maximum_distance: 30.0, ..default() }.build(),
     ));
@@ -876,11 +878,12 @@ pub fn frame(
 }
 
 /// Where the camera looks at the whole workspace from.
-/// The camera (PROMPT_02 step 1): below the ceiling's front edge, looking down 17°,
-/// fitted so the whole window band shows near the top, the robot's head sits at about 38%
-/// and the teleporter at about 71% of the height. `space` places things by this eye.
-pub(crate) const FULL_EYE: Vec3 = Vec3::new(0.0, 6.0, 15.6);
-const FULL_LOOK: Vec3 = Vec3::new(0.0, 0.0, -4.0);
+/// The camera (the user chose the reference's steep view, 2026-11-19): above the
+/// ceiling, which cuts away (`hull::cutaway`), looking down 36° with a 40° view, so
+/// the room fills the width, the robot's head sits at about a third of the height and
+/// the teleporter at about three quarters. `space` places things by this eye.
+pub(crate) const FULL_EYE: Vec3 = Vec3::new(0.0, 12.2, 15.4);
+const FULL_LOOK: Vec3 = Vec3::new(0.0, 0.0, -1.4);
 
 /// The hologram floating beside a robot: a picture of what it is doing right now
 /// (PLAN.md M17, "the holograms are the visualisation of its mind").

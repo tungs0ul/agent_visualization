@@ -92,14 +92,14 @@ pub fn build(kit: &mut Kit) {
         perceptual_roughness: 0.5,
         ..default()
     });
-    kit.mesh(Cuboid::new(width, 0.3, depth), ceiling, Transform::from_xyz(0.0, CEILING + 0.15, middle_z));
+    ceiling_part(kit, Cuboid::new(width, 0.3, depth), ceiling, Transform::from_xyz(0.0, CEILING + 0.15, middle_z));
     for z in [-1.0, 2.6] {
-        kit.mesh(Cuboid::new(width - 0.6, 0.4, 0.55), trim.clone(), Transform::from_xyz(0.0, CEILING - 0.2, z));
-        kit.mesh(Cuboid::new(width - 0.8, 0.03, 0.1), white.clone(), Transform::from_xyz(0.0, CEILING - 0.42, z));
+        ceiling_part(kit, Cuboid::new(width - 0.6, 0.4, 0.55), trim.clone(), Transform::from_xyz(0.0, CEILING - 0.2, z));
+        ceiling_part(kit, Cuboid::new(width - 0.8, 0.03, 0.1), white.clone(), Transform::from_xyz(0.0, CEILING - 0.42, z));
     }
     for x in [-8.4, 8.4] {
-        kit.mesh(Cuboid::new(0.55, 0.4, depth - 0.6), trim.clone(), Transform::from_xyz(x, CEILING - 0.2, middle_z));
-        kit.mesh(Cuboid::new(0.1, 0.03, depth - 0.8), strip.clone(), Transform::from_xyz(x, CEILING - 0.42, middle_z));
+        ceiling_part(kit, Cuboid::new(0.55, 0.4, depth - 0.6), trim.clone(), Transform::from_xyz(x, CEILING - 0.2, middle_z));
+        ceiling_part(kit, Cuboid::new(0.1, 0.03, depth - 0.8), strip.clone(), Transform::from_xyz(x, CEILING - 0.42, middle_z));
     }
 
     // Recessed round fixtures, each a real spot light: the big one over the command
@@ -112,9 +112,9 @@ pub fn build(kit: &mut Kit) {
     for (at, radius, lumens) in fixtures {
         let centre = Vec3::new(at.x, CEILING, at.y);
         let face_down = Quat::from_rotation_x(std::f32::consts::FRAC_PI_2);
-        kit.mesh(Circle::new(radius), disc.clone(), Transform::from_translation(centre - Vec3::Y * 0.02).with_rotation(face_down));
-        kit.mesh(Torus::new(radius, radius + 0.2), trim.clone(), Transform::from_translation(centre - Vec3::Y * 0.06));
-        kit.mesh(Torus::new(radius + 0.3, radius + 0.38), ring.clone(), Transform::from_translation(centre - Vec3::Y * 0.04));
+        ceiling_part(kit, Circle::new(radius), disc.clone(), Transform::from_translation(centre - Vec3::Y * 0.02).with_rotation(face_down));
+        ceiling_part(kit, Torus::new(radius, radius + 0.2), trim.clone(), Transform::from_translation(centre - Vec3::Y * 0.06));
+        ceiling_part(kit, Torus::new(radius + 0.3, radius + 0.38), ring.clone(), Transform::from_translation(centre - Vec3::Y * 0.04));
         kit.commands.spawn((
             SpotLight {
                 color: FIXTURE_LIGHT,
@@ -128,7 +128,32 @@ pub fn build(kit: &mut Kit) {
             },
             Transform::from_translation(centre - Vec3::Y * 0.1).looking_at(Vec3::new(at.x, 0.0, at.y), Vec3::Z),
             crate::look::BaseIntensity(lumens),
+            all_layers(),
         ));
     }
 
+}
+
+/// The render layer the ceiling lives on. The main camera leaves it out while it looks
+/// down from above the ceiling (a cutaway, as in the user's reference), and draws it
+/// once it's inside the room; lights and the reflection probe always see it, so its
+/// shadows and reflections stay.
+pub const CEILING_LAYER: usize = 1;
+/// Layers for everything that must see the ceiling too: lights and probe cameras.
+pub fn all_layers() -> bevy::camera::visibility::RenderLayers {
+    bevy::camera::visibility::RenderLayers::from_layers(&[0, CEILING_LAYER])
+}
+
+fn ceiling_part(kit: &mut Kit, mesh: impl Into<Mesh>, material: Handle<StandardMaterial>, at: Transform) {
+    let part = kit.mesh(mesh, material, at);
+    kit.commands.entity(part).insert(bevy::camera::visibility::RenderLayers::layer(CEILING_LAYER));
+}
+
+/// Shows the ceiling only while the camera is below it.
+pub fn cutaway(mut camera: Query<(&Transform, &mut bevy::camera::visibility::RenderLayers), With<crate::view3d::RoomCamera3d>>) {
+    let Ok((at, mut layers)) = camera.single_mut() else { return };
+    let wanted = if at.translation.y > CEILING - 0.2 { bevy::camera::visibility::RenderLayers::layer(0) } else { all_layers() };
+    if *layers != wanted {
+        *layers = wanted;
+    }
 }

@@ -78,6 +78,7 @@ pub fn capture(
                             // (look.json) undoes the exposure: 1.2 × 2^ev100 is "as seen".
                             (Hdr, Tonemapping::None, DebandDither::Disabled, Msaa::Off, Exposure { ev100: look.exposure_ev100 }),
                             Transform::from_translation(AT).looking_to(forward, up),
+                            crate::hull::all_layers(),
                         ))
                         .id(),
                 );
