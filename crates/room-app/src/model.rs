@@ -108,6 +108,8 @@ pub struct SessionState {
     pub main_repo: Option<Repo>,
     /// Claude's tool calls and the files it wrote (PLAN.md M28).
     pub main_work: crate::work::Work,
+    /// What the user asked, in full, oldest first (the mission report quotes them).
+    pub prompts: Vec<String>,
     /// Claude's last tool call or turn failed, and nothing has succeeded since.
     pub main_failed: bool,
     /// The model, from `SessionStart` (its context window: 1M for `[1m]` models).
@@ -363,6 +365,9 @@ fn update_session(session: &mut SessionState, event: &RoomEvent, changes: &mut V
                 session.main_failed = failed;
             }
             session.main_work.on(&event.kind);
+            if let EventKind::UserPrompt { text } = &event.kind {
+                session.prompts.push(text.clone());
+            }
             if let EventKind::SessionStarted { model: Some(name) } | EventKind::ModelSwitched { model: name } = &event.kind {
                 session.model = Some(name.clone());
             }

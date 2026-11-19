@@ -17,6 +17,7 @@ mod mini;
 mod model;
 mod notify;
 mod palette;
+mod report;
 mod repo;
 mod server;
 mod hud;

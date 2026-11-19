@@ -45,6 +45,7 @@ pub fn draw(
     mut panel: ResMut<PanelPrefs>,
     mut styled: Local<bool>,
     mut was_open: Local<Option<Console>>,
+    mut feed: Local<Feed>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
     // Panels in the room's theme (PLAN.md M14).
@@ -165,6 +166,14 @@ pub fn draw(
                 open.0 = None;
             }
         }
+    }
+    // The activity console along the bottom (PLAN.md M28): one line, or tabs.
+    if !mode.mini {
+        let shown = model.shown();
+        let height = ctx.viewport_rect().height() * 0.36;
+        egui::Panel::bottom("activity")
+            .frame(egui::Frame::new().fill(crate::palette::GLASS).inner_margin(egui::Margin::symmetric(10, 4)))
+            .show(&mut root, |ui| activity_console(ui, &mut feed, lines, shown, &chat.usage, final_answer.as_ref(), height));
     }
     let window_size = UVec2::new(window.physical_width(), window.physical_height());
     fit_camera(&mut camera, root.available_rect_before_wrap(), window.scale_factor(), window_size);
@@ -1045,6 +1054,221 @@ fn permission_cards(
 
 fn colored_button(text: &str, fill: egui::Color32) -> egui::Button<'_> {
     egui::Button::new(egui::RichText::new(text).color(egui::Color32::WHITE).strong()).fill(fill)
+}
+
+/// The activity console's state: folded to one line, or open on a tab.
+pub struct Feed {
+    open: Option<FeedTab>,
+    /// The result of the last "Export report", to show beside the button.
+    exported: Option<String>,
+}
+
+impl Default for Feed {
+    /// `AGENT_ROOM_FEED=<tab>` (e.g. `tools`) starts with that tab open (screenshot
+    /// tests can't click).
+    fn default() -> Self {
+        let wanted = std::env::var("AGENT_ROOM_FEED").unwrap_or_default().to_lowercase();
+        let open = FeedTab::ALL.into_iter().find(|tab| tab.title().to_lowercase().starts_with(&wanted) && !wanted.is_empty());
+        Self { open, exported: None }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FeedTab {
+    Live,
+    Tools,
+    Files,
+    Errors,
+    Metrics,
+}
+
+impl FeedTab {
+    const ALL: [FeedTab; 5] = [FeedTab::Live, FeedTab::Tools, FeedTab::Files, FeedTab::Errors, FeedTab::Metrics];
+
+    fn title(self) -> &'static str {
+        match self {
+            FeedTab::Live => "Live feed",
+            FeedTab::Tools => "Tool calls",
+            FeedTab::Files => "Files",
+            FeedTab::Errors => "Errors",
+            FeedTab::Metrics => "Metrics",
+        }
+    }
+}
+
+/// Every agent of a session with its record: Claude first, then the sub-agents.
+fn crew(session: &crate::model::SessionState) -> Vec<(String, &crate::work::Work)> {
+    std::iter::once(("Claude".to_owned(), &session.main_work))
+        .chain(session.agents.iter().map(|(id, info)| {
+            let short: String = id.chars().take(4).collect();
+            (format!("{} {short}", info.agent_type), &info.work)
+        }))
+        .collect()
+}
+
+/// The activity console (PLAN.md M28, from the user's Mission Control brief): folded,
+/// the latest event in one line; open, tabs over what the hooks saw in the shown
+/// session. Nothing here is made up: no progress %, no estimated cost.
+fn activity_console(
+    ui: &mut egui::Ui,
+    feed: &mut Feed,
+    lines: &VecDeque<LogLine>,
+    session: Option<&crate::model::SessionState>,
+    usage: &crate::usage::Usage,
+    answer: Option<&crate::log::FinalAnswer>,
+    height: f32,
+) {
+    use crate::palette::{AMBER, CYAN, RED, TEXT, TEXT_DIM};
+    let id = session.map(|session| session.id.as_str());
+    ui.horizontal(|ui| {
+        let arrow = if feed.open.is_some() { "▼ Activity" } else { "▲ Activity" };
+        if ui.small_button(egui::RichText::new(arrow).color(CYAN)).on_hover_text("Show or hide the activity console").clicked() {
+            feed.open = if feed.open.is_some() { None } else { Some(FeedTab::Live) };
+        }
+        match feed.open {
+            None => {
+                if let Some(line) = lines.iter().rev().find(|line| id.is_none_or(|id| line.session == id)) {
+                    ui.label(egui::RichText::new(format!("{:>4}", crate::hud::ago(line.at))).small().monospace().color(TEXT_DIM));
+                    ui.label(egui::RichText::new(&line.agent).small().strong().color(TEXT));
+                    ui.add(egui::Label::new(egui::RichText::new(&line.text).small().color(TEXT)).truncate());
+                }
+            }
+            Some(open) => {
+                for tab in FeedTab::ALL {
+                    if ui.selectable_label(open == tab, egui::RichText::new(tab.title()).small()).clicked() {
+                        feed.open = Some(tab);
+                    }
+                }
+                if let Some(session) = session {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.small_button("⤓ Export report").on_hover_text("Write a Markdown mission report and open it").clicked() {
+                            feed.exported = Some(export_report(session, lines, usage, answer));
+                        }
+                        if let Some(note) = &feed.exported {
+                            ui.label(egui::RichText::new(note).small().color(TEXT_DIM));
+                        }
+                    });
+                }
+            }
+        }
+    });
+    let Some(tab) = feed.open else { return };
+    let Some(session) = session else {
+        ui.label(egui::RichText::new("No session yet.").weak());
+        return;
+    };
+    ui.set_height(height);
+    let crew = crew(session);
+    egui::ScrollArea::vertical().id_salt(("feed", tab.title())).auto_shrink(false).stick_to_bottom(tab == FeedTab::Live).show(
+        ui,
+        |ui| match tab {
+            FeedTab::Live => event_log(ui, lines, Some(&session.id)),
+            FeedTab::Tools => {
+                let mut calls: Vec<_> = crew.iter().flat_map(|(who, work)| work.calls.iter().map(move |call| (who, call))).collect();
+                calls.sort_by_key(|(_, call)| std::cmp::Reverse(call.started));
+                for (who, call) in calls.into_iter().take(200) {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(format!("{:>4}", crate::hud::ago(call.started))).small().monospace().color(TEXT_DIM));
+                        ui.label(egui::RichText::new(who).small().strong().color(TEXT));
+                        ui.vertical(|ui| crate::hud::call_row(ui, call));
+                    });
+                }
+            }
+            FeedTab::Files => {
+                let mut any = false;
+                for (who, work) in &crew {
+                    for file in &work.files {
+                        any = true;
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new(who).small().strong().color(TEXT));
+                            if ui.link(egui::RichText::new(file).small().monospace()).on_hover_text("Open").clicked() {
+                                crate::hud::open_file(file);
+                            }
+                        });
+                    }
+                }
+                if !any {
+                    ui.label(egui::RichText::new("No files written yet.").weak());
+                }
+            }
+            FeedTab::Errors => {
+                let mut any = false;
+                for (who, work) in &crew {
+                    for call in &work.calls {
+                        if let crate::work::Outcome::Failed { error, .. } = &call.outcome {
+                            any = true;
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label(egui::RichText::new(format!("{:>4}", crate::hud::ago(call.started))).small().monospace().color(TEXT_DIM));
+                                ui.label(egui::RichText::new(who).small().strong().color(TEXT));
+                                ui.label(egui::RichText::new(&call.label).small().color(RED));
+                                let first = error.lines().next().unwrap_or_default();
+                                ui.label(egui::RichText::new(truncate(first, 160)).small().color(TEXT_DIM));
+                            });
+                        }
+                    }
+                }
+                for line in lines.iter().filter(|line| line.session == session.id && line.text.starts_with("Stopped")) {
+                    any = true;
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(egui::RichText::new(format!("{:>4}", crate::hud::ago(line.at))).small().monospace().color(TEXT_DIM));
+                        ui.label(egui::RichText::new(&line.agent).small().strong().color(TEXT));
+                        ui.label(egui::RichText::new(&line.text).small().color(RED));
+                    });
+                }
+                if !any {
+                    ui.label(egui::RichText::new("No failures.").color(crate::palette::GREEN));
+                }
+            }
+            FeedTab::Metrics => {
+                let calls: usize = crew.iter().map(|(_, work)| work.calls.len()).sum();
+                let failed: usize = crew.iter().map(|(_, work)| work.failures()).sum();
+                let files: usize = crew.iter().map(|(_, work)| work.files.len()).sum();
+                let done = session.agents.iter().filter(|(_, info)| info.status == crate::model::Status::Done).count();
+                egui::Grid::new("metrics").num_columns(2).spacing([24.0, 4.0]).show(ui, |ui| {
+                    let mut row = |name: &str, value: String, color: egui::Color32| {
+                        ui.label(egui::RichText::new(name).color(TEXT_DIM));
+                        ui.label(egui::RichText::new(value).color(color));
+                        ui.end_row();
+                    };
+                    if let Some(tokens) = usage.tokens(&session.id) {
+                        row("Tokens in", crate::usage::short(tokens.input), TEXT);
+                        row("Tokens out", crate::usage::short(tokens.output), TEXT);
+                    }
+                    if let Some(started) = lines.iter().find(|line| line.session == session.id) {
+                        let secs = started.at.elapsed().as_secs();
+                        row("Runtime (since the app saw it)", format!("{}m {}s", secs / 60, secs % 60), TEXT);
+                    }
+                    row("Tool calls", calls.to_string(), TEXT);
+                    row("Failed calls", failed.to_string(), if failed > 0 { RED } else { TEXT });
+                    row("Files written", files.to_string(), TEXT);
+                    row("Sub-agents done", format!("{done} of {}", session.agents.len()), TEXT);
+                    row("Cost", "not measured (Claude Code doesn't report it here)".to_owned(), AMBER);
+                });
+            }
+        },
+    );
+}
+
+/// Writes the mission report for the shown session and opens it; the note says how
+/// it went.
+fn export_report(
+    session: &crate::model::SessionState,
+    lines: &VecDeque<LogLine>,
+    usage: &crate::usage::Usage,
+    answer: Option<&crate::log::FinalAnswer>,
+) -> String {
+    let runtime = lines.iter().find(|line| line.session == session.id).map(|line| line.at.elapsed().as_secs());
+    let answer = answer.filter(|answer| answer.session == session.id).map(|answer| answer.text.as_str());
+    let extras = crate::report::Extras { prompts: &session.prompts, answer, tokens: usage.tokens(&session.id), runtime };
+    let text = crate::report::render(session, &extras);
+    match crate::report::save(session, &text) {
+        Ok(path) => {
+            let shown = path.display().to_string();
+            crate::hud::open_file(&shown);
+            format!("Saved {}", path.file_name().map_or(shown.clone(), |name| name.to_string_lossy().into_owned()))
+        }
+        Err(err) => format!("Couldn't save: {err}"),
+    }
 }
 
 /// The shown session's log. Each line is one wrapped label that may break anywhere:
