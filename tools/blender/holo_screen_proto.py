@@ -2,7 +2,12 @@
 before anything is ported to the app (target crop 07).
 
     /Applications/Blender.app/Contents/MacOS/Blender -b --factory-startup \
-        --python tools/blender/holo_screen_proto.py -- OUT.png [close|room|screen] [subject]
+        --python tools/blender/holo_screen_proto.py -- OUT.png [close|room|screen|bake] [subject]
+
+`bake` writes what the app shows: the screen's light only (subject, UI, beam) seen
+straight on through an orthographic camera, on black, no bloom (the app adds its
+own), 1024x512 for the 1.5 x 0.75 m screen. The app draws it added over its dark
+glass (`screens.rs`). Bake all with `tools/blender/bake_screens.sh`.
 
 Imports the desk (assets/models/stations/desk_console.glb) and builds the main screen
 on it at `screens::SCREENS`: dark see-through glass with a fresnel edge glow and
@@ -21,7 +26,7 @@ from mathutils import Vector
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 args = sys.argv[sys.argv.index("--") + 1:]
 OUT = args[0]
-VIEW = args[1] if len(args) > 1 else "close"     # close | room | screen
+VIEW = args[1] if len(args) > 1 else "close"     # close | room | screen | bake
 SUBJECT = args[2] if len(args) > 2 else "crate"   # crate rocket moon sun station ship blackhole
 rng = random.Random(7)
 
@@ -628,5 +633,27 @@ else:
     cam.location = (0.35, -2.7, 2.05)
     target = Vector((0, 0.2, 1.0))
 cam.rotation_euler = (target - cam.location).to_track_quat("-Z", "Y").to_euler()
+if VIEW == "bake":
+    # light only: no desk, floor, glass or lamps; black behind; linear-ish colours
+    for ob in list(sc.objects):
+        if ob.type in ("LIGHT",) or ob.name in ("glass", "f") or (ob.type == "MESH" and ob.data.materials
+                and ob.data.materials[0] and ob.data.materials[0].name in ("Panel", "PanelDark", "DeskGlass")):
+            ob.hide_render = True
+    for ob in list(sc.objects):
+        if ob.type in ("MESH", "EMPTY") and ob.parent is None and ob.name.startswith(("desk_console", "Scene")):
+            ob.hide_render = True
+            for ch in ob.children_recursive:
+                ch.hide_render = True
+    w.node_tree.nodes["Background"].inputs["Color"].default_value = (0, 0, 0, 1)
+    sc.compositing_node_group = None
+    sc.view_settings.view_transform = "Standard"
+    sc.view_settings.look = "None"
+    sc.view_settings.exposure = -1.7   # keep peaks under 1 so colours survive; the app adds gain
+    sc.render.resolution_x, sc.render.resolution_y = 1024, 512
+    sc.render.image_settings.color_mode = "RGB"
+    cd_.type = "ORTHO"
+    cd_.ortho_scale = SW
+    cam.location = tuple(on_screen(0, 0, 2.0))
+    cam.rotation_euler = (on_screen(0, 0, 0) - cam.location).to_track_quat("-Z", "Y").to_euler()
 sc.render.filepath = OUT
 bpy.ops.render.render(write_still=True)

@@ -1,7 +1,7 @@
-//! The crew desks' screen art (PROMPT_03 B; the user: "it is a star ship and you
-//! display code? some display graph, some display planet"). Each desk shows starship
-//! illustrations painted here once at start: a big focal graphic, small gauges round
-//! it and one accent colour, so no two desks look alike. Each screen is dark
+//! The crew desks' screens (the user: "it is a star ship and you display code?").
+//! The main screen shows a starship hologram (rocket, moon, sun, station, ship, black
+//! hole, cargo crate) rendered in Blender and approved by the user; the side panels
+//! show gauges, lists and waves painted here once at start. Each screen is dark
 //! see-through glass with the art added over it as light, so the art glows and the
 //! glass stays dim. They are frameless holograms as in the target
 //! (crops 07, 08); the Blender desk (`stations.py`) has only their emitters.
@@ -20,21 +20,6 @@ const SCREENS: [(Vec3, Vec2, f32, f32); 3] = [
     (Vec3::new(0.94, 1.24, -0.3), Vec2::new(0.36, 0.54), -28.0, -4.0),
 ];
 
-/// The big illustrations a main screen can show.
-#[derive(Clone, Copy)]
-enum Art {
-    StarMap,
-    Planet,
-    Radar,
-    Ship,
-    Nebula,
-    Route,
-    Crew,
-    Cargo,
-}
-
-const ARTS: [Art; 8] = [Art::StarMap, Art::Planet, Art::Radar, Art::Ship, Art::Nebula, Art::Route, Art::Crew, Art::Cargo];
-
 /// The narrow side-panel graphics.
 #[derive(Clone, Copy)]
 enum Side {
@@ -51,17 +36,14 @@ const CYAN: Vec3 = Vec3::new(0.22, 0.78, 1.0);
 const AZURE: Vec3 = Vec3::new(0.18, 0.55, 1.0);
 const DIM: Vec3 = Vec3::new(0.08, 0.25, 0.5);
 const AMBER: Vec3 = Vec3::new(1.0, 0.6, 0.24);
-const ORANGE: Vec3 = Vec3::new(1.0, 0.42, 0.24);
-const MAGENTA: Vec3 = Vec3::new(1.0, 0.31, 0.85);
 const VIOLET: Vec3 = Vec3::new(0.54, 0.36, 1.0);
 const GREEN: Vec3 = Vec3::new(0.13, 0.88, 0.48);
-const WHITE: Vec3 = Vec3::new(0.85, 0.95, 1.0);
 
 /// Spawns the screens on every crew desk: each is two quads, a dark see-through glass
 /// pane and, just in front of it, the art added on top as light (it glows and blooms
 /// while the glass stays dim, as in the target's crop 07).
 pub fn build(kit: &mut Kit, images: &mut Assets<Image>) {
-    let mains: Vec<Handle<Image>> = ARTS.iter().enumerate().map(|(seed, art)| images.add(paint_main(*art, seed as u32))).collect();
+    let mains: Vec<Handle<Image>> = SUBJECTS.iter().map(|bytes| images.add(crate::space::decode_png(bytes))).collect();
     let sides: Vec<Handle<Image>> = SIDES.iter().enumerate().map(|(seed, side)| images.add(paint_side(*side, seed as u32 + 40))).collect();
     let glass_main = images.add(glass_image(512, 256));
     let glass_side = images.add(glass_image(160, 240));
@@ -78,7 +60,7 @@ pub fn build(kit: &mut Kit, images: &mut Assets<Image>) {
     let quad = kit.meshes.add(Rectangle::new(1.0, 1.0));
     for index in 0..DESKS.len() {
         let desk = Spot::Desk(index as u8).center();
-        let textures = [mains[(index * 3) % ARTS.len()].clone(), sides[index % SIDES.len()].clone(), sides[(index + 2) % SIDES.len()].clone()];
+        let textures = [mains[index % mains.len()].clone(), sides[index % SIDES.len()].clone(), sides[(index + 2) % SIDES.len()].clone()];
         for (i, ((at, size, yaw, tilt), texture)) in SCREENS.into_iter().zip(textures).enumerate() {
             let rotation = Quat::from_rotation_y(yaw.to_radians()) * Quat::from_rotation_x(tilt.to_radians());
             let front = rotation * Vec3::Z;
@@ -88,8 +70,10 @@ pub fn build(kit: &mut Kit, images: &mut Assets<Image>) {
                 MeshMaterial3d(glass[(i > 0) as usize].clone()),
                 Transform::from_translation(desk + at + front * 0.004).with_rotation(rotation).with_scale(scale),
             ));
-            // The art: well over 1, added on top, so it blooms like a hologram.
-            let art = kit.materials.add(unlit(texture, ART_GAIN, AlphaMode::Add));
+            // The art: well over 1, added on top, so it blooms like a hologram. The
+            // main screens are baked darker (exposure -1.7) to keep their colours.
+            let gain = if i == 0 { MAIN_GAIN } else { ART_GAIN };
+            let art = kit.materials.add(unlit(texture, gain, AlphaMode::Add));
             kit.commands.spawn((
                 Mesh3d(quad.clone()),
                 MeshMaterial3d(art),
@@ -99,8 +83,23 @@ pub fn build(kit: &mut Kit, images: &mut Assets<Image>) {
     }
 }
 
-/// How bright the art is drawn over its glass.
+/// How bright the side-panel art is drawn over its glass.
 const ART_GAIN: f32 = 3.0;
+/// How bright the baked main screens are drawn (they were rendered 1.7 stops dark).
+const MAIN_GAIN: f32 = 3.2;
+
+/// The main screens' starship holograms, rendered in Blender
+/// (`tools/blender/holo_screen_proto.py`, `bake_screens.sh`): the subject, the UI and
+/// the beam as light only, straight on. One per desk, in this order.
+const SUBJECTS: [&[u8]; 7] = [
+    include_bytes!("../../../assets/textures/screens/rocket.png"),
+    include_bytes!("../../../assets/textures/screens/moon.png"),
+    include_bytes!("../../../assets/textures/screens/sun.png"),
+    include_bytes!("../../../assets/textures/screens/station.png"),
+    include_bytes!("../../../assets/textures/screens/ship.png"),
+    include_bytes!("../../../assets/textures/screens/blackhole.png"),
+    include_bytes!("../../../assets/textures/screens/crate.png"),
+];
 
 /// The dark glass pane behind the art: deep navy, a touch lighter in the middle, a
 /// faint grid, about two thirds opaque so the room shows through it.
@@ -175,27 +174,6 @@ impl Canvas {
         for i in 0..=steps {
             let p = a.lerp(b, i as f32 / steps as f32);
             self.dot(p.x, p.y, width / 2.0, color * 0.5, width * 2.5 + 2.0);
-        }
-    }
-
-    /// A flat filled polygon (convex or not), `amount` of `color` per pixel: the
-    /// translucent faces of a hologram.
-    fn fill(&mut self, points: &[Vec2], color: Vec3, amount: f32) {
-        let (lo, hi) = points.iter().fold((Vec2::MAX, Vec2::MIN), |(lo, hi), p| (lo.min(*p), hi.max(*p)));
-        for y in lo.y as i32..=hi.y as i32 {
-            for x in lo.x as i32..=hi.x as i32 {
-                let p = Vec2::new(x as f32 + 0.5, y as f32 + 0.5);
-                let mut inside = false;
-                for i in 0..points.len() {
-                    let (a, b) = (points[i], points[(i + 1) % points.len()]);
-                    if (a.y > p.y) != (b.y > p.y) && p.x < a.x + (p.y - a.y) / (b.y - a.y) * (b.x - a.x) {
-                        inside = !inside;
-                    }
-                }
-                if inside {
-                    self.add(x, y, color, amount);
-                }
-            }
         }
     }
 
@@ -299,195 +277,6 @@ fn linear_to_srgb(v: f32) -> f32 {
     if v <= 0.003_130_8 { v * 12.92 } else { 1.055 * v.powf(1.0 / 2.4) - 0.055 }
 }
 
-/// Points round an ellipse, for orbits and globe meridians.
-fn ellipse(c: &mut Canvas, centre: Vec2, radii: Vec2, width: f32, color: Vec3) {
-    let steps = 120;
-    for i in 0..steps {
-        let a0 = i as f32 / steps as f32 * std::f32::consts::TAU;
-        let a1 = (i + 1) as f32 / steps as f32 * std::f32::consts::TAU;
-        c.line(centre + Vec2::new(a0.cos(), a0.sin()) * radii, centre + Vec2::new(a1.cos(), a1.sin()) * radii, width, color);
-    }
-}
-
-// ---------------------------------------------------------------- main screens
-
-fn paint_main(art: Art, seed: u32) -> Image {
-    main_canvas(art, seed).finish()
-}
-
-fn main_canvas(art: Art, seed: u32) -> Canvas {
-    use std::f32::consts::{PI, TAU};
-    let mut c = Canvas::new(512, 256, seed * 7919 + 17);
-    let centre = Vec2::new(256.0, 136.0);
-    let accent = match art {
-        Art::StarMap | Art::Route => ORANGE,
-        Art::Planet => VIOLET,
-        Art::Radar | Art::Cargo => AMBER,
-        Art::Ship | Art::Nebula => MAGENTA,
-        Art::Crew => GREEN,
-    };
-    match art {
-        Art::StarMap => {
-            for _ in 0..160 {
-                let (x, y, b) = (c.random() * 512.0, c.random() * 256.0, c.random());
-                c.dot(x, y, 0.6 + b, WHITE * (0.3 + b * 0.7), 1.5);
-            }
-            let stops: Vec<Vec2> = (0..6).map(|i| Vec2::new(70.0 + i as f32 * 76.0, 70.0 + c.random() * 130.0)).collect();
-            for pair in stops.windows(2) {
-                c.line(pair[0], pair[1], 2.2, ORANGE);
-            }
-            for (i, stop) in stops.iter().enumerate() {
-                c.ring(*stop, 7.0, 1.4, if i == 0 { CYAN } else { ORANGE }, 0.0, TAU);
-                c.dot(stop.x, stop.y, 2.5, WHITE, 4.0);
-            }
-            c.ring(stops[5], 16.0, 1.0, AMBER, 0.0, TAU);
-        }
-        Art::Planet => {
-            let r = 82.0;
-            c.dot(centre.x, centre.y, r, AZURE * 0.12, 0.0);
-            c.ring(centre, r + 4.0, 3.0, CYAN, 0.0, TAU);
-            for k in 1..6 {
-                ellipse(&mut c, centre, Vec2::new(r * k as f32 / 6.0, r), 1.0, AZURE * 0.7);
-                let y = centre.y - r + 2.0 * r * k as f32 / 6.0;
-                let half = (r * r - (y - centre.y).powi(2)).max(0.0).sqrt();
-                c.line(Vec2::new(centre.x - half, y), Vec2::new(centre.x + half, y), 1.0, AZURE * 0.7);
-            }
-            ellipse(&mut c, centre, Vec2::new(170.0, 48.0), 1.2, VIOLET);
-            c.dot(centre.x + 150.0, centre.y + 23.0, 6.0, VIOLET, 8.0);
-        }
-        Art::Radar => {
-            for k in 1..5 {
-                c.ring(centre, k as f32 * 26.0, 1.2, CYAN * 0.8, 0.0, TAU);
-            }
-            c.line(centre - Vec2::X * 110.0, centre + Vec2::X * 110.0, 1.0, DIM * 2.0);
-            c.line(centre - Vec2::Y * 110.0, centre + Vec2::Y * 110.0, 1.0, DIM * 2.0);
-            for i in 0..40 {
-                let a = -0.9 + i as f32 * 0.02;
-                c.line(centre, centre + Vec2::from_angle(a) * 104.0, 1.0, CYAN * (i as f32 / 40.0) * 0.6);
-            }
-            for _ in 0..14 {
-                let (a, d) = (c.random() * TAU, 20.0 + c.random() * 80.0);
-                let p = centre + Vec2::from_angle(a) * d;
-                c.dot(p.x, p.y, 2.0, CYAN, 4.0);
-            }
-            let hit = centre + Vec2::from_angle(-0.5) * 70.0;
-            c.dot(hit.x, hit.y, 4.0, AMBER, 9.0);
-            c.ring(hit, 12.0, 1.4, AMBER, 0.0, TAU);
-        }
-        Art::Ship => {
-            // A side-on wireframe of a ship, its reactor in the accent colour.
-            let hull = [(90.0, 140.0), (150.0, 100.0), (330.0, 96.0), (420.0, 120.0), (440.0, 136.0), (420.0, 152.0), (330.0, 176.0), (150.0, 172.0)];
-            let pts: Vec<Vec2> = hull.iter().map(|&(x, y)| Vec2::new(x, y)).collect();
-            for i in 0..pts.len() {
-                c.line(pts[i], pts[(i + 1) % pts.len()], 2.0, CYAN);
-            }
-            for x in [190.0, 240.0, 290.0, 340.0] {
-                c.line(Vec2::new(x, 100.0), Vec2::new(x, 172.0), 1.0, AZURE * 0.7);
-            }
-            c.line(Vec2::new(150.0, 136.0), Vec2::new(420.0, 136.0), 1.0, AZURE * 0.7);
-            c.ring(Vec2::new(215.0, 136.0), 20.0, 2.0, MAGENTA, 0.0, TAU);
-            c.dot(215.0, 136.0, 7.0, MAGENTA, 12.0);
-            c.line(Vec2::new(70.0, 128.0), Vec2::new(90.0, 124.0), 3.0, CYAN);
-            c.line(Vec2::new(70.0, 152.0), Vec2::new(90.0, 156.0), 3.0, CYAN);
-            c.dot(62.0, 140.0, 5.0, AZURE, 14.0);
-        }
-        Art::Nebula => {
-            for _ in 0..2600 {
-                let a = c.random() * TAU;
-                let d = (c.random() * c.random()) * 120.0;
-                let swirl = a + d * 0.03;
-                let p = centre + Vec2::new(swirl.cos() * d * 1.7, swirl.sin() * d * 0.9);
-                let color = if d < 30.0 {
-                    MAGENTA.lerp(WHITE, 1.0 - d / 30.0)
-                } else if c.random() < 0.5 {
-                    VIOLET
-                } else {
-                    AZURE
-                };
-                c.dot(p.x, p.y, 0.8, color * 0.25, 3.0);
-            }
-            c.dot(centre.x, centre.y, 6.0, WHITE, 18.0);
-            for _ in 0..60 {
-                let (x, y) = (c.random() * 512.0, c.random() * 256.0);
-                c.dot(x, y, 0.7, WHITE * 0.7, 1.2);
-            }
-        }
-        Art::Route => {
-            for k in 0..6 {
-                let y = 40.0 + k as f32 * 36.0;
-                c.line(Vec2::new(30.0, y), Vec2::new(482.0, y), 0.8, DIM * 1.5);
-            }
-            let mut last = Vec2::new(30.0, 200.0);
-            for i in 1..24 {
-                let x = 30.0 + i as f32 * 19.6;
-                let y = 200.0 - i as f32 * 5.0 - (i as f32 * 0.9).sin() * 22.0 - c.random() * 10.0;
-                let p = Vec2::new(x, y);
-                c.line(last, p, 2.4, ORANGE);
-                last = p;
-            }
-            c.dot(last.x, last.y, 4.0, WHITE, 8.0);
-            for i in 0..22 {
-                let height = 10.0 + c.random() * 40.0;
-                c.rect(36.0 + i as f32 * 20.5, 218.0 - height, 48.0 + i as f32 * 20.5, 218.0, AZURE, 0.6);
-            }
-        }
-        Art::Crew => {
-            for i in 0..5 {
-                let x = 72.0 + i as f32 * 92.0;
-                c.ring(Vec2::new(x, 100.0), 18.0, 2.0, CYAN, 0.0, TAU);
-                c.ring(Vec2::new(x, 172.0), 36.0, 2.0, CYAN, PI, TAU);
-                c.line(Vec2::new(x - 36.0, 172.0), Vec2::new(x + 36.0, 172.0), 2.0, CYAN);
-                c.dot(x + 26.0, 84.0, 4.0, if i == 3 { AMBER } else { GREEN }, 6.0);
-                c.rect(x - 30.0, 192.0, x + 30.0, 196.0, AZURE, 0.7);
-                c.rect(x - 30.0, 202.0, x + 10.0, 205.0, DIM, 0.9);
-            }
-        }
-        Art::Cargo => {
-            // One big isometric crate (crop 07): translucent blue faces, bright edges,
-            // straps, a glowing platform under it and labels either side.
-            let o = Vec2::new(256.0, 150.0);
-            let dx = Vec2::new(0.87, 0.5) * 92.0;
-            let dy = Vec2::new(-0.87, 0.5) * 62.0;
-            let up = Vec2::new(0.0, -78.0);
-            let base = Vec2::new(0.0, 22.0);
-            let (o, top) = (o + base, o + base + up);
-            ellipse(&mut c, o + (dx + dy) / 2.0, Vec2::new(120.0, 34.0), 2.0, CYAN * 0.8);
-            ellipse(&mut c, o + (dx + dy) / 2.0, Vec2::new(150.0, 44.0), 1.0, AZURE * 0.6);
-            c.fill(&[top, top + dx, top + dx + dy, top + dy], AZURE, 0.22);
-            c.fill(&[o + dy, o + dy + dx, top + dy + dx, top + dy], AZURE, 0.14);
-            c.fill(&[o + dx, o + dx + dy, top + dx + dy, top + dx], CYAN, 0.12);
-            let corners = [o, o + dx, o + dx + dy, o + dy];
-            for i in 0..4 {
-                c.line(corners[i] + up, corners[(i + 1) % 4] + up, 2.6, CYAN);
-                if i != 0 {
-                    c.line(corners[i], corners[i] + up, 2.6, CYAN);
-                }
-            }
-            c.line(o + dx, o + dx + dy, 2.6, CYAN);
-            c.line(o + dx + dy, o + dy, 2.6, CYAN);
-            for k in [0.3, 0.7] {
-                let a = o + dx * k;
-                c.line(a + dy, a + dy + up, 2.0, WHITE * 0.8);
-                c.line(a + dy + up, a + up, 2.0, WHITE * 0.8);
-            }
-            let b = o + dy * 0.5;
-            c.line(b + dx, b + dx + up, 1.6, CYAN * 0.8);
-            c.line(o + dy + up * 0.82, o + dy + dx + up * 0.82, 1.4, CYAN * 0.6);
-            c.dot((top + dx).x, (top + dx).y, 4.0, AMBER, 10.0);
-            for x in [30.0, 392.0] {
-                for k in 0..4 {
-                    let y = 70.0 + k as f32 * 22.0;
-                    let len = 50.0 + c.random() * 40.0;
-                    c.rect(x, y, x + len, y + 4.0, if k == 0 { AMBER } else { CYAN }, 0.6);
-                    c.rect(x, y + 8.0, x + len * 0.6, y + 10.0, AZURE, 0.5);
-                }
-            }
-        }
-    }
-    c.chrome(accent);
-    c
-}
-
 // ---------------------------------------------------------------- side panels
 
 fn paint_side(side: Side, seed: u32) -> Image {
@@ -558,9 +347,6 @@ mod tests {
             encoder.set_depth(png::BitDepth::Eight);
             encoder.write_header().unwrap().write_image_data(&c.bytes()).unwrap();
         };
-        for (seed, art) in ARTS.iter().enumerate() {
-            save(format!("main-{seed}"), main_canvas(*art, seed as u32));
-        }
         for (seed, side) in SIDES.iter().enumerate() {
             save(format!("side-{seed}"), side_canvas(*side, seed as u32 + 40));
         }

@@ -100,14 +100,18 @@ fn planet_sprite(kit: &mut Kit, images: &mut Assets<Image>, png_bytes: &[u8], at
     kit.mesh(Rectangle::new(size, size), material, Transform::from_translation(at).with_rotation(facing_camera(at)));
 }
 
-/// An RGBA8 PNG compiled into the binary, as a mipmapped image.
-fn decode_png(bytes: &[u8]) -> Image {
-    let mut reader = png::Decoder::new(std::io::Cursor::new(bytes)).read_info().expect("planet sprite is a PNG");
-    let mut buffer = vec![0; reader.output_buffer_size().expect("planet sprite size")];
-    let info = reader.next_frame(&mut buffer).expect("planet sprite decodes");
+/// An RGB8 or RGBA8 PNG compiled into the binary, as a mipmapped RGBA image.
+pub(crate) fn decode_png(bytes: &[u8]) -> Image {
+    let mut reader = png::Decoder::new(std::io::Cursor::new(bytes)).read_info().expect("compiled-in PNG");
+    let mut buffer = vec![0; reader.output_buffer_size().expect("PNG size")];
+    let info = reader.next_frame(&mut buffer).expect("PNG decodes");
     buffer.truncate(info.buffer_size());
-    assert_eq!(info.color_type, png::ColorType::Rgba, "planet sprites are RGBA");
-    image(info.width, info.height, buffer)
+    let rgba = match info.color_type {
+        png::ColorType::Rgba => buffer,
+        png::ColorType::Rgb => buffer.chunks_exact(3).flat_map(|p| [p[0], p[1], p[2], 255]).collect(),
+        other => panic!("compiled-in PNGs are RGB or RGBA, not {other:?}"),
+    };
+    image(info.width, info.height, rgba)
 }
 
 /// A flat additive picture facing the camera.

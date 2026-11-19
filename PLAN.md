@@ -2262,3 +2262,18 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   one big isometric crate with translucent blue faces, cyan edges, white straps, a
   glowing platform and labels (`Canvas::fill`). Preview (local):
   baseline/p07_desk_glow.png. Not yet seen in the app (Mac locked).
+- 2026-11-19, Claude Opus 5.5: new working rule from the user: prototype looks in
+  Blender, show the render, wait for approval before porting or starting the next item.
+  Screen holograms prototyped in `tools/blender/holo_screen_proto.py` (views close,
+  room, screen, bake): dark glass with an edge glow and corner brackets, header, side
+  readouts, tick scale, bar chart, a 3D subject standing out of the glass on a ring
+  platform, motes, a beam from the projector bar. Subjects approved by the user:
+  rocket, moon, sun (plasma ball, streamer corona, two flame arcs; no measuring ring),
+  station, ship, black hole (black core, photon ring, flat streaked accretion disc,
+  lensed far side; no outer ring), plus the cargo crate. Ported by baking: 
+  `tools/blender/bake_screens.sh` renders each as light only, straight on, ortho,
+  1024x512, exposure -1.7, into `assets/textures/screens/`; `screens::SUBJECTS` puts
+  one on each desk's main screen, added over the dark glass at ×3.2 (`MAIN_GAIN`).
+  The painted main-screen art (`Art`, `paint_main`) is gone; side panels unchanged.
+  Not yet seen in the app (Mac locked). Open: the activity holograms still float over
+  the screens at 1.92 m and may clash with the subjects.
