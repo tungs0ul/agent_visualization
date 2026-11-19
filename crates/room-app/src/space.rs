@@ -97,7 +97,10 @@ fn planet_sprite(kit: &mut Kit, images: &mut Assets<Image>, png_bytes: &[u8], at
         ..default()
     });
     let size = radius * 2.6;
-    kit.mesh(Rectangle::new(size, size), material, Transform::from_translation(at).with_rotation(facing_camera(at)));
+    // `facing_camera` turns the quad's back (-Z) to the camera; half a turn about its
+    // own up axis shows its front, so it isn't culled and the picture isn't mirrored.
+    let rotation = facing_camera(at) * Quat::from_rotation_y(std::f32::consts::PI);
+    kit.mesh(Rectangle::new(size, size), material, Transform::from_translation(at).with_rotation(rotation));
 }
 
 /// An RGB8 or RGBA8 PNG compiled into the binary, as a mipmapped RGBA image.

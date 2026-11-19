@@ -2294,3 +2294,9 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   image: a round deck with a glowing rim, a domed hub with amber windows and an amber
   foot ring, a ring of modules with screens, bridges, two antenna towers and a cargo arm,
   seen from above (`station`, no ring platform). Approved and baked.
+- 2026-11-19, Claude Opus 5.5: first app screenshots of the day's work (Mac unlocked):
+  desks, screen holograms and planets all show. Bug fixed: the planet sprites were
+  culled (the quad's back faced the camera); `planet_sprite` turns them half a turn.
+  Screen subjects read well from the hero camera. Still open: screen brightness looks
+  fine but unmeasured; activity holograms vs screen subjects not yet checked closely.
+  Hero (local): baseline/p21_app_hero.png.
