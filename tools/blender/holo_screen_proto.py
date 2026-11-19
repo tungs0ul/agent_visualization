@@ -2,12 +2,12 @@
 before anything is ported to the app (target crop 07).
 
     /Applications/Blender.app/Contents/MacOS/Blender -b --factory-startup \
-        --python tools/blender/holo_screen_proto.py -- OUT.png [close|room]
+        --python tools/blender/holo_screen_proto.py -- OUT.png [close|room|screen] [subject]
 
 Imports the desk (assets/models/stations/desk_console.glb) and builds the main screen
 on it at `screens::SCREENS`: dark see-through glass with a fresnel edge glow and
-corner brackets, a header plate, glowing UI bars, a 3D wireframe crate standing out
-of the glass with translucent blue faces, a soft light beam rising from the projector
+corner brackets, a header plate, glowing UI bars, a 3D hologram of a starship subject
+(crate, rocket, moon, sun, station, ship, black hole) standing out of the glass, a soft light beam rising from the projector
 bar, a scan band, floating motes and blue light spilling onto the desk.
 """
 import math
@@ -21,7 +21,8 @@ from mathutils import Vector
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 args = sys.argv[sys.argv.index("--") + 1:]
 OUT = args[0]
-VIEW = args[1] if len(args) > 1 else "close"
+VIEW = args[1] if len(args) > 1 else "close"     # close | room | screen
+SUBJECT = args[2] if len(args) > 2 else "crate"   # crate rocket moon sun station ship blackhole
 rng = random.Random(7)
 
 sc = bpy.context.scene
@@ -208,7 +209,7 @@ def on_screen(x, y, z=0.0):
     right = Vector((1, 0, 0))
     up = Vector((0, math.sin(t) * -1, math.cos(t)))
     up = Vector((0, -math.sin(-t), math.cos(-t)))
-    front = right.cross(up) * -1
+    front = right.cross(up)
     return CEN + right * x + up * y + front * z
 
 
@@ -267,45 +268,158 @@ for i in range(12):
     xx = hw - 0.42 + i * 0.03
     strip((xx, -hh + 0.09), (xx, -hh + 0.09 + rng.uniform(0.02, 0.1)), 0.003, 0.016, M_LINE)
 
-# ---------------------------------------------------------------- the 3D crate
+# ---------------------------------------------------------------- the 3D subject
 crate_c = on_screen(0, -0.02, 0.09)          # stands out of the glass toward the viewer
-cw, cd, ch = 0.4, 0.28, 0.26
-UPV = (on_screen(0, 1) - on_screen(0, 0)).normalized()
+M_ORANGE = emit("orange", (1.0, 0.35, 0.03), 9.0)[0]
+M_HOT = emit("hot", (1.0, 0.75, 0.4), 14.0)[0]
+M_SUNFACE = emit("sunface", (1.0, 0.4, 0.05), 5.0, alpha=0.8)[0]
+M_PINK = emit("pink", (1.0, 0.1, 0.7), 7.0)[0]
+M_VIOLET = emit("violet", (0.35, 0.1, 1.0), 6.0)[0]
+M_BLACK = emit("black", (0, 0, 0), 0.0, alpha=1.0)[0]
+pivot = bpy.data.objects.new("subject", None)
+sc.collection.objects.link(pivot)
 
 
-def crate_box(scale, mat, wire=None, offset=(0, 0, 0)):
-    """A box in the crate's frame (real size: scale applied), optionally as glowing
-    edges only (wireframe of `wire` metres)."""
-    bpy.ops.mesh.primitive_cube_add(size=1)
+def part(op, mat, loc=(0, 0, 0), scale=(1, 1, 1), rot=(0, 0, 0), wire=None, **kw):
+    """A primitive in the subject's frame (x right, y depth, z up, metres): real size
+    (scale applied), optionally as glowing edges only (a wireframe `wire` thick)."""
+    op(**kw)
     c = bpy.context.object
     c.scale = scale
-    c.location = offset
-    bpy.ops.object.transform_apply(location=True, scale=True)
+    c.rotation_euler = [math.radians(a) for a in rot]
+    c.location = loc
+    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
     c.data.materials.append(mat)
     if wire:
         mm = c.modifiers.new("w", "WIREFRAME")
         mm.thickness = wire
         mm.use_even_offset = False
+    c.parent = pivot
     return c
 
 
-parts = [
-    crate_box((cw, cd, ch), M_FACE),
-    crate_box((cw, cd, ch), M_EDGE, wire=0.007),
-    # straps round the body, a lid seam and a label plate
-    crate_box((0.035, cd + 0.006, ch + 0.006), M_WHITE, wire=0.004, offset=(-0.11, 0, 0)),
-    crate_box((0.035, cd + 0.006, ch + 0.006), M_WHITE, wire=0.004, offset=(0.11, 0, 0)),
-    crate_box((cw + 0.006, cd + 0.006, 0.02), M_LINE, wire=0.003, offset=(0, 0, ch * 0.32)),
-    crate_box((0.1, 0.004, 0.05), M_AMBER, offset=(0, -cd / 2 - 0.004, -0.04)),
-]
-pivot = bpy.data.objects.new("crate", None)
-sc.collection.objects.link(pivot)
-for prt in parts:
-    prt.parent = pivot
+def both(op, loc=(0, 0, 0), scale=(1, 1, 1), rot=(0, 0, 0), face=None, edge=None, wire=0.005, **kw):
+    part(op, face or M_FACE, loc, scale, rot, **kw)
+    part(op, edge or M_EDGE, loc, scale, rot, wire=wire, **kw)
+
+
+cube = bpy.ops.mesh.primitive_cube_add
+cyl = bpy.ops.mesh.primitive_cylinder_add
+cone = bpy.ops.mesh.primitive_cone_add
+uvs = bpy.ops.mesh.primitive_uv_sphere_add
+tor = bpy.ops.mesh.primitive_torus_add
+ico = bpy.ops.mesh.primitive_ico_sphere_add
+
+
+def crate():
+    cw, cd, ch = 0.4, 0.28, 0.26
+    both(cube, scale=(cw, cd, ch), size=1, wire=0.007)
+    for x in (-0.11, 0.11):
+        part(cube, M_WHITE, (x, 0, 0), (0.035, cd + 0.006, ch + 0.006), size=1, wire=0.004)
+    part(cube, M_LINE, (0, 0, ch * 0.32), (cw + 0.006, cd + 0.006, 0.02), size=1, wire=0.003)
+    part(cube, M_AMBER, (0, -cd / 2 - 0.004, -0.04), (0.1, 0.004, 0.05), size=1)
+    return (TILT + 16, 35)
+
+
+def rocket():
+    # upright, nose up, three fins, a porthole ring, an orange exhaust plume
+    both(cyl, (0, 0, 0.0), vertices=16, radius=0.06, depth=0.3)
+    both(cone, (0, 0, 0.2), vertices=16, radius1=0.06, radius2=0.0, depth=0.1)
+    for k in range(3):
+        a = k * 120
+        both(cube, (0.075 * math.sin(math.radians(a)), 0.075 * math.cos(math.radians(a)), -0.11),
+             (0.05, 0.006, 0.09), (0, 0, -a + 90), size=1, wire=0.003)
+    part(tor, M_WHITE, (0, 0, 0.07), rot=(90, 0, 0), major_radius=0.022, minor_radius=0.003)
+    for z in (-0.06, 0.12):
+        part(tor, M_LINE, (0, 0, z), major_radius=0.061, minor_radius=0.002, major_segments=32)
+    part(cone, M_ORANGE, (0, 0, -0.2), radius1=0.0, radius2=0.045, depth=0.1, vertices=16)
+    part(cone, M_HOT, (0, 0, -0.18), radius1=0.0, radius2=0.025, depth=0.06, vertices=12)
+    return (TILT + 10, 25)
+
+
+def moon():
+    both(uvs, segments=16, ring_count=10, radius=0.17, wire=0.003, face=M_FACE)
+    for k in range(7):
+        a, b = rng.uniform(0, 360), rng.uniform(-50, 50)
+        r = rng.uniform(0.018, 0.04)
+        d = Vector((math.cos(math.radians(b)) * math.sin(math.radians(a)),
+                    -math.cos(math.radians(b)) * math.cos(math.radians(a)), math.sin(math.radians(b))))
+        for op, mat, kw in ((cyl, M_FACE, dict(radius=r, depth=0.004, vertices=24)),
+                            (tor, M_LINE_DIM, dict(major_radius=r, minor_radius=0.0018, major_segments=24))):
+            t = part(op, mat, tuple(d * 0.171), **kw)
+            t.rotation_mode = "QUATERNION"
+            t.rotation_quaternion = d.to_track_quat("Z", "Y")
+    part(tor, M_LINE_DIM, rot=(75, 0, 15), major_radius=0.26, minor_radius=0.002, major_segments=96)
+    part(ico, M_WHITE, (0.25, -0.02, 0.07), radius=0.012, subdivisions=2)
+    return (TILT, 20)
+
+
+def sun():
+    part(uvs, M_SUNFACE, segments=32, ring_count=16, radius=0.13)
+    part(uvs, M_HOT, segments=32, ring_count=16, radius=0.09)
+    part(uvs, M_ORANGE, segments=14, ring_count=8, radius=0.135, wire=0.0025)
+    for k in range(16):
+        a = k * 22.5
+        L = 0.07 if k % 2 else 0.11
+        r0 = 0.15
+        part(cone, M_ORANGE if k % 2 else M_AMBER,
+             (0.0 + (r0 + L / 2) * math.cos(math.radians(a)), -0.01, (r0 + L / 2) * math.sin(math.radians(a))),
+             rot=(0, 90 - a, 0), radius1=0.012, radius2=0.0, depth=L, vertices=6)
+    part(tor, M_AMBER, rot=(90, 0, 0), major_radius=0.29, minor_radius=0.0025, major_segments=96)
+    return (TILT, 0)
+
+
+def station():
+    # a hub, a ring on four spokes, a truss with two solar wings
+    both(cyl, vertices=16, radius=0.045, depth=0.12)
+    part(tor, M_EDGE, major_radius=0.2, minor_radius=0.018, major_segments=48, minor_segments=8)
+    part(tor, M_FACE, major_radius=0.2, minor_radius=0.017, major_segments=48, minor_segments=8)
+    for k in range(4):
+        a = k * 90 + 45
+        part(cube, M_LINE, (0.11 * math.cos(math.radians(a)), 0.11 * math.sin(math.radians(a)), 0),
+             (0.16, 0.006, 0.006), (0, 0, a), size=1)
+    part(cube, M_WHITE, (0, 0, 0), (0.008, 0.008, 0.46), size=1)
+    for z in (-0.2, 0.2):
+        both(cube, (0, 0, z), (0.24, 0.004, 0.07), size=1, wire=0.002)
+        for i in range(1, 6):
+            part(cube, M_LINE_DIM, (-0.12 + i * 0.04, -0.003, z), (0.002, 0.002, 0.07), size=1)
+    part(ico, M_AMBER, (0.2, 0, 0), radius=0.012, subdivisions=2)
+    return (TILT + 60, 15)
+
+
+def ship():
+    # a long hull with a cockpit, swept wings and two engines glowing cyan
+    both(cone, (0.04, 0, 0), rot=(0, 90, 0), vertices=6, radius1=0.07, radius2=0.012, depth=0.42, wire=0.004)
+    both(cube, (-0.05, 0, 0), (0.18, 0.12, 0.05), size=1, wire=0.004)
+    for sy in (-1, 1):
+        both(cube, (-0.05, sy * 0.13, -0.005), (0.14, 0.16, 0.008), (0, 0, sy * 25), size=1, wire=0.003)
+        part(cyl, M_EDGE, (-0.15, sy * 0.045, 0), rot=(0, 90, 0), vertices=12, radius=0.025, depth=0.07)
+        part(cyl, M_HOT, (-0.19, sy * 0.045, 0), rot=(0, 90, 0), vertices=12, radius=0.02, depth=0.01)
+        part(cone, M_LINE, (-0.24, sy * 0.045, 0), rot=(0, -90, 0), vertices=12, radius1=0.02, radius2=0.0, depth=0.09)
+    part(uvs, M_WHITE, (0.1, 0, 0.03), (1.6, 1, 0.6), segments=16, ring_count=8, radius=0.025)
+    return (TILT + 22, -28)
+
+
+def blackhole():
+    # a black core, a bright photon ring round it facing the viewer, a hot accretion
+    # disc seen from a little above (its far side bent up over the core, as lensing
+    # does), and a faint violet halo
+    part(uvs, M_BLACK, segments=32, ring_count=16, radius=0.08)
+    part(tor, M_HOT, rot=(90, 0, 0), major_radius=0.086, minor_radius=0.004, major_segments=96)
+    for r, w, m in ((0.12, 0.01, M_HOT), (0.16, 0.014, M_ORANGE), (0.21, 0.01, M_AMBER), (0.26, 0.005, M_PINK)):
+        part(tor, m, (0, 0, 0), (1, 1, 0.15), (-14, 0, 0), major_radius=r, minor_radius=w, major_segments=128)
+    # the lensed far side: arcs over the top of the core
+    for r, w, m in ((0.11, 0.006, M_HOT), (0.14, 0.005, M_ORANGE)):
+        part(tor, m, (0, 0.01, 0.0), (1, 1, 0.85), (90, 0, 0), major_radius=r, minor_radius=w, major_segments=96)
+    part(tor, M_VIOLET, (0, 0.02, 0), rot=(90, 0, 0), major_radius=0.3, minor_radius=0.002, major_segments=96)
+    return (0, 0)
+
+
+SUBJECTS = dict(crate=crate, rocket=rocket, moon=moon, sun=sun, station=station, ship=ship, blackhole=blackhole)
+lean, turn = SUBJECTS[SUBJECT]()
 pivot.location = crate_c
-# turned 35 deg about the screen's up axis, leaning back with the screen
 pivot.rotation_mode = "ZYX"   # spin about the vertical first, then lean toward the viewer
-pivot.rotation_euler = (math.radians(TILT + 16), 0, math.radians(35))
+pivot.rotation_euler = (math.radians(lean), 0, math.radians(turn))
 
 # platform rings under the crate, on the glass plane
 for r, mat, wd in ((0.27, M_EDGE, 0.006), (0.34, M_LINE_DIM, 0.003), (0.2, M_LINE, 0.003)):
@@ -365,7 +479,12 @@ cd_ = bpy.data.cameras.new("c")
 cam = bpy.data.objects.new("c", cd_)
 sc.collection.objects.link(cam)
 sc.camera = cam
-if VIEW == "room":
+if VIEW == "screen":
+    sc.render.resolution_x, sc.render.resolution_y = 900, 520
+    cd_.lens = 50
+    cam.location = tuple(on_screen(0, 0.02, 2.0))
+    target = on_screen(0, 0.0, 0.0)
+elif VIEW == "room":
     cd_.lens = 30
     cam.location = (0.0, -7.5, 6.0)
     target = Vector((0, 0.2, 0.7))
