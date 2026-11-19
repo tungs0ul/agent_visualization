@@ -504,14 +504,14 @@ def sun():
     return (TILT, 0)
 
 
-def rim_face(name="rimface"):
+def rim_face(name="rimface", strength=(2.5, 9.0), alpha=(0.45, 0.95), blend=0.25):
     """Smooth translucent blue whose edges glow cyan (by how much the surface turns
     away from the viewer): a hologram outline without wireframe lines."""
     mt, nt = emit(name, BLUE, 1.0, alpha=0.5)
     em = [n for n in nt.nodes if n.type == "EMISSION"][0]
     mix = [n for n in nt.nodes if n.type == "MIX_SHADER"][0]
     lw = nt.nodes.new("ShaderNodeLayerWeight")
-    lw.inputs["Blend"].default_value = 0.25
+    lw.inputs["Blend"].default_value = blend
     pw = nt.nodes.new("ShaderNodeMath")
     pw.operation = "POWER"
     pw.inputs[1].default_value = 2.0
@@ -523,11 +523,11 @@ def rim_face(name="rimface"):
     nt.links.new(pw.outputs[0], col.inputs["Factor"])
     nt.links.new(col.outputs["Result"], em.inputs["Color"])
     st = nt.nodes.new("ShaderNodeMapRange")
-    st.inputs["To Min"].default_value, st.inputs["To Max"].default_value = 2.5, 9.0
+    st.inputs["To Min"].default_value, st.inputs["To Max"].default_value = strength
     nt.links.new(pw.outputs[0], st.inputs["Value"])
     nt.links.new(st.outputs["Result"], em.inputs["Strength"])
     al = nt.nodes.new("ShaderNodeMapRange")
-    al.inputs["To Min"].default_value, al.inputs["To Max"].default_value = 0.45, 0.95
+    al.inputs["To Min"].default_value, al.inputs["To Max"].default_value = alpha
     nt.links.new(pw.outputs[0], al.inputs["Value"])
     nt.links.new(al.outputs["Result"], mix.inputs[0])
     return mt
@@ -697,14 +697,54 @@ pivot.location = crate_c
 pivot.rotation_mode = "ZYX"   # spin about the vertical first, then lean toward the viewer, then roll
 pivot.rotation_euler = (math.radians(lean), math.radians(roll), math.radians(turn))
 
-# platform rings under the crate, on the glass plane
-for r, mat, wd in ((0.27, M_EDGE, 0.006), (0.34, M_LINE_DIM, 0.003), (0.2, M_LINE, 0.003)):
-    bpy.ops.mesh.primitive_torus_add(major_radius=r, minor_radius=wd, major_segments=96, minor_segments=6)
-    t = bpy.context.object
-    t.scale = (1, 0.3, 1)
-    t.rotation_euler = ROT
-    t.location = on_screen(0, -0.2, 0.03)
-    t.data.materials.append(mat)
+# Extras to try (env HOLO_EXTRAS, comma separated): "earth" puts the curve of a
+# glowing planet under the subject instead of the ring platform; "callouts" adds
+# leader lines from parts of the subject to small labels at the sides.
+EXTRAS = set(filter(None, os.environ.get("HOLO_EXTRAS", "").split(",")))
+if "earth" in EXTRAS:
+    earth = rim_face("earth", strength=(0.5, 6.0), alpha=(0.25, 0.9), blend=0.12)
+    R, cy = 0.9, -1.13                       # its top just above the screen's lower third
+    bpy.ops.mesh.primitive_uv_sphere_add(segments=128, ring_count=64, radius=R)
+    e = bpy.context.object
+    e.location = on_screen(0.12, cy, -0.6)
+    e.data.materials.append(earth)
+    # the atmosphere: a bright thin horizon and a soft wider glow along the limb
+    for rr, wd, mat in ((R + 0.002, 0.003, M_EDGE), (R + 0.012, 0.008, M_LINE_DIM)):
+        bpy.ops.mesh.primitive_torus_add(major_radius=rr, minor_radius=wd, major_segments=256, minor_segments=8)
+        t = bpy.context.object
+        t.rotation_euler = ROT
+        t.location = e.location
+        t.data.materials.append(mat)
+    # city lights and cloud glints on the visible cap, below its rim
+    for i in range(90):
+        bpy.ops.mesh.primitive_ico_sphere_add(radius=rng.uniform(0.0018, 0.0035), subdivisions=1)
+        p = bpy.context.object
+        x = rng.uniform(-0.62, 0.68)
+        top = cy + math.sqrt(max(R * R - (x - 0.12) ** 2, 0.0))
+        p.location = on_screen(x, top - rng.uniform(0.015, 0.1), 0.02)
+        p.data.materials.append(M_AMBER if i % 3 == 0 else M_LINE_DIM)
+else:
+    # platform rings under the subject, on the glass plane
+    for r, mat, wd in ((0.27, M_EDGE, 0.006), (0.34, M_LINE_DIM, 0.003), (0.2, M_LINE, 0.003)):
+        bpy.ops.mesh.primitive_torus_add(major_radius=r, minor_radius=wd, major_segments=96, minor_segments=6)
+        t = bpy.context.object
+        t.scale = (1, 0.3, 1)
+        t.rotation_euler = ROT
+        t.location = on_screen(0, -0.2, 0.03)
+        t.data.materials.append(mat)
+if "callouts" in EXTRAS:
+    # (point on the subject in screen coords, label side)
+    for (px, py), side, ly in (((-0.2, 0.12), -1, 0.2), ((0.02, 0.02), -1, -0.05), ((0.2, -0.1), 1, -0.12), ((0.17, 0.2), 1, 0.22)):
+        lx = side * 0.42
+        strip((px, py), (lx * 0.85, ly), 0.03, 0.0015, M_LINE_DIM)
+        strip((lx * 0.85, ly), (lx, ly), 0.03, 0.0015, M_LINE_DIM)
+        bpy.ops.mesh.primitive_ico_sphere_add(radius=0.006, subdivisions=2)
+        d = bpy.context.object
+        d.location = on_screen(px, py, 0.03)
+        d.data.materials.append(M_AMBER)
+        x0 = lx if side > 0 else lx - 0.12
+        strip((x0, ly + 0.018), (x0 + 0.12, ly + 0.018), 0.03, 0.005, M_WHITE)
+        strip((x0, ly - 0.004), (x0 + rng.uniform(0.05, 0.1), ly - 0.004), 0.03, 0.003, M_LINE_DIM)
 # motes floating round the crate
 for i in range(40):
     bpy.ops.mesh.primitive_ico_sphere_add(radius=rng.uniform(0.003, 0.007), subdivisions=1)
