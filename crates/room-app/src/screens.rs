@@ -155,35 +155,80 @@ impl Canvas {
         }
     }
 
-    /// Small label bars and corner brackets: the "UI" round the focal graphic.
+    /// The monitor's UI round the focal graphic: an inner border, corner brackets, a
+    /// header strip with a title bar, a status pill and tick labels, and a footer of ticks.
     fn chrome(&mut self, accent: Vec3) {
         let (w, h) = (self.w as f32, self.h as f32);
+        // inner border, thin and dim, just inside the bezel
+        for (a, b) in [((3.0, 3.0), (w - 3.0, 3.0)), ((3.0, h - 3.0), (w - 3.0, h - 3.0)), ((3.0, 3.0), (3.0, h - 3.0)), ((w - 3.0, 3.0), (w - 3.0, h - 3.0))] {
+            self.line(Vec2::from(a), Vec2::from(b), 1.0, AZURE * 0.45);
+        }
         for (x, y) in [(6.0, 6.0), (w - 6.0, 6.0), (6.0, h - 6.0), (w - 6.0, h - 6.0)] {
             let sx = if x < w / 2.0 { 1.0 } else { -1.0 };
             let sy = if y < h / 2.0 { 1.0 } else { -1.0 };
-            self.line(Vec2::new(x, y), Vec2::new(x + sx * 18.0, y), 1.5, CYAN);
-            self.line(Vec2::new(x, y), Vec2::new(x, y + sy * 18.0), 1.5, CYAN);
+            self.line(Vec2::new(x, y), Vec2::new(x + sx * 16.0, y), 2.0, CYAN);
+            self.line(Vec2::new(x, y), Vec2::new(x, y + sy * 16.0), 2.0, CYAN);
         }
-        self.rect(14.0, 12.0, 14.0 + w * 0.22, 16.0, AZURE, 0.8);
-        self.rect(14.0, 20.0, 14.0 + w * 0.12, 23.0, DIM, 0.8);
-        self.rect(w - 14.0 - w * 0.08, 12.0, w - 14.0, 16.0, accent, 0.9);
+        if w < 200.0 {
+            // side panel: a title bar and a status dot
+            self.rect(14.0, 13.0, w * 0.6, 17.0, AZURE, 0.8);
+            self.dot(w - 18.0, 15.0, 3.0, accent, 4.0);
+            return;
+        }
+        // header: title, sub-title "text", a status pill in the accent colour
+        self.rect(14.0, 11.0, 14.0 + w * 0.2, 16.0, CYAN, 0.85);
+        let mut x = 14.0;
+        while x < 14.0 + w * 0.3 {
+            let word = 6.0 + self.random() * 16.0;
+            self.rect(x, 20.0, x + word, 22.5, DIM * 1.6, 0.9);
+            x += word + 4.0;
+        }
+        self.rect(w - 74.0, 10.0, w - 14.0, 20.0, accent * 0.35, 0.9);
+        self.rect(w - 70.0, 13.5, w - 40.0, 16.5, accent, 1.0);
+        self.dot(w - 24.0, 15.0, 2.5, accent, 4.0);
+        // header rule
+        self.line(Vec2::new(10.0, 28.0), Vec2::new(w - 10.0, 28.0), 0.8, AZURE * 0.35);
+        // footer: a tick scale and three small readouts
+        for i in 0..48u32 {
+            let x = 16.0 + i as f32 * ((w - 32.0) / 47.0);
+            let tall = if i.is_multiple_of(6) { 6.0 } else { 3.0 };
+            self.rect(x, h - 12.0 - tall, x + 1.0, h - 12.0, AZURE, 0.5);
+        }
+        for i in 0..3 {
+            let x = w - 150.0 + i as f32 * 44.0;
+            let end = x + 30.0 + self.random() * 8.0;
+            self.rect(x, h - 30.0, end, h - 26.0, if i == 1 { accent } else { CYAN }, 0.7);
+        }
     }
 
-    /// Dark navy glass behind everything, then out to sRGB bytes.
+    /// Glass behind everything (a dark navy panel, a touch brighter in the middle),
+    /// a faint grid and scanlines, then out to sRGB bytes.
     fn finish(self) -> Image {
-        let mut bytes = Vec::with_capacity(self.w * self.h * 4);
-        for (rgb, alpha) in self.rgb.iter().zip(&self.alpha) {
-            // A luminous blue panel under the art, like the reference's screens
-            // (dark navy read as switched off).
-            let lit = Vec3::new(0.008, 0.035, 0.13) + *rgb;
-            let a = (0.92 + 0.08 * alpha).min(1.0);
+        let (w, h) = (self.w, self.h);
+        crate::space::image(w as u32, h as u32, self.bytes())
+    }
+
+    fn bytes(&self) -> Vec<u8> {
+        let (w, h) = (self.w, self.h);
+        let mut bytes = Vec::with_capacity(w * h * 4);
+        for (i, (rgb, alpha)) in self.rgb.iter().zip(&self.alpha).enumerate() {
+            let (x, y) = ((i % w) as f32, (i / w) as f32);
+            let u = Vec2::new(x / w as f32 - 0.5, y / h as f32 - 0.45);
+            let centre = (1.0 - (u.length() * 1.6).min(1.0)).powi(2);
+            let mut glass = Vec3::new(0.002, 0.008, 0.03) + Vec3::new(0.003, 0.014, 0.05) * centre;
+            // grid every 32 px and a scanline every third row
+            let grid = ((x as usize).is_multiple_of(32) || (y as usize).is_multiple_of(32)) as u8 as f32;
+            glass += DIM * 0.05 * grid;
+            let scan = if (y as usize).is_multiple_of(3) { 0.82 } else { 1.0 };
+            let lit = (glass + *rgb) * scan;
+            let a = (0.94 + 0.06 * alpha).min(1.0);
             for channel in [lit.x, lit.y, lit.z] {
                 let mapped = channel / (1.0 + channel * 0.35);
                 bytes.push((linear_to_srgb(mapped.min(1.0)) * 255.0) as u8);
             }
             bytes.push((a * 255.0) as u8);
         }
-        crate::space::image(self.w as u32, self.h as u32, bytes)
+        bytes
     }
 }
 
@@ -204,6 +249,10 @@ fn ellipse(c: &mut Canvas, centre: Vec2, radii: Vec2, width: f32, color: Vec3) {
 // ---------------------------------------------------------------- main screens
 
 fn paint_main(art: Art, seed: u32) -> Image {
+    main_canvas(art, seed).finish()
+}
+
+fn main_canvas(art: Art, seed: u32) -> Canvas {
     use std::f32::consts::{PI, TAU};
     let mut c = Canvas::new(512, 256, seed * 7919 + 17);
     let centre = Vec2::new(256.0, 136.0);
@@ -316,7 +365,7 @@ fn paint_main(art: Art, seed: u32) -> Image {
             c.dot(last.x, last.y, 4.0, WHITE, 8.0);
             for i in 0..22 {
                 let height = 10.0 + c.random() * 40.0;
-                c.rect(36.0 + i as f32 * 20.5, 232.0 - height, 48.0 + i as f32 * 20.5, 232.0, AZURE, 0.6);
+                c.rect(36.0 + i as f32 * 20.5, 218.0 - height, 48.0 + i as f32 * 20.5, 218.0, AZURE, 0.6);
             }
         }
         Art::Crew => {
@@ -349,12 +398,16 @@ fn paint_main(art: Art, seed: u32) -> Image {
         }
     }
     c.chrome(accent);
-    c.finish()
+    c
 }
 
 // ---------------------------------------------------------------- side panels
 
 fn paint_side(side: Side, seed: u32) -> Image {
+    side_canvas(side, seed).finish()
+}
+
+fn side_canvas(side: Side, seed: u32) -> Canvas {
     let mut c = Canvas::new(160, 240, seed * 104_729 + 3);
     match side {
         Side::Gauges => {
@@ -397,5 +450,32 @@ fn paint_side(side: Side, seed: u32) -> Image {
         }
     }
     c.chrome(CYAN);
-    c.finish()
+    c
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Writes every screen texture as PNG into `$AGENT_ROOM_SCREENS_DUMP`, to look at
+    /// the art without running the app: `cargo test -p room-app dump_screens -- --ignored`.
+    #[test]
+    #[ignore]
+    fn dump_screens() {
+        let dir = std::env::var("AGENT_ROOM_SCREENS_DUMP").unwrap_or_else(|_| "/tmp/screens".into());
+        std::fs::create_dir_all(&dir).unwrap();
+        let save = |name: String, c: Canvas| {
+            let file = std::fs::File::create(format!("{dir}/{name}.png")).unwrap();
+            let mut encoder = png::Encoder::new(std::io::BufWriter::new(file), c.w as u32, c.h as u32);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder.write_header().unwrap().write_image_data(&c.bytes()).unwrap();
+        };
+        for (seed, art) in ARTS.iter().enumerate() {
+            save(format!("main-{seed}"), main_canvas(*art, seed as u32));
+        }
+        for (seed, side) in SIDES.iter().enumerate() {
+            save(format!("side-{seed}"), side_canvas(*side, seed as u32 + 40));
+        }
+    }
 }

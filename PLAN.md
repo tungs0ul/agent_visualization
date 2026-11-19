@@ -2207,3 +2207,16 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   unmeasured. Left: re-measure, remaining D (mullions, back ledge, racks, ceiling
   coffers), E (cube-sphere planet, atmosphere, nebula sky), 5 (screen art by tool
   category), camera rig limits.
+- 2026-11-19, Claude Opus 5.5: re-measured the build from the last entry: 8/12
+  (edge_density 0.147, flat_tiles 26%, warm 0.004 too high, white_hardware 0.009).
+  User: "The monitor on the desk should look better". Desk monitors are now real
+  monitors (`stations.py` `monitor`): charcoal bezel 3 cm proud of the art, white
+  clear-coated back shell with a rear hump, a cyan light line and amber tab on the top
+  bezel, three status LEDs, and a white neck with a cyan strip down to the desk (main
+  screen to the projector bar). The art (`screens.rs`) is on dark navy glass with a
+  centre glow, a 32 px grid, scanlines, an inner border, a header (title, words, a
+  status pill in the accent colour) and a footer tick scale with readouts; the old
+  luminous blue base is gone. `cargo test -p room-app dump_screens -- --ignored` with
+  `AGENT_ROOM_SCREENS_DUMP=<dir>` writes every screen texture as PNG. Not yet seen in
+  the app (display off). Next: check on screen; tone down amber (pad arcs, chevrons);
+  white hardware; then the rest of D, E, screen art by tool category, camera limits.

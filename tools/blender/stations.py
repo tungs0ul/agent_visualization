@@ -502,6 +502,33 @@ def holo_screen(center, w, h, yaw=0.0, tilt=10.0, content="bars", frame="GlowCya
             holo_content(content, w, h, rng)
 
 
+def monitor(center, w, h, yaw=0.0, tilt=0.0, stand_to=None, seed=1):
+    """A crew-desk monitor: the app paints the art on a quad just in front of the
+    glass (`screens.rs`), so this is the body round it. A charcoal bezel set a few mm
+    proud of the art, a white clear-coated back shell with rounded edges, a cyan light
+    line along the top edge, three status LEDs on the lower bezel and, with
+    `stand_to` (a z in the screen's parent frame), a neck down to that height."""
+    b = 0.03                                         # bezel width round the art
+    with at(center, (tilt, 0, yaw)):
+        box((0, 0.002, 0), (w, 0.004, h), "DeskGlass")
+        for z in (h / 2 + b / 2, -h / 2 - b / 2):
+            box((0, -0.004, z), (w + 2 * b, 0.016, b), "Graphite", bevel=0.004)
+        for x in (w / 2 + b / 2, -w / 2 - b / 2):
+            box((x, -0.004, 0), (b, 0.016, h), "Graphite", bevel=0.004)
+        box((0, 0.026, 0), (w + 2 * b + 0.01, 0.04, h + 2 * b + 0.01), "Panel", bevel=0.018, segs=3)
+        box((0, 0.049, 0), (w * 0.5, 0.01, h * 0.45), "Panel", bevel=0.008, segs=2)
+        # top light line and a small amber tab, like the reference's screens
+        box((0, -0.0125, h / 2 + b * 0.55), (w * 0.62, 0.002, 0.004), "GlowCyanT2")
+        box((-w / 2 + 0.04, -0.0125, h / 2 + b * 0.55), (0.03, 0.002, 0.004), "GlowAmberT2")
+        for i, m in enumerate(("GlowCyanT2", "GlowCyanT2", "GlowGreen")):
+            box((w / 2 - 0.02 - i * 0.016, -0.0125, -h / 2 - b * 0.5), (0.008, 0.002, 0.005), m)
+        if stand_to is not None:
+            drop = center[2] - h / 2 - b - stand_to
+            if drop > 0:
+                box((0, 0.045, -h / 2 - b - drop / 2 + 0.02), (0.07, 0.03, drop + 0.04), "Panel", bevel=0.012, segs=2)
+                box((0, 0.028, -h / 2 - b - drop / 2 + 0.02), (0.012, 0.004, drop * 0.7), "GlowCyanT2")
+
+
 def floor_disc(cx, cy, r, h=0.04, segs=64):
     """Circular illuminated platform: white rim, dark glossy top, glowing rings."""
     disc((cx, cy, 0), r, 0.0, h, "PadRim", segs=segs, bevel=0.012, bsegs=2)
@@ -836,9 +863,9 @@ def build_desk_console():
     # holographic screens: a wide main screen and two side panels angled 28° in
     # Screen glass and frames only: the app paints the starship art on them
     # (`screens.rs`; keep these positions in step with `screens::SCREENS`).
-    holo_screen((0, by, 1.45), 1.5, 0.75, yaw=0, tilt=-6, content=None, seed=21)
-    holo_screen((-0.98, by - 0.16, 1.32), 0.42, 0.62, yaw=28, tilt=-4, content=None, seed=22)
-    holo_screen((0.98, by - 0.16, 1.32), 0.42, 0.62, yaw=-28, tilt=-4, content=None, seed=23)
+    monitor((0, by, 1.45), 1.5, 0.75, yaw=0, tilt=-6, stand_to=top + 0.03, seed=21)
+    monitor((-0.98, by - 0.16, 1.32), 0.42, 0.62, yaw=28, tilt=-4, stand_to=top, seed=22)
+    monitor((0.98, by - 0.16, 1.32), 0.42, 0.62, yaw=-28, tilt=-4, stand_to=top, seed=23)
 
 
 # ---------------------------------------------------------------- activity holograms
