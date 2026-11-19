@@ -28,7 +28,10 @@ import bpy
 from mathutils import Euler, Matrix, Vector
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-OUT_DIR = os.path.join(REPO, "assets", "models", "stations")
+OUT_DIR = os.environ.get("STATIONS_OUT") or os.path.join(REPO, "assets", "models", "stations")
+# Prototype switch: STATIONS_NO_CONSOLE=1 builds the main desk without its console
+# (for the big command hologram, `tools/blender/command_holo_proto.py`).
+NO_CONSOLE = os.environ.get("STATIONS_NO_CONSOLE") == "1"
 ARGS = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 rad = math.radians
 
@@ -607,6 +610,9 @@ def build_main_desk():
         box((0.42 * math.sin(rad(a)), 0.42 * math.cos(rad(a)), top + 0.006), (0.1, 0.018, 0.004), "Trim",
             rot=(0, 0, -a))
 
+    if NO_CONSOLE:
+        build_main_desk_pylons()
+        return
     # low curved console wall behind the robot (Blender +Y = glTF -Z)
     ring((0, 0, 0), 0.97, 1.22, top, top + 0.05, "Trim", segs=40, a0=-66, a1=66, bevel=0.012)
     ring((0, 0, 0), 1.0, 1.2, top + 0.05, top + 0.72, "PanelDark", segs=40, a0=-64, a1=64)
@@ -660,6 +666,10 @@ def build_main_desk():
             box((sx * 0.165, 0, 0.035), (0.012, 0.24, 0.03), "Panel", bevel=0.004)
         box((0, 0.115, 0.035), (0.34, 0.012, 0.03), "Panel", bevel=0.004)
         box((0, -0.122, 0.012), (0.26, 0.006, 0.008), "GlowOrange")
+    build_main_desk_pylons()
+
+
+def build_main_desk_pylons():
     # light pylons at the back and a plant on the lower tier
     for sx in (-1, 1):
         with at((sx * 1.3, 0.75, 0.26)):

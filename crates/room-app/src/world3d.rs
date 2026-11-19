@@ -228,7 +228,6 @@ pub fn build(kit: &mut Kit) {
     let command = Spot::Command.center();
     let station = kit.model("models/stations/main_desk.glb", command);
     kit.commands.entity(station).insert(StationBody);
-    command_core(kit, command);
     // Cinematic light (PLAN.md M29): a dim blue room lit in pools. Cyan from the
     // command core and the teleporter, warm orange accents by the back desks. No
     // shadows, a short range each: cheap.
@@ -302,31 +301,6 @@ impl DeskState {
 pub struct DeskLight {
     pub desk: u8,
     pub shown: DeskState,
-}
-
-/// The command core (PLAN.md M29, the user's reference image): a glass hologram
-/// cylinder over the command platform with a glowing ring at its foot and top.
-/// Additive, so Claude stays visible inside; static, so it costs no frames.
-fn command_core(kit: &mut Kit, command: Vec3) {
-    const RADIUS: f32 = 1.3;
-    const HEIGHT: f32 = 2.4;
-    let base = command.y + 0.38;
-    let glass = kit.materials.add(StandardMaterial {
-        // Unlit: the base colour is what shows, added onto what is behind.
-        base_color: Color::LinearRgba(LinearRgba::rgb(0.02, 0.1, 0.24)),
-        alpha_mode: AlphaMode::Add,
-        double_sided: true,
-        cull_mode: None,
-        unlit: true,
-        ..default()
-    });
-    let at = Transform::from_translation(command + Vec3::Y * (base + HEIGHT / 2.0));
-    kit.mesh(Cylinder::new(RADIUS, HEIGHT).mesh().resolution(48).without_caps().build(), glass, at);
-    let ring = kit.glow(LinearRgba::rgb(0.6, 3.0, 5.0));
-    for height in [base + 0.02, base + HEIGHT] {
-        let at = Transform::from_translation(command + Vec3::Y * height);
-        kit.mesh(Torus::new(RADIUS - 0.03, RADIUS + 0.03), ring.clone(), at);
-    }
 }
 
 /// Each desk's route colour, so the floor isn't one flat blue.
