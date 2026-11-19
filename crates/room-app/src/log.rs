@@ -421,6 +421,7 @@ mod tests {
             session_id: "s1".into(),
             cwd: Some("/tmp".into()),
             transcript_path: None,
+            agent_transcript_path: None,
             agent: AgentRef::Main,
             kind: EventKind::UserPrompt { text: "hi".into() },
             headless: false,

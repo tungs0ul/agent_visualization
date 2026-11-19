@@ -69,6 +69,8 @@ pub struct RoomEvent {
     pub session_id: String,
     pub cwd: Option<String>,
     pub transcript_path: Option<String>,
+    /// A sub-agent's own transcript (`SubagentStop`'s `agent_transcript_path`).
+    pub agent_transcript_path: Option<String>,
     pub agent: AgentRef,
     pub kind: EventKind,
     /// Started with `claude -p` by another tool ([`crate::HEADLESS_FIELD`]).
@@ -164,6 +166,7 @@ impl RoomEvent {
             session_id,
             cwd: opt_str(hook, "cwd"),
             transcript_path: opt_str(hook, "transcript_path"),
+            agent_transcript_path: opt_str(hook, "agent_transcript_path"),
             agent,
             kind,
             headless: hook.get(crate::HEADLESS_FIELD).and_then(Value::as_bool).unwrap_or(false),

@@ -90,6 +90,8 @@ pub struct AgentInfo {
     pub repo: Option<Repo>,
     /// Its last tool call or turn failed, and nothing has succeeded since.
     pub failed: bool,
+    /// Its tool calls and the files it wrote (PLAN.md M28).
+    pub work: crate::work::Work,
     reported: bool,
 }
 
@@ -104,6 +106,8 @@ pub struct SessionState {
     pub home_repo: Option<Repo>,
     /// The repository Claude's latest tool call worked in.
     pub main_repo: Option<Repo>,
+    /// Claude's tool calls and the files it wrote (PLAN.md M28).
+    pub main_work: crate::work::Work,
     /// Claude's last tool call or turn failed, and nothing has succeeded since.
     pub main_failed: bool,
     /// The model, from `SessionStart` (its context window: 1M for `[1m]` models).
@@ -358,6 +362,7 @@ fn update_session(session: &mut SessionState, event: &RoomEvent, changes: &mut V
             if let Some(failed) = failure(&event.kind) {
                 session.main_failed = failed;
             }
+            session.main_work.on(&event.kind);
             if let EventKind::SessionStarted { model: Some(name) } | EventKind::ModelSwitched { model: name } = &event.kind {
                 session.model = Some(name.clone());
             }
@@ -422,6 +427,7 @@ fn update_sub(session: &mut SessionState, id: &str, agent_type: &str, kind: &Eve
                 report: None,
                 repo: None,
                 failed: false,
+                work: Default::default(),
                 reported: false,
             },
         ));
@@ -437,6 +443,7 @@ fn update_sub(session: &mut SessionState, id: &str, agent_type: &str, kind: &Eve
     if let Some(failed) = failure(kind) {
         info.failed = failed;
     }
+    info.work.on(kind);
     if let Some(pose) = pose {
         info.pose = pose;
         info.status = if pose == Pose::Waiting { Status::Waiting } else { Status::Working };

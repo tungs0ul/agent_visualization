@@ -48,13 +48,7 @@ pub fn trace(model: Res<Model>, mut trace: ResMut<Trace>) {
     trace.busy = busy;
 }
 
-const GLASS: egui::Color32 = egui::Color32::from_rgba_premultiplied(10, 14, 32, 225);
-const EDGE: egui::Color32 = egui::Color32::from_rgb(60, 110, 200);
-const CYAN: egui::Color32 = egui::Color32::from_rgb(90, 210, 255);
-const GREEN: egui::Color32 = egui::Color32::from_rgb(80, 220, 140);
-const DIM: egui::Color32 = egui::Color32::from_gray(150);
-const AMBER: egui::Color32 = egui::Color32::from_rgb(255, 190, 80);
-const WHITE: egui::Color32 = egui::Color32::WHITE;
+use crate::palette::{AMBER, CYAN, EDGE, GLASS, GREEN, TEXT as WHITE, TEXT_DIM as DIM};
 /// The remove control only forgets the session in the app; Claude is never touched.
 const FORGET_HOVER: &str = "Remove from the room (Claude keeps running; it comes back if it sends events again)";
 
@@ -330,6 +324,15 @@ pub fn draw(
             info.report.clone(),
         ),
     };
+    // What the hooks saw it do (PLAN.md M28), and its tokens when known.
+    let work = match info {
+        None => &session.main_work,
+        Some(info) => &info.work,
+    };
+    let tokens = match &selected.0 {
+        Some(Who::Sub(id)) => usage.tokens(&crate::usage::agent_key(&session.id, id)),
+        _ => usage.tokens(&session.id),
+    };
     let mut open = true;
     let mut forget_shown = false;
     let session_id = session.id.clone();
@@ -360,18 +363,65 @@ pub fn draw(
             if let Some(doing) = doing {
                 ui.label(egui::RichText::new(format!("Now: {doing}")).color(DIM));
             }
-            if let Some(report) = report {
-                ui.label(egui::RichText::new(format!("Report: {}", truncate(&report, 300))).color(GREEN));
+            // Its report is its own words; beside it, what the hooks saw (PLAN.md M28).
+            if let Some(report) = &report {
+                ui.label(egui::RichText::new("Report, in its own words").small().color(GREEN));
+                ui.label(egui::RichText::new(truncate(report, 600)).color(WHITE));
+            }
+            let failed = work.failures();
+            let mut seen = format!("Seen by Agent Room: {} tool call{}", work.calls.len(), if work.calls.len() == 1 { "" } else { "s" });
+            if failed > 0 {
+                seen.push_str(&format!(", {failed} failed"));
+            }
+            if !work.files.is_empty() {
+                seen.push_str(&format!(", {} file{} written", work.files.len(), if work.files.len() == 1 { "" } else { "s" }));
+            }
+            ui.label(egui::RichText::new(seen).small().color(DIM));
+            if let Some(count) = report.as_deref().and_then(|report| crate::work::unmentioned_failures(report, work)) {
+                ui.label(
+                    egui::RichText::new(format!(
+                        "⚠ Check: {count} failed call{} the report doesn't mention",
+                        if count == 1 { "" } else { "s" }
+                    ))
+                    .small()
+                    .color(AMBER),
+                );
+            }
+            if let Some(tokens) = tokens {
+                let line = format!("Tokens: {} in · {} out", crate::usage::short(tokens.input), crate::usage::short(tokens.output));
+                ui.label(egui::RichText::new(line).small().color(DIM));
             }
             ui.separator();
-            ui.label(egui::RichText::new("History").strong().color(WHITE));
-            egui::ScrollArea::vertical().max_height(220.0).stick_to_bottom(true).show(ui, |ui| {
-                for line in log.lines.iter().filter(|line| line.session == session.id && line.agent == name) {
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label(egui::RichText::new(format!("{:>4}", ago(line.at))).small().monospace().color(DIM));
-                        ui.label(egui::RichText::new(&line.text).small().color(egui::Color32::from_gray(220)));
+            egui::CollapsingHeader::new(egui::RichText::new(format!("Tool calls ({})", work.calls.len())).strong().color(WHITE))
+                .id_salt("details-calls")
+                .default_open(true)
+                .show(ui, |ui| {
+                    egui::ScrollArea::vertical().id_salt("details-calls-scroll").max_height(240.0).show(ui, |ui| {
+                        for call in work.calls.iter().rev().take(100) {
+                            call_row(ui, call);
+                        }
                     });
-                }
+                });
+            if !work.files.is_empty() {
+                egui::CollapsingHeader::new(egui::RichText::new(format!("Files ({})", work.files.len())).strong().color(WHITE))
+                    .id_salt("details-files")
+                    .show(ui, |ui| {
+                        for file in &work.files {
+                            if ui.link(egui::RichText::new(file).small().monospace()).on_hover_text("Open").clicked() {
+                                open_file(file);
+                            }
+                        }
+                    });
+            }
+            egui::CollapsingHeader::new(egui::RichText::new("History").strong().color(WHITE)).id_salt("details-history").show(ui, |ui| {
+                egui::ScrollArea::vertical().id_salt("details-history-scroll").max_height(220.0).stick_to_bottom(true).show(ui, |ui| {
+                    for line in log.lines.iter().filter(|line| line.session == session.id && line.agent == name) {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(egui::RichText::new(format!("{:>4}", ago(line.at))).small().monospace().color(DIM));
+                            ui.label(egui::RichText::new(&line.text).small().color(WHITE));
+                        });
+                    }
+                });
             });
         });
     if !open || forget_shown {
@@ -478,4 +528,44 @@ fn bell_button(ui: &mut egui::Ui, bells: &mut crate::notify::Bells, session: &st
     if ui.add(egui::Button::new(egui::RichText::new("🔔").small()).small().selected(set)).on_hover_text(hover).clicked() {
         bells.toggle(session);
     }
+}
+
+/// One tool call: a line with how it went and how long it took; unfolded, the input
+/// as sent and the result as returned.
+pub fn call_row(ui: &mut egui::Ui, call: &crate::work::Call) {
+    use crate::work::Outcome;
+    let (mark, color, took) = match &call.outcome {
+        Outcome::Running => ("…", AMBER, String::new()),
+        Outcome::Done { took, .. } => ("✔", GREEN, format!("  {:.1} s", took.as_secs_f32())),
+        Outcome::Failed { took, .. } => ("✖", crate::palette::RED, format!("  {:.1} s", took.as_secs_f32())),
+    };
+    let header = egui::RichText::new(format!("{mark} {}{took}", truncate(&call.label, 70))).small().color(color);
+    egui::CollapsingHeader::new(header).id_salt(("call", &call.id)).show(ui, |ui| {
+        ui.label(egui::RichText::new("Input").small().color(DIM));
+        ui.add(egui::Label::new(egui::RichText::new(truncate(&call.input, 1500)).small().monospace()).wrap());
+        match &call.outcome {
+            Outcome::Running => {
+                ui.label(egui::RichText::new("Running…").small().color(AMBER));
+            }
+            Outcome::Done { output, .. } if !output.is_empty() => {
+                ui.label(egui::RichText::new("Result").small().color(DIM));
+                ui.add(egui::Label::new(egui::RichText::new(output).small().monospace()).wrap());
+            }
+            Outcome::Done { .. } => {
+                ui.label(egui::RichText::new("Done (no output)").small().color(DIM));
+            }
+            Outcome::Failed { error, .. } => {
+                ui.label(egui::RichText::new("Error").small().color(crate::palette::RED));
+                ui.add(egui::Label::new(egui::RichText::new(error).small().monospace()).wrap());
+            }
+        }
+    });
+}
+
+/// Opens a file in its default app; the short `open` process ends at once.
+pub fn open_file(path: &str) {
+    let path = path.to_owned();
+    std::thread::spawn(move || {
+        let _ = std::process::Command::new("open").arg(path).status();
+    });
 }

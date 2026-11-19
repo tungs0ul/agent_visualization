@@ -16,11 +16,13 @@ mod log;
 mod mini;
 mod model;
 mod notify;
+mod palette;
 mod repo;
 mod server;
 mod hud;
 mod view3d;
 mod wins;
+mod work;
 mod world3d;
 mod ui;
 mod usage;
@@ -146,7 +148,7 @@ fn main() -> AppExit {
                 (receive_events, chat::dev_chat, chat::read_chats, end_dead_sessions),
                 settle_permissions,
                 hud::title,
-                (view3d::sync, view3d::teleporter, view3d::deliver, view3d::links, view3d::context_tank, view3d::celebrate, world3d::daylight, world3d::cruise, view3d::activity_holograms, view3d::light_trails, hud::trace, view3d::camera_input, view3d::frame).chain(),
+                (view3d::sync, view3d::desk_lights, view3d::teleporter, view3d::deliver, view3d::links, view3d::context_tank, view3d::celebrate, world3d::daylight, world3d::cruise, view3d::activity_holograms, view3d::light_trails, hud::trace, view3d::camera_input, view3d::frame).chain(),
                 pace_updates,
                 log_frame_rate.run_if(|| std::env::var_os("AGENT_ROOM_FPS_LOG").is_some()),
                 window::take_screenshots,
@@ -224,6 +226,12 @@ fn receive_events(
             && let Some(transcript) = &event.transcript_path
         {
             usage.update(&event.session_id, transcript);
+        }
+        // A sub-agent's own tokens, from its transcript when it stops (PLAN.md M28).
+        if let (EventKind::SubagentStopped { .. }, AgentRef::Sub { id, .. }, Some(transcript)) =
+            (&event.kind, &event.agent, &event.agent_transcript_path)
+        {
+            usage.update(&usage::agent_key(&event.session_id, id), transcript);
         }
         // The tank empties when compaction is done (PostCompact). A plugin from before
         // PostCompact was forwarded never says so: then the next prompt or turn end does.

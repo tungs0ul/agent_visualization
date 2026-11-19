@@ -1278,15 +1278,25 @@ fn heatmap(ui: &mut egui::Ui, hours: &[u32; 24]) {
 
 /// The panels' look: dark glass, cyan highlights, to match the space station.
 fn visuals() -> egui::Visuals {
+    use crate::palette::*;
     use egui::Color32;
     let mut visuals = egui::Visuals::dark();
-    visuals.panel_fill = Color32::from_rgb(0x0B, 0x11, 0x20);
-    visuals.window_fill = Color32::from_rgb(0x0F, 0x18, 0x2C);
-    visuals.extreme_bg_color = Color32::from_rgb(0x06, 0x0A, 0x16);
-    visuals.selection.bg_fill = Color32::from_rgb(0x1E, 0x7F, 0xA8);
-    visuals.hyperlink_color = Color32::from_rgb(0x7F, 0xDB, 0xFF);
-    visuals.widgets.inactive.weak_bg_fill = Color32::from_rgb(0x16, 0x24, 0x3A);
-    visuals.widgets.hovered.weak_bg_fill = Color32::from_rgb(0x1D, 0x33, 0x52);
+    visuals.panel_fill = BG;
+    visuals.window_fill = PANEL;
+    visuals.window_stroke = egui::Stroke::new(1.0, EDGE);
+    visuals.extreme_bg_color = BG;
+    visuals.faint_bg_color = BG_RAISED;
+    visuals.selection.bg_fill = BLUE.gamma_multiply(0.7);
+    visuals.hyperlink_color = CYAN;
+    visuals.warn_fg_color = AMBER;
+    visuals.error_fg_color = RED;
+    // Readable text: near-white body, blue-grey for secondary (`weak`) text.
+    visuals.widgets.noninteractive.fg_stroke.color = TEXT;
+    visuals.widgets.inactive.fg_stroke.color = TEXT;
+    visuals.widgets.noninteractive.bg_stroke.color = EDGE.gamma_multiply(0.6);
+    visuals.weak_text_color = Some(TEXT_DIM);
+    visuals.widgets.inactive.weak_bg_fill = Color32::from_rgb(0x16, 0x26, 0x44);
+    visuals.widgets.hovered.weak_bg_fill = Color32::from_rgb(0x1D, 0x35, 0x5C);
     visuals
 }
 

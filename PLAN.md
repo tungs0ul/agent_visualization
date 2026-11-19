@@ -989,6 +989,49 @@ None of these is in the backlog above. The user picks.
 11. **Commit or open a PR from the writing desk** (M): git and `gh`. Moves the app from
     watching to doing, so the user decides.
 
+### M28: Mission control from the "Starship Mission Control 2.0" brief (requested 2026-11-19, not started)
+
+The user pasted a long brief (web-style mission control: desks per task, bottom
+activity console with tabs, inspection panel, toolbar, replay, approval station,
+event schema, responsive layouts) and asked what to take from it. Triage against what
+exists and what Claude Code's hooks and transcripts can show; the user picks.
+
+Take (real data, fits the bridge):
+1. **Desk states** (S): each crew desk's ring and screens show its robot's state:
+   dim when free, cyan working, amber waiting, green done (until it leaves), red
+   failed. Today all eight desks glow the same whether used or not.
+2. **Desk nameplate** (S): over an occupied desk, the agent type, its task (the
+   `Agent` description), current tool and tool count. No % progress: Claude Code
+   gives none (V2.md section 3).
+3. **Report vs verified** (S-M, overlaps backlog item 3 "Claimed vs real"): label an
+   agent's final text as its report, and show beside it what the hooks saw (tools run,
+   failures, files written), flagging a report that claims success after a failure.
+4. **Artifacts console** (S-M): files each agent created or edited (`Write`/`Edit`/
+   `NotebookEdit` paths), newest first, click to open; per agent in the robot details.
+5. **Errors filter** (S): failed tools and turns only, in the History console.
+6. **Robot details, deeper** (M): each tool call with input and result (collapsible),
+   files touched, tokens of a sub-agent from its own transcript.
+7. **Mission report export** (S-M): a Markdown summary of a turn or session: prompt,
+   agents and tasks, tools, files, failures, tokens, duration.
+8. **Panel palette** (S): the brief's colours for the egui panels (text #F2F7FF on
+   #101D36, secondary #91A4C4, cyan #42D9FF, status green/amber/red), one place in
+   `ui::visuals`.
+
+Ask the user (earlier decisions say no):
+- **Mission replay**: the brief's top feature. V2.md phase 5 (replay / time machine)
+  was trimmed by the user on 2026-11-18. Feasible: record each session's hook events
+  to a file and play them through a separate `Model`; the Director is pure, so the
+  room rebuilds from events, not canned animation.
+- **Bottom activity console**: M19 replaced the side panel with consoles on purpose;
+  a docked console brings a panel back. A one-line ticker of the latest event is the
+  small version.
+
+Leave out: tablet and mobile layouts (desktop app), WebSocket/reconnect (local socket
+already), estimated cost (a guess; measured cost only via the telemetry backlog
+item), task dependencies and % progress (no data), agent memory (no data), showing
+reasoning (never), desk types per category (M27 made desks identical; the hologram
+shows the tool).
+
 ### M27: Starship bridge instead of the station HQ (requested 2026-11-19, in progress)
 
 User: "if the agent is working at their desk should we redesign our background? like a
@@ -1960,3 +2003,10 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   loads), the bell is a silent notification. Re-measured: no sound process, and the
   audio service's remaining 8-10 % was there before the app started and after it quit
   (another app's audio).
+- 2026-11-19, Claude Opus 5.5: fixed two leftovers of the old room seen in the user's
+  screenshot: the context tank stood at the old main desk spot, now beside a crew
+  desk (`view3d::tank_at`, on the command platform again), and the trophy shelf lay
+  across the front-right desk (`SHELF_AT` now along the front edge right of the
+  teleporter). The command sign moved up (3.5 m) so Claude's label no longer covers
+  its Chat button. Clippy clean; not seen on screen (display asleep). M28 written
+  from the user's "Mission Control 2.0" brief.

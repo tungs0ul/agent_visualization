@@ -227,6 +227,18 @@ pub fn build(kit: &mut Kit) {
     for index in 0..DESKS.len() {
         let at = Spot::Desk(index as u8).center();
         kit.model("models/stations/writing_desk.glb", at);
+        // The desk's own light over the floor ring, coloured by its robot's state
+        // (`view3d::desk_lights`).
+        let light = kit.materials.add(StandardMaterial { base_color: Color::BLACK, emissive: DeskState::Free.glow(), ..default() });
+        // A halo on the floor just outside the desk's own disc (`stations.py`
+        // `floor_disc`: r 1.45, 0.3 m forward): dark while the desk is free.
+        let ring = kit.meshes.add(Annulus::new(1.5, 1.66));
+        kit.commands.spawn((
+            Mesh3d(ring),
+            MeshMaterial3d(light),
+            Transform::from_translation(at + Vec3::new(0.0, 0.02, 0.3)).with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
+            DeskLight { desk: index as u8, shown: DeskState::Free },
+        ));
         let dir = (at - command).normalize();
         kit.path(command + dir * 2.6, at - dir * 1.4, desk_glow(index));
     }
@@ -234,6 +246,37 @@ pub fn build(kit: &mut Kit) {
     let dir = (teleporter_spot() - command).normalize();
     kit.path(command + dir * 2.6, teleporter_spot() - dir * 1.6, LinearRgba::rgb(0.4, 1.6, 3.2));
     sky(kit);
+}
+
+/// What a crew desk shows (PLAN.md M28): free, or its robot's state.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum DeskState {
+    Free,
+    Working,
+    Waiting,
+    Done,
+    Failed,
+}
+
+impl DeskState {
+    /// The halo's light: none when free, the status colours otherwise (`palette`:
+    /// cyan, amber, green, red).
+    pub fn glow(self) -> LinearRgba {
+        match self {
+            DeskState::Free => LinearRgba::BLACK,
+            DeskState::Working => LinearRgba::rgb(0.5, 2.6, 4.0),
+            DeskState::Waiting => LinearRgba::rgb(4.0, 2.2, 0.4),
+            DeskState::Done => LinearRgba::rgb(0.4, 3.6, 1.6),
+            DeskState::Failed => LinearRgba::rgb(4.0, 0.6, 0.8),
+        }
+    }
+}
+
+/// A crew desk's light ring and the state it shows now.
+#[derive(Component)]
+pub struct DeskLight {
+    pub desk: u8,
+    pub shown: DeskState,
 }
 
 /// Each desk's route colour, so the floor isn't one flat blue.

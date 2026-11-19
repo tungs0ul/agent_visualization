@@ -140,7 +140,7 @@ pub fn station_click(height: f32) -> Option<Console> {
     (height > Spot::Command.platform_top()).then_some(Console::Settings)
 }
 
-pub const HOLO: egui::Color32 = egui::Color32::from_rgb(90, 210, 255);
+pub const HOLO: egui::Color32 = crate::palette::CYAN;
 
 /// Draws a console as a hologram standing over its station (`spot`, logical pixels),
 /// kept inside the window. Returns false when the user closed it.

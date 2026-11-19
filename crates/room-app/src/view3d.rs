@@ -658,7 +658,7 @@ pub fn labels(
     // The command station's sign: where the settings and the other consoles are
     // (PLAN.md M27), one button each.
     if !mode.mini
-        && let Ok(screen) = camera.world_to_viewport(camera_at, Spot::Command.center() + Vec3::Y * 2.6)
+        && let Ok(screen) = camera.world_to_viewport(camera_at, Spot::Command.center() + Vec3::Y * 3.5)
     {
         let screen = screen + offset;
         let color = egui::Color32::from_rgb(130, 200, 255);
@@ -723,14 +723,31 @@ pub fn labels(
     let mut picked = None;
     for (avatar, at) in &avatars {
         let Some(session) = model.session(&avatar.session) else { continue };
-        let (mut name, doing, repo) = match &avatar.who {
-            Who::Main if several => (format!("Claude · {}", session.name()), &session.main_doing, session.main_repo.as_ref()),
-            Who::Main => ("Claude".to_owned(), &session.main_doing, session.main_repo.as_ref()),
+        let (mut name, doing, repo, task, work) = match &avatar.who {
+            Who::Main if several => {
+                (format!("Claude · {}", session.name()), &session.main_doing, session.main_repo.as_ref(), None, &session.main_work)
+            }
+            Who::Main => ("Claude".to_owned(), &session.main_doing, session.main_repo.as_ref(), None, &session.main_work),
             Who::Sub(id) => match session.agent(id) {
-                Some(info) => (info.agent_type.clone(), &info.doing, info.repo.as_ref()),
+                Some(info) => (info.agent_type.clone(), &info.doing, info.repo.as_ref(), info.task.as_deref(), &info.work),
                 None => continue,
             },
         };
+        // A sub-agent's nameplate (PLAN.md M28): its task, and what the hooks counted.
+        let tally = (!work.calls.is_empty()).then(|| {
+            let failed = work.failures();
+            let mut line = format!("{} tool{}", work.calls.len(), if work.calls.len() == 1 { "" } else { "s" });
+            if failed > 0 {
+                line.push_str(&format!(" · {failed} failed"));
+            }
+            if !work.files.is_empty() {
+                line.push_str(&format!(" · {} file{}", work.files.len(), if work.files.len() == 1 { "" } else { "s" }));
+            }
+            if let Some(call) = work.current() {
+                line.push_str(&format!(" · now {}", call.name));
+            }
+            (line, failed > 0)
+        });
         // Working in a linked git worktree (PLAN.md M20): say which.
         if let Some(tree) = repo.and_then(|repo| repo.worktree.as_ref().map(|tree| repo.branch.as_ref().unwrap_or(tree))) {
             name.push_str(&format!(" · ⎇ {tree}"));
@@ -756,9 +773,18 @@ pub fn labels(
                     let color =
                         egui::Color32::from_rgb((tint.red * 255.0) as u8, (tint.green * 255.0) as u8, (tint.blue * 255.0) as u8);
                     ui.label(egui::RichText::new(name.as_str()).small().strong().color(color));
+                    if let Some(task) = task {
+                        ui.label(egui::RichText::new(room_proto::describe::truncate(task, 60)).small().color(crate::palette::TEXT_DIM));
+                    }
                     if let Some(doing) = doing {
                         let text = egui::RichText::new(doing).small();
-                        ui.label(if avatar.failed { text.color(egui::Color32::from_rgb(255, 110, 100)) } else { text });
+                        ui.label(if avatar.failed { text.color(crate::palette::RED) } else { text });
+                    }
+                    if let Some((line, failed)) = &tally
+                        && avatar.who != Who::Main
+                    {
+                        let color = if *failed { crate::palette::AMBER } else { crate::palette::TEXT_DIM };
+                        ui.label(egui::RichText::new(line).small().color(color));
                     }
                 });
                 // Clicking a robot's label opens its details (`hud`).
@@ -1059,6 +1085,36 @@ fn detour(here: Vec3, target: Vec3) -> Vec3 {
     let out = (closest - c).try_normalize().unwrap_or_else(|| ab.perp().normalize_or_zero());
     let point = c + out * (RIM + 0.5);
     Vec3::new(point.x, here.y, point.y)
+}
+
+/// Lights each crew desk's ring for the robot working there (PLAN.md M28): off when
+/// free, cyan working, amber waiting for the user, green done, red after a failure.
+/// The material changes only when a desk's state does.
+pub fn desk_lights(
+    avatars: Query<&Avatar>,
+    mut lights: Query<(&mut crate::world3d::DeskLight, &MeshMaterial3d<StandardMaterial>)>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    use crate::world3d::DeskState;
+    for (mut light, material) in &mut lights {
+        let state = avatars
+            .iter()
+            .filter(|avatar| avatar.desk == Some(light.desk) && !matches!(avatar.presence, Presence::Leaving(_)))
+            .map(|avatar| match () {
+                _ if avatar.failed => DeskState::Failed,
+                _ if avatar.done => DeskState::Done,
+                _ if avatar.pose == Pose::Waiting => DeskState::Waiting,
+                _ => DeskState::Working,
+            })
+            .max_by_key(|state| *state as u8)
+            .unwrap_or(DeskState::Free);
+        if state != light.shown {
+            light.shown = state;
+            if let Some(mut material) = materials.get_mut(&material.0) {
+                material.emissive = state.glow();
+            }
+        }
+    }
 }
 
 /// The way a walking robot faces: where it actually moved this frame.
@@ -1492,7 +1548,10 @@ fn plan_board(ctx: &egui::Context, at: Vec2, todos: &[(String, crate::model::Tod
 }
 
 /// Where the context tank stands: on the main platform, front right of Claude.
-const TANK_AT: Vec3 = Vec3::new(1.45, 0.35, 0.75);
+/// Beside Claude on the command station's platform (front right).
+fn tank_at() -> Vec3 {
+    Spot::Command.center() + Vec3::new(1.45, 0.35, 0.75)
+}
 const TANK_HEIGHT: f32 = 0.9;
 
 /// The tank's parts and the level it shows now (it eases to the real one).
@@ -1531,10 +1590,10 @@ pub fn context_tank(
             commands.spawn((
                 Mesh3d(meshes.add(Cylinder::new(0.14, TANK_HEIGHT))),
                 MeshMaterial3d(glass),
-                Transform::from_translation(TANK_AT + Vec3::Y * TANK_HEIGHT / 2.0),
+                Transform::from_translation(tank_at() + Vec3::Y * TANK_HEIGHT / 2.0),
             ));
             let base = materials.add(StandardMaterial { base_color: Color::srgb(0.2, 0.22, 0.28), metallic: 0.8, ..default() });
-            commands.spawn((Mesh3d(meshes.add(Cylinder::new(0.18, 0.05))), MeshMaterial3d(base), Transform::from_translation(TANK_AT)));
+            commands.spawn((Mesh3d(meshes.add(Cylinder::new(0.18, 0.05))), MeshMaterial3d(base), Transform::from_translation(tank_at())));
             let glow = materials.add(StandardMaterial { base_color: Color::BLACK, emissive: LinearRgba::rgb(0.4, 3.0, 1.2), ..default() });
             let fill = commands
                 .spawn((Mesh3d(meshes.add(Cylinder::new(0.11, 1.0))), MeshMaterial3d(glow.clone()), Transform::from_scale(Vec3::ZERO)))
@@ -1559,7 +1618,7 @@ pub fn context_tank(
     tank.drawn = Some(tank.level);
     let height = TANK_HEIGHT * tank.level;
     if let Ok(mut at) = fills.get_mut(fill) {
-        *at = Transform::from_translation(TANK_AT + Vec3::Y * (0.03 + height / 2.0)).with_scale(Vec3::new(1.0, height.max(0.0001), 1.0));
+        *at = Transform::from_translation(tank_at() + Vec3::Y * (0.03 + height / 2.0)).with_scale(Vec3::new(1.0, height.max(0.0001), 1.0));
     }
     let color = match tank.level {
         level if level > 0.8 => LinearRgba::rgb(4.0, 0.5, 0.3),
@@ -1583,9 +1642,9 @@ pub(crate) struct Spark {
 /// How long a burst's sparks fly.
 const SPARK_SECS: f32 = 1.6;
 
-/// Where the trophy shelf starts (front right, the teleporter's mirror) and how far
+/// Where the trophy shelf starts (along the front edge, right of the teleporter) and how far
 /// apart trophies stand.
-const SHELF_AT: Vec3 = Vec3::new(2.6, 0.0, 4.6);
+const SHELF_AT: Vec3 = Vec3::new(1.8, 0.0, 5.6);
 const TROPHY_STEP: f32 = 0.34;
 
 fn trophy_spot(index: usize) -> Vec3 {

@@ -117,6 +117,11 @@ fn count(reading: &mut Reading, line: &str) {
     reading.tokens.output += field("output_tokens");
 }
 
+/// The key a sub-agent's tokens are kept under, beside its session's.
+pub fn agent_key(session: &str, agent: &str) -> String {
+    format!("{session}/{agent}")
+}
+
 fn unix_now() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |since| since.as_secs())
 }
