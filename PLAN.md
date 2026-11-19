@@ -2277,3 +2277,9 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   The painted main-screen art (`Art`, `paint_main`) is gone; side panels unchanged.
   Not yet seen in the app (Mac locked). Open: the activity holograms still float over
   the screens at 1.92 m and may clash with the subjects.
+- 2026-11-19, Claude Opus 5.5: rocket reworked on request (no wireframe lines on the
+  body and nose, rings instead, three swept triangular fins) and re-baked. The user is
+  away from the Mac; nothing of today's look work is seen in the app yet. Next session:
+  take app screenshots first (hero, desk close-up), check screen brightness
+  (`MAIN_GAIN`), planet placement and whether the activity holograms clash with the
+  screen subjects; then, one item at a time with Blender approval, the rest of M30.
