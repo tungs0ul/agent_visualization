@@ -1895,3 +1895,10 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   with `scripts/replay.py` of `~/.agent-room/spike/events.jsonl` at speed 3: Claude
   stayed at the main desk while its tools ran, sub-agents beamed in and walked to it
   with their reports. Their short Bash calls ended before a walk to the lab showed.
+- 2026-11-19, Claude Opus 5.5: the chat console stretched past the window when Claude's
+  answer held a wide table, a long code line or a long path, taking its header and close
+  button off screen (the user's screenshot; reproduced with Haiku). The transcript
+  (`ui::transcript`, split out of the chat body) now scrolls both ways inside the
+  console's width, as the final-answer pop-up already did. A headless egui test lays out
+  the real console with such an answer: 890 px wide before, within 460 px + margins
+  after. Clippy clean, 63 tests pass. Not seen on screen after the fix (Mac locked).

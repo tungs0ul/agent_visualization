@@ -593,25 +593,8 @@ fn chat_console(ui: &mut egui::Ui, chat: &mut Desk, markdown: &mut MarkdownCache
         chat_controls(ui, session, &mut end);
         ui.separator();
         let input_height = 74.0;
-        egui::ScrollArea::vertical()
-            .stick_to_bottom(true)
-            .auto_shrink(false)
-            .max_height((ui.available_height() - input_height).max(140.0))
-            .show(ui, |ui| {
-                // Reading text: near-white on the dark panel (egui's dark default is
-                // mid-grey), with room between lines.
-                let style = ui.style_mut();
-                style.visuals.override_text_color = Some(egui::Color32::from_gray(232));
-                style.spacing.item_spacing.y = 6.0;
-                for entry in &session.transcript {
-                    chat_entry(ui, entry, markdown);
-                }
-                if !session.streaming.is_empty() {
-                    egui_commonmark::CommonMarkViewer::new().show(ui, &mut markdown.0, &session.streaming);
-                } else if session.busy {
-                    ui.label(egui::RichText::new("Claude is working…").weak().italics());
-                }
-            });
+        let height = (ui.available_height() - input_height).max(140.0);
+        transcript(ui, &session.transcript, &session.streaming, session.busy, height, markdown);
         // Images dropped on the window go with the next message (PLAN.md M24).
         if !chats.attachments.is_empty() {
             ui.horizontal_wrapped(|ui| {
@@ -813,6 +796,39 @@ fn chat_controls(ui: &mut egui::Ui, session: &mut crate::chat::ChatSession, end:
         });
     });
     ui.add(egui::Label::new(egui::RichText::new(&session.cwd).small().weak()).truncate());
+}
+
+/// The chat's messages, scrolling both ways: a wide table, code line or path scrolls
+/// inside the console instead of stretching it past the window (and its close button
+/// with it).
+fn transcript(
+    ui: &mut egui::Ui,
+    entries: &[crate::chat::Entry],
+    streaming: &str,
+    busy: bool,
+    height: f32,
+    markdown: &mut MarkdownCache,
+) {
+    egui::ScrollArea::both()
+        .stick_to_bottom(true)
+        .auto_shrink(false)
+        .max_width(ui.available_width())
+        .max_height(height)
+        .show(ui, |ui| {
+            // Reading text: near-white on the dark panel (egui's dark default is
+            // mid-grey), with room between lines.
+            let style = ui.style_mut();
+            style.visuals.override_text_color = Some(egui::Color32::from_gray(232));
+            style.spacing.item_spacing.y = 6.0;
+            for entry in entries {
+                chat_entry(ui, entry, markdown);
+            }
+            if !streaming.is_empty() {
+                egui_commonmark::CommonMarkViewer::new().show(ui, &mut markdown.0, streaming);
+            } else if busy {
+                ui.label(egui::RichText::new("Claude is working…").weak().italics());
+            }
+        });
 }
 
 /// One line of a chat: your message, Claude's (as markdown), a tool step or a note.
@@ -1301,4 +1317,41 @@ fn full_input(tool: &ToolCall) -> String {
         return command.to_owned();
     }
     serde_json::to_string_pretty(&tool.input).unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::chat::Entry;
+    use crate::console::{Console, hologram};
+
+    #[test]
+    fn wide_messages_scroll_inside_the_chat_instead_of_stretching_it() {
+        let ctx = egui::Context::default();
+        let long = "x".repeat(300);
+        let path = format!("/private/tmp/{}/file.txt", "very-long-folder-name-".repeat(12));
+        let cell = "extraordinarily-long-cell";
+        let answer = format!(
+            "Some prose.\n\n| a | b | c | d | e | f |\n|---|---|---|---|---|---|\n| {cell} | {cell} | {cell} | {cell} | {cell} | {cell} |\n\n```\n{long}\n```\n\n`{path}`"
+        );
+        let entries = [Entry::You(long.clone()), Entry::Claude(answer)];
+        let mut markdown = MarkdownCache::default();
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 900.0))),
+            ..Default::default()
+        };
+        // A few frames: the area learns its size from the previous one.
+        for _ in 0..4 {
+            ctx.begin_pass(input.clone());
+            hologram(&ctx, Console::Chat, egui::pos2(600.0, 850.0), |ui| {
+                transcript(ui, &entries, "", false, 400.0, &mut markdown);
+            });
+            ctx.end_pass().textures_delta.clear();
+        }
+        let id = egui::Id::new(("console", Console::Chat.title()));
+        let rect = ctx.memory(|memory| memory.area_rect(id)).expect("the console was drawn");
+        // The console's width plus its frame margins and stroke, nothing more.
+        assert!(rect.width() <= 460.0 + 2.0 * 10.0 + 2.0, "console grew to {} px", rect.width());
+        assert!(rect.min.x >= 0.0 && rect.max.x <= 1200.0, "console left the window: {rect:?}");
+    }
 }
