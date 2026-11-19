@@ -56,14 +56,14 @@ ORANGE = (1.0, 0.38, 0.06)
 PURPLE = (0.55, 0.22, 1.0)
 GREEN = (0.15, 1.0, 0.35)
 MAT_SPECS = {
-    "Panel": dict(color=(0.85, 0.86, 0.88), rough=0.32),
+    "Panel": dict(color=(0.62, 0.7, 0.82), rough=0.25, metal=0.35),
     "PanelDark": dict(color=(0.025, 0.035, 0.06), rough=0.12, metal=0.2),
-    "Trim": dict(color=(0.45, 0.48, 0.53), rough=0.35, metal=0.8),
-    "GlowCyan": dict(color=CYAN, rough=0.3, emit=CYAN, strength=6.0),
+    "Trim": dict(color=(0.3, 0.38, 0.52), rough=0.3, metal=0.85),
+    "GlowCyan": dict(color=CYAN, rough=0.3, emit=CYAN, strength=8.0),
     "GlowOrange": dict(color=ORANGE, rough=0.3, emit=ORANGE, strength=6.0),
     "GlowPurple": dict(color=PURPLE, rough=0.3, emit=PURPLE, strength=6.0),
     "GlowGreen": dict(color=GREEN, rough=0.3, emit=GREEN, strength=6.0),
-    "Holo": dict(color=(0.1, 0.75, 1.0), rough=0.2, emit=(0.1, 0.7, 1.0), strength=2.0, alpha=0.35),
+    "Holo": dict(color=(0.1, 0.75, 1.0), rough=0.2, emit=(0.1, 0.7, 1.0), strength=3.0, alpha=0.4),
     "HoloDark": dict(color=(0.01, 0.05, 0.08), rough=0.2, emit=(0.02, 0.25, 0.35), strength=1.0, alpha=0.6),
     "Glass": dict(color=(0.7, 0.92, 1.0), rough=0.05, alpha=0.2),
     "Paper": dict(color=(0.93, 0.96, 1.0), rough=0.6, emit=(0.85, 0.93, 1.0), strength=1.2),

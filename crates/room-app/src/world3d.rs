@@ -138,12 +138,12 @@ pub fn daylight(
     }
     *shown = Some(phase);
     let (clear, light, brightness, stars, sun) = match phase {
-        Daylight::Night => (Color::srgb(0.02, 0.02, 0.06), Color::srgb(0.55, 0.5, 1.0), 350.0, 1.0, None),
+        Daylight::Night => (Color::srgb(0.01, 0.02, 0.06), Color::srgb(0.48, 0.64, 1.0), 190.0, 1.0, None),
         Daylight::Day => {
-            (Color::srgb(0.05, 0.09, 0.2), Color::srgb(0.8, 0.85, 1.0), 600.0, 0.3, Some((Vec3::new(-8.0, -4.0, -26.0), LinearRgba::rgb(12.0, 10.0, 7.0))))
+            (Color::srgb(0.05, 0.09, 0.2), Color::srgb(0.7, 0.8, 1.0), 300.0, 0.3, Some((Vec3::new(-8.0, -4.0, -26.0), LinearRgba::rgb(12.0, 10.0, 7.0))))
         }
         Daylight::Dawn | Daylight::Dusk => {
-            (Color::srgb(0.1, 0.05, 0.1), Color::srgb(1.0, 0.7, 0.6), 450.0, 0.6, Some((Vec3::new(-10.0, -8.0, -26.0), LinearRgba::rgb(12.0, 4.0, 1.0))))
+            (Color::srgb(0.06, 0.05, 0.12), Color::srgb(0.8, 0.72, 0.85), 240.0, 0.6, Some((Vec3::new(-10.0, -8.0, -26.0), LinearRgba::rgb(12.0, 4.0, 1.0))))
         }
     };
     if let Ok(mut camera) = camera.single_mut() {
@@ -179,11 +179,11 @@ pub struct Kit<'a, 'w, 's> {
 }
 
 impl Kit<'_, '_, '_> {
-    fn glow(&mut self, color: LinearRgba) -> Handle<StandardMaterial> {
+    pub fn glow(&mut self, color: LinearRgba) -> Handle<StandardMaterial> {
         self.materials.add(StandardMaterial { base_color: Color::BLACK, emissive: color, ..default() })
     }
 
-    fn mesh(&mut self, mesh: impl Into<Mesh>, material: Handle<StandardMaterial>, at: Transform) -> Entity {
+    pub fn mesh(&mut self, mesh: impl Into<Mesh>, material: Handle<StandardMaterial>, at: Transform) -> Entity {
         let mesh = self.meshes.add(mesh.into());
         self.commands.spawn((Mesh3d(mesh), MeshMaterial3d(material), at)).id()
     }
@@ -224,6 +224,18 @@ pub fn build(kit: &mut Kit) {
     let command = Spot::Command.center();
     let station = kit.model("models/stations/main_desk.glb", command);
     kit.commands.entity(station).insert(StationBody);
+    command_core(kit, command);
+    // Cinematic light (PLAN.md M29): a dim blue room lit in pools. Cyan from the
+    // command core and the teleporter, warm orange accents by the back desks. No
+    // shadows, a short range each: cheap.
+    for (at, color, lumens, range) in [
+        (command + Vec3::new(0.0, 3.8, -0.4), Color::srgb(0.35, 0.8, 1.0), 350_000.0, 9.0),
+        (teleporter_spot() + Vec3::Y * 1.2, Color::srgb(0.3, 0.75, 1.0), 300_000.0, 6.0),
+        (Spot::Desk(0).center() + Vec3::new(0.0, 1.6, -0.6), Color::srgb(1.0, 0.6, 0.25), 90_000.0, 4.0),
+        (Spot::Desk(1).center() + Vec3::new(0.0, 1.6, -0.6), Color::srgb(1.0, 0.6, 0.25), 90_000.0, 4.0),
+    ] {
+        kit.commands.spawn((PointLight { color, intensity: lumens, range, ..default() }, Transform::from_translation(at)));
+    }
     for index in 0..DESKS.len() {
         let at = Spot::Desk(index as u8).center();
         kit.model("models/stations/writing_desk.glb", at);
@@ -277,6 +289,31 @@ impl DeskState {
 pub struct DeskLight {
     pub desk: u8,
     pub shown: DeskState,
+}
+
+/// The command core (PLAN.md M29, the user's reference image): a glass hologram
+/// cylinder over the command platform with a glowing ring at its foot and top.
+/// Additive, so Claude stays visible inside; static, so it costs no frames.
+fn command_core(kit: &mut Kit, command: Vec3) {
+    const RADIUS: f32 = 1.3;
+    const HEIGHT: f32 = 2.4;
+    let base = command.y + 0.38;
+    let glass = kit.materials.add(StandardMaterial {
+        base_color: Color::srgba(0.2, 0.7, 1.0, 0.05),
+        emissive: LinearRgba::rgb(0.02, 0.12, 0.28),
+        alpha_mode: AlphaMode::Add,
+        double_sided: true,
+        cull_mode: None,
+        unlit: true,
+        ..default()
+    });
+    let at = Transform::from_translation(command + Vec3::Y * (base + HEIGHT / 2.0));
+    kit.mesh(Cylinder::new(RADIUS, HEIGHT).mesh().resolution(48).without_caps().build(), glass, at);
+    let ring = kit.glow(LinearRgba::rgb(0.6, 3.0, 5.0));
+    for height in [base + 0.02, base + HEIGHT] {
+        let at = Transform::from_translation(command + Vec3::Y * height);
+        kit.mesh(Torus::new(RADIUS - 0.03, RADIUS + 0.03), ring.clone(), at);
+    }
 }
 
 /// Each desk's route colour, so the floor isn't one flat blue.
@@ -390,13 +427,6 @@ fn sky(kit: &mut Kit) {
             Transform::from_translation(at).with_scale(Vec3::splat(size)),
         ));
     }
-    let planet = kit.materials.add(StandardMaterial {
-        base_color: Color::srgb(0.25, 0.35, 0.9),
-        emissive: LinearRgba::rgb(0.2, 0.3, 1.0),
-        perceptual_roughness: 0.9,
-        ..default()
-    });
-    kit.mesh(Sphere::new(5.0), planet, Transform::from_xyz(12.0, 6.5, -26.0));
     // The sun, shown by day (`daylight`); placed where the high camera sees it
     // through the window.
     let sun_glow = kit.glow(LinearRgba::rgb(12.0, 10.0, 7.0));

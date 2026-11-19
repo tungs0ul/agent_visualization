@@ -100,7 +100,7 @@ pub(crate) struct Avatar {
     /// Its current report has been handed over or left on the desk.
     reported: bool,
     /// The station a sub-agent works at: where its first tool call took it.
-    desk: Option<u8>,
+    pub(crate) desk: Option<u8>,
     /// The location it is at or walking to, and since when (seconds of app time).
     at: Spot,
     since: f32,
@@ -143,6 +143,7 @@ pub fn build(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut graphs: ResMut<Assets<AnimationGraph>>,
+    mut images: ResMut<Assets<Image>>,
 ) {
     commands.insert_resource(Clips::load(&assets, &mut graphs));
 
@@ -156,18 +157,21 @@ pub fn build(
             ..default()
         },
         Tonemapping::TonyMcMapface,
-        Bloom::NATURAL,
+        // A little more glow than the default: the light strips and holograms carry
+        // the starship look (PLAN.md M29).
+        Bloom { intensity: 0.22, ..Bloom::NATURAL },
         Msaa::Sample4,
         Transform::from_translation(FULL_EYE).looking_at(FULL_LOOK, Vec3::Y),
     ));
     commands.spawn((
-        DirectionalLight { illuminance: 2500.0, color: Color::srgb(0.75, 0.75, 1.0), shadow_maps_enabled: true, ..default() },
+        DirectionalLight { illuminance: 2600.0, color: Color::srgb(0.78, 0.88, 1.0), shadow_maps_enabled: true, ..default() },
         Transform::from_rotation(Quat::from_euler(EulerRot::YXZ, -0.6, -0.95, 0.0)),
         CascadeShadowConfigBuilder { num_cascades: 1, maximum_distance: 30.0, ..default() }.build(),
     ));
-    commands.insert_resource(GlobalAmbientLight { color: Color::srgb(0.55, 0.5, 1.0), brightness: 350.0, ..default() });
+    commands.insert_resource(GlobalAmbientLight { color: Color::srgb(0.48, 0.64, 1.0), brightness: 190.0, ..default() });
     let mut kit = crate::world3d::Kit { commands: &mut commands, assets: &assets, meshes: &mut meshes, materials: &mut materials };
     crate::world3d::build(&mut kit);
+    crate::space::build(&mut kit, &mut images);
 }
 
 
@@ -655,13 +659,15 @@ pub fn labels(
     let ctx = contexts.ctx_mut()?;
     let Ok((camera, camera_at)) = camera.single() else { return Ok(()) };
     let offset = camera.logical_viewport_rect().map_or(Vec2::ZERO, |rect| rect.min);
-    // The command panel: where the settings and the other consoles are (PLAN.md M27),
-    // one button each. Fixed under the title, top left: anchored in the room it
-    // covered the robots' labels.
+    // The command panel (PLAN.md M27, M29): the current mission and a button for each
+    // console, centred under the top card as in the user's reference image.
     if !mode.mini {
         let color = egui::Color32::from_rgb(130, 200, 255);
+        let mission = model.shown().and_then(|session| session.prompts.last()).map(|prompt| room_proto::describe::truncate(prompt.trim(), 110));
+        let centre = camera.logical_viewport_rect().map_or(400.0, |rect| rect.center().x);
         egui::Area::new("command-sign".into())
-            .fixed_pos(egui::pos2(offset.x + 8.0, offset.y + 64.0))
+            .fixed_pos(egui::pos2(centre, offset.y + 96.0))
+            .pivot(egui::Align2::CENTER_TOP)
             .order(egui::Order::Middle)
             .show(ctx, |ui| {
                 egui::Frame::new()
@@ -670,7 +676,12 @@ pub fn labels(
                     .corner_radius(6.0)
                     .inner_margin(egui::Margin::symmetric(8, 4))
                     .show(ui, |ui| {
-                        ui.label(egui::RichText::new("Command").strong().color(color));
+                        ui.set_max_width(520.0);
+                        ui.label(egui::RichText::new("✦ Command").strong().color(color));
+                        if let Some(mission) = &mission {
+                            ui.label(egui::RichText::new(mission).small().color(crate::palette::TEXT));
+                        }
+                        ui.add_space(2.0);
                         ui.horizontal(|ui| {
                             for console in crate::console::Console::ALL.into_iter().filter(|console| console.on_command()) {
                                 let text = egui::RichText::new(console.hint()).small().color(crate::console::HOLO);

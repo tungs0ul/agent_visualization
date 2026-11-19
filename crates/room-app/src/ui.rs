@@ -171,7 +171,7 @@ pub fn draw(
     if let Some(play) = replay.active.as_ref() {
         let name = play.name.clone();
         egui::Area::new("replay-badge".into())
-            .anchor(egui::Align2::LEFT_TOP, egui::vec2(8.0, 116.0))
+            .anchor(egui::Align2::LEFT_TOP, egui::vec2(8.0, 64.0))
             .show(ctx, |ui| {
                 egui::Frame::new()
                     .fill(crate::palette::GLASS)
@@ -363,6 +363,10 @@ fn settings(
     }
     if row(ui, "Notifications", "", prefs.notify, "A macOS notification when Claude needs you and this window isn't in front") {
         prefs.notify = !prefs.notify;
+        prefs.save();
+    }
+    if row(ui, "Effects", "", prefs.effects, "Lightning, energy pulses and particles while agents work; off saves power") {
+        prefs.effects = !prefs.effects;
         prefs.save();
     }
     ui.add_space(4.0);
@@ -1001,6 +1005,9 @@ pub struct PanelPrefs {
     /// A macOS notification when Claude needs you and the window isn't in front.
     #[serde(default = "yes")]
     pub notify: bool,
+    /// The ship's energy effects: lightning, pulses, particles (PLAN.md M29).
+    #[serde(default = "yes")]
+    pub effects: bool,
 }
 
 fn yes() -> bool {
@@ -1009,7 +1016,7 @@ fn yes() -> bool {
 
 impl Default for PanelPrefs {
     fn default() -> Self {
-        Self { notify: true }
+        Self { notify: true, effects: true }
     }
 }
 
