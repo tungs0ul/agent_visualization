@@ -553,7 +553,74 @@ def flat(points, thick, mat, wire=None, rot_z=0.0, mirror_y=False):
     return ob
 
 
+PLATFORM = [True]   # a subject with its own base turns the ring platform off
+
+
 def station():
+    # After the user's reference: a round deck with a glowing rim, a domed hub with
+    # amber windows and an amber ring at its foot, a ring of modules with small
+    # screens round the edge, bridges to the hub, two antenna towers and a cargo arm,
+    # seen from above at an angle. Hologram style: smooth glowing surfaces.
+    PLATFORM[0] = False
+    rim = rim_face("station", strength=(1.0, 7.0), alpha=(0.85, 0.98), blend=0.2)
+    M_WIN = emit("window", (1.0, 0.5, 0.1), 6.0)[0]
+    M_SCREEN = emit("modscreen", (0.2, 0.75, 1.0), 5.0)[0]
+    # deck: a thick disc, a bright rim underneath, an inner deck ring
+    part(cyl, rim, (0, 0, -0.02), vertices=96, radius=0.25, depth=0.04)
+    part(tor, M_EDGE, (0, 0, -0.04), major_radius=0.25, minor_radius=0.004, major_segments=128)
+    part(tor, M_LINE, (0, 0, 0.0), major_radius=0.25, minor_radius=0.0018, major_segments=128)
+    part(tor, M_LINE_DIM, (0, 0, 0.001), major_radius=0.16, minor_radius=0.0015, major_segments=128)
+    # hub: a short drum and a dome, panel seams, amber windows, an amber ring at its foot
+    part(cyl, rim, (0, 0, 0.02), vertices=64, radius=0.115, depth=0.04)
+    part(tor, M_ORANGE, (0, 0, 0.003), major_radius=0.122, minor_radius=0.003, major_segments=96)
+    dome = part(uvs, rim_face("dome", strength=(1.6, 9.0), alpha=(0.9, 0.98), blend=0.3), (0, 0, 0.04),
+                segments=64, ring_count=32, radius=0.105)
+    for z in (0.075, 0.11):
+        r = math.sqrt(max(0.105 ** 2 - (z - 0.04) ** 2, 0))
+        part(tor, M_LINE_DIM, (0, 0, z), major_radius=r, minor_radius=0.0012, major_segments=64)
+    for k in range(6):
+        a = math.radians(k * 60 + 15)
+        part(cube, M_WIN, (0.117 * math.cos(a), 0.117 * math.sin(a), 0.022), (0.03, 0.004, 0.016), (0, 0, k * 60 + 15 + 90), size=1)
+    for k in range(3):
+        a = math.radians(k * 120 + 40)
+        part(cube, M_SCREEN, (0.085 * math.cos(a), 0.085 * math.sin(a), 0.1), (0.03, 0.004, 0.02), (35, 0, k * 120 + 40 + 90), size=1)
+    # ring of modules on the deck edge, each with a little screen and a light
+    for k in range(9):
+        if k == 6:
+            continue                         # a gap where the cargo arm leaves
+        a = math.radians(k * 40)
+        c = (0.205 * math.cos(a), 0.205 * math.sin(a), 0.025)
+        rot = (0, 0, k * 40 + 90)
+        part(cube, rim, c, (0.075, 0.05, 0.05), rot, size=1)
+        part(cube, M_EDGE, c, (0.075, 0.05, 0.05), rot, size=1, wire=0.0015)
+        part(cube, M_SCREEN, (0.205 * math.cos(a), 0.205 * math.sin(a), 0.052), (0.045, 0.028, 0.002), rot, size=1)
+        part(ico, M_AMBER if k % 2 else M_WHITE, (0.235 * math.cos(a), 0.235 * math.sin(a), 0.03), radius=0.004, subdivisions=1)
+    # bridges from the hub to the ring
+    for k in (1, 4, 7):
+        a = math.radians(k * 40)
+        part(cube, rim, (0.16 * math.cos(a), 0.16 * math.sin(a), 0.012), (0.07, 0.022, 0.016), (0, 0, k * 40), size=1)
+    # towers: a tall stacked one with an antenna mast, a cluster of masts
+    tx, ty = 0.09, 0.17
+    for z, r, h in ((0.07, 0.022, 0.08), (0.125, 0.03, 0.03), (0.155, 0.016, 0.04)):
+        part(cyl, rim, (tx, ty, z), vertices=24, radius=r, depth=h)
+        part(tor, M_EDGE, (tx, ty, z + h / 2), major_radius=r, minor_radius=0.0013, major_segments=24)
+    for dx, dy, h in ((0, 0, 0.09), (0.012, 0.004, 0.06)):
+        part(cyl, M_LINE, (tx + dx, ty + dy, 0.2 + h / 2), vertices=6, radius=0.0015, depth=h)
+    for dx, dy, h in ((-0.13, 0.09, 0.12), (-0.115, 0.1, 0.09), (-0.14, 0.105, 0.15), (-0.125, 0.115, 0.1)):
+        part(cyl, M_LINE, (dx, dy, 0.05 + h / 2), vertices=6, radius=0.002, depth=h)
+        part(ico, M_WHITE, (dx, dy, 0.05 + h), radius=0.004, subdivisions=1)
+    # cargo arm: a long boom out past the deck with lights along it
+    a = math.radians(6 * 40)
+    for t in (0.2, 0.27, 0.34):
+        part(cube, rim, (t * math.cos(a), t * math.sin(a), 0.02), (0.07, 0.045, 0.03), (0, 0, 240), size=1)
+        part(cube, M_EDGE, (t * math.cos(a), t * math.sin(a), 0.02), (0.07, 0.045, 0.03), (0, 0, 240), size=1, wire=0.0012)
+        part(cube, emit("cargo_green", (0.2, 1.0, 0.4), 5.0)[0] if t == 0.34 else M_WIN,
+             ((t) * math.cos(a), (t) * math.sin(a), 0.037), (0.05, 0.006, 0.003), (0, 0, 240), size=1)
+    pivot.scale = (1.05, 1.05, 1.05)
+    return (TILT + 38, 25)
+
+
+def iss():
     # A modular orbital station, with the detail that makes real ones read as real:
     # a lattice truss, solar wings of dark cells on a central mast, modules of
     # different sizes with side branches, a capsule docked at the front, ribbed
@@ -688,7 +755,7 @@ def blackhole():
     return (0, 0)
 
 
-SUBJECTS = dict(crate=crate, rocket=rocket, planet=planet, sun=sun, station=station, ship=ship, blackhole=blackhole)
+SUBJECTS = dict(iss=iss, crate=crate, rocket=rocket, planet=planet, sun=sun, station=station, ship=ship, blackhole=blackhole)
 angles = SUBJECTS[SUBJECT]()
 if os.environ.get("HOLO_ANGLES"):           # try other angles: "lean,turn,roll"
     angles = tuple(float(v) for v in os.environ["HOLO_ANGLES"].split(","))
@@ -723,7 +790,7 @@ if "earth" in EXTRAS:
         top = cy + math.sqrt(max(R * R - (x - 0.12) ** 2, 0.0))
         p.location = on_screen(x, top - rng.uniform(0.015, 0.1), 0.02)
         p.data.materials.append(M_AMBER if i % 3 == 0 else M_LINE_DIM)
-else:
+elif PLATFORM[0]:
     # platform rings under the subject, on the glass plane
     for r, mat, wd in ((0.27, M_EDGE, 0.006), (0.34, M_LINE_DIM, 0.003), (0.2, M_LINE, 0.003)):
         bpy.ops.mesh.primitive_torus_add(major_radius=r, minor_radius=wd, major_segments=96, minor_segments=6)
