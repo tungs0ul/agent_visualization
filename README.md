@@ -100,6 +100,18 @@ After pulling new changes, run `scripts/install-dev.sh` again and restart `agent
   commands with their output). The **teleporter** (**O**) starts a new session in a
   folder, and the **wall screen** (**T**) shows today's numbers. Esc or a click on the
   floor closes a console.
+- **Desks:** a desk's halo is dark while free, cyan while its robot works, amber while
+  it waits for you, green when done, red after a failure. A sub-agent's label is its
+  nameplate: task, tool count, failures, files written, current tool.
+- **Click a robot** for its details: its report (in its own words) next to what Agent
+  Room saw it do, each tool call with its input and result, the files it wrote, and
+  its tokens. A report that doesn't mention failed calls gets a "Check" note.
+- **Activity console** along the bottom: one line with the latest event; open it for
+  Live feed, Tool calls, Files, Errors and Metrics. **Export report** there writes a
+  Markdown mission report to `~/.agent-room/reports/` and opens it.
+- **Mission replay** (**H**, or Replay on the command sign): pick a recorded session
+  and watch it again, at 1× to 10×, with a timeline to jump around. Live sessions keep
+  running and come back when you exit.
 - The app makes no sound.
 - **Chat:** answers stream in as Claude writes, each tool step shows with ✔ or ✖,
   **Stop** ends the turn (not the session), and you can switch the model and the
@@ -142,8 +154,15 @@ After pulling new changes, run `scripts/install-dev.sh` again and restart `agent
 ## Privacy
 
 Hook events (commands, file paths, prompts) go from Claude Code to the app over a Unix
-socket in `~/.agent-room` that only your user can open. Nothing is sent anywhere or
-written to disk, except the window position in `~/.agent-room/window.json`.
+socket in `~/.agent-room` that only your user can open. Nothing is sent anywhere.
+
+On disk, all in `~/.agent-room` (readable only by your user):
+- `missions/<session>.jsonl`: every hook event of each session, for mission replay.
+  This includes your prompts, commands and file paths. Kept 30 days, then deleted;
+  delete the folder any time to remove them.
+- `reports/`: mission reports you export.
+- `window.json`, `ui.json`, `commands.json`: window position, settings, and the slash
+  command list.
 
 ## Uninstall
 

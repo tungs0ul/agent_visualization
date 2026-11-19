@@ -989,7 +989,15 @@ None of these is in the backlog above. The user picks.
 11. **Commit or open a PR from the writing desk** (M): git and `gh`. Moves the app from
     watching to doing, so the user decides.
 
-### M28: Mission control from the "Starship Mission Control 2.0" brief (requested 2026-11-19, not started)
+### M28: Mission control from the "Starship Mission Control 2.0" brief (requested 2026-11-19, done 2026-11-19)
+
+The user answered the triage below with "just do everything": all of "Take", and
+both "Ask" items (replay, bottom console). "Leave out" stays out. Built: `work.rs`
+(per-agent record), desk halos (`view3d::desk_lights`), nameplates, robot details,
+sub-agent tokens (`agent_transcript_path`), `palette.rs`, the bottom activity console
+(`ui::activity_console`, tabs Live feed, Tool calls, Files, Errors, Metrics; the
+Errors tab is the errors filter), `report.rs`, mission replay (`replay.rs`, Replay
+console on H). Not built: the brief's second image (a chart wall on the window).
 
 The user pasted a long brief (web-style mission control: desks per task, bottom
 activity console with tabs, inspection panel, toolbar, replay, approval station,
@@ -1385,6 +1393,7 @@ config file, and can remove both cleanly.
 - [x] M23 StopFailure reasons, PostCompact, PostModelSwitch, notices (2026-11-18; plugin 0.3.0)
 - [x] M24 Chat @ mentions and dropped images (2026-11-18; not yet seen on screen)
 - [x] M7 Distribution, code side (2026-11-17); publishing left to the user
+- [x] M28 Mission control: desk states, nameplates, details, activity console, report, replay (2026-11-19; console tabs and replay not yet seen on screen)
 - [ ] M27 Starship bridge (2026-11-19: front bridge with eight crew desks, free desks for sub-agents, warp stars; power still to measure)
 - [x] M26 Robots work at their desk, walk only when it matters (2026-11-19)
 - [x] M25 Pause, resume and stop any session (2026-11-18; plugin 0.4.0; buttons not yet seen on screen)
@@ -2010,3 +2019,13 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   teleporter). The command sign moved up (3.5 m) so Claude's label no longer covers
   its Chat button. Clippy clean; not seen on screen (display asleep). M28 written
   from the user's "Mission Control 2.0" brief.
+- 2026-11-19, Claude Opus 5.5: M28 built in four commits (3bf2d85, d6d6bd3, bb26ffb
+  and the docs). Checked: clippy, 68 tests (work record, report rendering, replay
+  load/play), desk halos and nameplates on screen with a synthetic busy session,
+  recording end to end (the app wrote all 126 events of a replayed session to
+  `missions/busy-1.jsonl`) and playback started from it without errors. **Not seen on
+  screen**: the activity console (folded and open), the Replay console and badge, and
+  the robot details changes; the display slept during those runs. To look:
+  `AGENT_ROOM_FEED=tools`, `AGENT_ROOM_REPLAY=<recording>` with
+  `AGENT_ROOM_CONSOLE=replay`, `AGENT_ROOM_SHOW_DETAILS=1`. README's privacy section
+  now lists what is written to disk (mission recordings hold prompts and commands).
