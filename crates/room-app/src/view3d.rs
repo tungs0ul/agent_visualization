@@ -658,13 +658,13 @@ pub fn labels(
     // The command station's sign: where the settings and the other consoles are
     // (PLAN.md M27), one button each.
     if !mode.mini
-        && let Ok(screen) = camera.world_to_viewport(camera_at, Spot::Command.center() + Vec3::Y * 3.5)
+        && let Ok(screen) = camera.world_to_viewport(camera_at, Spot::Command.center() + Vec3::new(-2.6, 1.0, 0.0))
     {
         let screen = screen + offset;
         let color = egui::Color32::from_rgb(130, 200, 255);
         egui::Area::new("command-sign".into())
             .fixed_pos(egui::pos2(screen.x, screen.y))
-            .pivot(egui::Align2::CENTER_BOTTOM)
+            .pivot(egui::Align2::RIGHT_CENTER)
             .order(egui::Order::Background)
             .show(ctx, |ui| {
                 egui::Frame::new()

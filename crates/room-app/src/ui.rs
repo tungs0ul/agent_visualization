@@ -196,6 +196,7 @@ pub fn draw(
         let shown = model.shown();
         let height = ctx.viewport_rect().height() * 0.36;
         egui::Panel::bottom("activity")
+            .resizable(false)
             .frame(egui::Frame::new().fill(crate::palette::GLASS).inner_margin(egui::Margin::symmetric(10, 4)))
             .show(&mut root, |ui| activity_console(ui, &mut state.feed, lines, shown, &chat.usage, final_answer.as_ref(), height));
     }
@@ -1255,9 +1256,15 @@ fn activity_console(
         ui.label(egui::RichText::new("No session yet.").weak());
         return;
     };
-    ui.set_height(height);
     let crew = crew(session);
-    egui::ScrollArea::vertical().id_salt(("feed", tab.title())).auto_shrink(false).stick_to_bottom(tab == FeedTab::Live).show(
+    // A fixed height: the list scrolls inside it instead of growing the panel.
+    egui::ScrollArea::vertical()
+        .id_salt(("feed", tab.title()))
+        .auto_shrink(false)
+        .max_height(height)
+        .min_scrolled_height(height)
+        .stick_to_bottom(tab == FeedTab::Live)
+        .show(
         ui,
         |ui| match tab {
             FeedTab::Live => event_log(ui, lines, Some(&session.id)),
@@ -1649,6 +1656,40 @@ mod tests {
     use super::*;
     use crate::chat::Entry;
     use crate::console::{Console, hologram};
+
+    #[test]
+    fn the_open_activity_console_keeps_its_height_inside_the_window() {
+        use room_proto::event::RoomEvent;
+        let mut model = crate::model::Model::default();
+        for index in 0..150 {
+            let hook = serde_json::json!({
+                "session_id": "s", "cwd": "/src/app", "hook_event_name": "PreToolUse", "tool_name": "Bash",
+                "tool_input": { "command": format!("echo {index}") }, "tool_use_id": format!("t{index}"),
+            });
+            model.apply(&RoomEvent::parse(&hook).unwrap());
+        }
+        let session = model.shown().unwrap();
+        let lines = VecDeque::new();
+        let usage = crate::usage::Usage::default();
+        let ctx = egui::Context::default();
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 900.0));
+        let input = egui::RawInput { screen_rect: Some(screen), ..Default::default() };
+        let height = 900.0 * 0.36;
+        let mut feed = Feed { open: Some(FeedTab::Tools), exported: None };
+        let mut panel = egui::Rect::NOTHING;
+        for _ in 0..3 {
+            ctx.begin_pass(input.clone());
+            let mut root = egui::Ui::new(ctx.clone(), "root".into(), egui::UiBuilder::new().max_rect(screen));
+            panel = egui::Panel::bottom("activity")
+                .resizable(false)
+                .show(&mut root, |ui| activity_console(ui, &mut feed, &lines, Some(session), &usage, None, height))
+                .response
+                .rect;
+            ctx.end_pass().textures_delta.clear();
+        }
+        assert!(panel.max.y <= 900.5, "the console runs past the window: {panel:?}");
+        assert!(panel.height() < height + 60.0, "150 calls grew the console to {} px", panel.height());
+    }
 
     #[test]
     fn wide_messages_scroll_inside_the_chat_instead_of_stretching_it() {
