@@ -7,7 +7,7 @@
 
 use bevy::prelude::*;
 
-use crate::world3d::{DESKS, Kit, Spot};
+use crate::world3d::{Kit, Spot};
 
 /// Where the ceiling's underside is, and where the original walls stop.
 pub const CEILING: f32 = 7.5;
@@ -20,29 +20,30 @@ const SIDE_X: f32 = 10.1;
 const CORNER_R: f32 = 2.6;
 const FRONT_Z: f32 = 5.0;
 
-/// The palette the user gave: icy blue-white, cyan, architectural blue, amber.
-const ICY: LinearRgba = LinearRgba::rgb(0.70, 0.91, 1.0);
-const CYAN: LinearRgba = LinearRgba::rgb(0.02, 0.62, 1.0);
-
-/// An under-desk amber lamp (hidden on Low graphics).
-#[derive(Component)]
-pub struct DeskLamp;
+/// The brief's glow colours (linear): cyan #38C8FF for strips and rings, azure
+/// #2E8BFF for the ceiling strips and fixture discs. Never white: the tonemapper burns
+/// a bright saturated colour to a white core by itself and keeps the halo coloured.
+const CYAN: LinearRgba = LinearRgba::rgb(0.04, 0.58, 1.0);
+const AZURE: LinearRgba = LinearRgba::rgb(0.027, 0.258, 1.0);
+/// The fixtures' light: a cool blue-white (#CFE6FF), a light colour, not a glow.
+const FIXTURE_LIGHT: Color = Color::srgb(0.81, 0.9, 1.0);
 
 pub fn build(kit: &mut Kit) {
+    // The brief's materials (section 3.5): wall panels #122241, frames #1A2640.
     let hull = kit.materials.add(StandardMaterial {
-        base_color: Color::srgb(0.075, 0.1, 0.15),
-        metallic: 0.85,
-        perceptual_roughness: 0.32,
+        base_color: Color::srgb_u8(0x12, 0x22, 0x41),
+        metallic: 0.5,
+        perceptual_roughness: 0.45,
         ..default()
     });
     let trim = kit.materials.add(StandardMaterial {
-        base_color: Color::srgb(0.55, 0.6, 0.7),
-        metallic: 1.0,
-        perceptual_roughness: 0.2,
+        base_color: Color::srgb_u8(0x1A, 0x26, 0x40),
+        metallic: 0.85,
+        perceptual_roughness: 0.28,
         ..default()
     });
-    let strip = kit.glow(CYAN * 5.0);
-    let white = kit.glow(ICY * 10.0);
+    let strip = kit.glow(CYAN * 2.4);
+    let white = kit.glow(AZURE * 2.6);
     let mid = (WALL_TOP + CEILING) / 2.0;
     let tall = CEILING - WALL_TOP;
 
@@ -99,8 +100,8 @@ pub fn build(kit: &mut Kit) {
     let command = Spot::Command.center();
     let mut fixtures = vec![(Vec2::new(command.x, command.z), 1.7, 4_000_000.0)];
     fixtures.extend([(-4.0, -0.9), (4.0, -0.9), (-4.6, 3.2), (4.6, 3.2)].map(|(x, z)| (Vec2::new(x, z), 1.1, 2_600_000.0)));
-    let disc = kit.glow(ICY * 14.0);
-    let ring = kit.glow(CYAN * 7.0);
+    let disc = kit.glow(AZURE * 3.2);
+    let ring = kit.glow(CYAN * 2.8);
     for (at, radius, lumens) in fixtures {
         let centre = Vec3::new(at.x, CEILING, at.y);
         let face_down = Quat::from_rotation_x(std::f32::consts::FRAC_PI_2);
@@ -109,7 +110,7 @@ pub fn build(kit: &mut Kit) {
         kit.mesh(Torus::new(radius + 0.3, radius + 0.38), ring.clone(), Transform::from_translation(centre - Vec3::Y * 0.04));
         kit.commands.spawn((
             SpotLight {
-                color: Color::LinearRgba(ICY),
+                color: FIXTURE_LIGHT,
                 intensity: lumens,
                 range: 16.0,
                 radius: radius * 0.6,
@@ -118,16 +119,8 @@ pub fn build(kit: &mut Kit) {
                 ..default()
             },
             Transform::from_translation(centre - Vec3::Y * 0.1).looking_at(Vec3::new(at.x, 0.0, at.y), Vec3::Z),
+            crate::look::BaseIntensity(lumens),
         ));
     }
 
-    // Warm amber under every desk, low and soft.
-    for index in 0..DESKS.len() {
-        let desk = Spot::Desk(index as u8).center();
-        kit.commands.spawn((
-            PointLight { color: Color::srgb(1.0, 0.7, 0.36), intensity: 14_000.0, range: 2.0, radius: 0.6, ..default() },
-            Transform::from_translation(desk + Vec3::new(0.0, 0.65, -0.05)),
-            DeskLamp,
-        ));
-    }
 }

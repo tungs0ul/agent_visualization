@@ -12,7 +12,6 @@ use std::time::Duration;
 use bevy::gltf::GltfMaterialName;
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::light::CascadeShadowConfigBuilder;
-use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
 use bevy::world_serialization::{WorldAssetRoot, WorldInstanceReady};
 use bevy_egui::{EguiContexts, egui};
@@ -160,9 +159,6 @@ pub fn build(
             ..default()
         },
         Tonemapping::TonyMcMapface,
-        // A little more glow than the default: the light strips and holograms carry
-        // the starship look (PLAN.md M29).
-        Bloom { intensity: 0.22, ..Bloom::NATURAL },
         Msaa::Sample4,
         Transform::from_translation(FULL_EYE).looking_at(FULL_LOOK, Vec3::Y),
         // What polished metal reflects (PLAN.md M29): a generated bridge-like
@@ -174,7 +170,9 @@ pub fn build(
         },
     ));
     commands.spawn((
-        DirectionalLight { illuminance: 2600.0, color: Color::srgb(0.78, 0.88, 1.0), shadow_maps_enabled: true, ..default() },
+        // Illuminance and colour come from the look settings (`look::apply`); no shadow
+        // maps: the user chose the plain look over the heavier graphics presets.
+        DirectionalLight { illuminance: 1800.0, shadow_maps_enabled: false, ..default() },
         Transform::from_rotation(Quat::from_euler(EulerRot::YXZ, -0.6, -0.95, 0.0)),
         CascadeShadowConfigBuilder { num_cascades: 1, maximum_distance: 30.0, ..default() }.build(),
     ));
@@ -675,12 +673,12 @@ pub fn labels(
     if !mode.mini {
         let color = egui::Color32::from_rgb(130, 200, 255);
         let mission = model.shown().and_then(|session| session.prompts.last()).map(|prompt| room_proto::describe::truncate(prompt.trim(), 110));
-        // At the left, level with the bottom of the window, as in the user's reference:
-        // centred it hid the view out.
-        let rect = camera.logical_viewport_rect().unwrap_or(bevy::math::Rect::new(0.0, 0.0, 800.0, 600.0));
+        // Centred over the command core (the user, 2026-11-19), its foot just above
+        // the glass cylinder.
+        let above = camera.world_to_viewport(camera_at, Spot::Command.center() + Vec3::Y * 3.3).unwrap_or(Vec2::ZERO) + offset;
         egui::Area::new("command-sign".into())
-            .fixed_pos(egui::pos2(rect.min.x + rect.width() * 0.2, rect.min.y + rect.height() * 0.3))
-            .pivot(egui::Align2::CENTER_CENTER)
+            .fixed_pos(egui::pos2(above.x, above.y))
+            .pivot(egui::Align2::CENTER_BOTTOM)
             .order(egui::Order::Middle)
             .show(ctx, |ui| {
                 egui::Frame::new()
@@ -1137,57 +1135,6 @@ pub fn desk_lights(
                 material.emissive = state.glow();
             }
         }
-    }
-}
-
-/// Applies the graphics quality (PLAN.md M29) to the camera and lights, at start
-/// and whenever the setting changes.
-#[allow(clippy::type_complexity, clippy::too_many_arguments)]
-pub fn apply_quality(
-    mut commands: Commands,
-    prefs: Res<crate::ui::PanelPrefs>,
-    camera: Query<Entity, With<RoomCamera3d>>,
-    mut sun: Query<&mut DirectionalLight>,
-    mut lamps: Query<&mut PointLight>,
-    mut spots: Query<&mut SpotLight>,
-    mut desk_lamps: Query<&mut Visibility, With<crate::hull::DeskLamp>>,
-    mut done: Local<Option<crate::ui::Quality>>,
-) {
-    use crate::ui::Quality;
-    use bevy::anti_alias::fxaa::Fxaa;
-    use bevy::pbr::ScreenSpaceAmbientOcclusion;
-    let quality = prefs.quality;
-    if *done == Some(quality) {
-        return;
-    }
-    let Ok(camera) = camera.single() else { return };
-    *done = Some(quality);
-    let mut camera = commands.entity(camera);
-    match quality {
-        Quality::Low => {
-            camera.remove::<(Bloom, ScreenSpaceAmbientOcclusion, Fxaa)>().insert(Msaa::Sample2);
-        }
-        Quality::Medium => {
-            camera.remove::<(ScreenSpaceAmbientOcclusion, Fxaa)>().insert((Msaa::Sample4, Bloom { intensity: 0.22, ..Bloom::NATURAL }));
-        }
-        Quality::High => {
-            // Ambient occlusion needs multisampling off; FXAA smooths the edges instead.
-            camera.insert((Msaa::Off, Fxaa::default(), ScreenSpaceAmbientOcclusion::default(), Bloom { intensity: 0.25, ..Bloom::NATURAL }));
-        }
-    }
-    for mut light in &mut sun {
-        light.shadow_maps_enabled = quality != Quality::Low;
-    }
-    // The ceiling fixtures cast shadows on High only; point lamps never do.
-    for mut lamp in &mut lamps {
-        lamp.shadow_maps_enabled = false;
-    }
-    for mut spot in &mut spots {
-        spot.shadow_maps_enabled = quality == Quality::High;
-    }
-    // Low drops the amber desk lamps (eight lights fewer).
-    for mut visibility in &mut desk_lamps {
-        *visibility = if quality == Quality::Low { Visibility::Hidden } else { Visibility::Inherited };
     }
 }
 

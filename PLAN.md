@@ -2094,3 +2094,16 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   dark colour #1B2E43 vs #0B2146). Not built yet from phase 0: look config with hot
   reload, inspector, hero screenshot flag, FPS overlay (screenshot env vars and the
   busy-session replay serve for now).
+- 2026-11-19, Claude Opus 5.5: M30 phase 1 (value and colour) done. The user removed
+  the Low/Medium/High setting ("medium and high just have weird opacity"); the plain
+  look stays: no bloom, no SSAO, no shadow maps, no desk lamps. The command panel is
+  centred over the command core. `look.rs` + `assets/look.json`: exposure, ambient
+  (25, #1A3A7A), key light (#9CC2FF, 1800 lx), reflection strength, light scales,
+  colour grading (post saturation 1.15, temperature -0.05, contrast 1.06), vignette
+  0.3, sky #020A1E; a dev build re-reads the file within 0.5 s of a save. Floor,
+  walls, frames in the brief's navy; no white glow (cyan #38C8FF and azure #2E8BFF);
+  glow intensities lowered so the tonemapper keeps them saturated without bloom;
+  holo screens saturated azure. The brief's pack is in `docs/agent-room-visual-
+  overhaul/` (PROMPT.md, reference images, crops, tools). Metrics (tools/look_metrics.py
+  with a scratch venv for numpy/pillow): 7/7 within tolerance, was 1/7; glow share
+  6.6% vs 10.4%. Screens: baseline/phase1_hero.png, phase1_compare.png.

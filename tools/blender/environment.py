@@ -71,18 +71,18 @@ CYAN = (0.0, 0.62, 1.0)
 PURPLE = (0.45, 0.12, 1.0)
 ORANGE = (1.0, 0.38, 0.05)
 MATS = {m.name: m for m in [
-    make_material("Floor", (0.06, 0.075, 0.11), 0.12, metal=0.65),
-    make_material("FloorAlt", (0.09, 0.11, 0.16), 0.1, metal=0.7),
+    make_material("Floor", (0.0044, 0.0103, 0.0331), 0.3, metal=0.75),
+    make_material("FloorAlt", (0.006, 0.014, 0.042), 0.26, metal=0.75),
     make_material("Seam", (0.008, 0.009, 0.012), 0.6, metal=0.3),
-    make_material("Pad", (0.02, 0.03, 0.06), 0.18, metal=0.7),
-    make_material("Panel", (0.1, 0.13, 0.2), 0.24, metal=0.7),
+    make_material("Pad", (0.0018, 0.006, 0.0242), 0.35, metal=0.7),
+    make_material("Panel", (0.006, 0.0159, 0.0513), 0.45, metal=0.5),
     make_material("Metal", (0.42, 0.5, 0.62), 0.28, metal=1.0),
     make_material("Graphite", (0.02, 0.03, 0.055), 0.35, metal=0.6),
-    make_material("GlowCyan", CYAN, 0.3, emit=CYAN, strength=9.0),
+    make_material("GlowCyan", CYAN, 0.3, emit=CYAN, strength=2.8),
     make_material("GlowPurple", PURPLE, 0.3, emit=PURPLE, strength=2.0),
-    make_material("GlowOrange", ORANGE, 0.3, emit=ORANGE, strength=5.0),
+    make_material("GlowOrange", ORANGE, 0.3, emit=ORANGE, strength=2.2),
     make_material("Glass", (0.12, 0.18, 0.26), 0.04, alpha=0.15),
-    make_material("Holo", (0.05, 0.7, 1.0), 0.2, emit=(0.05, 0.7, 1.0), strength=4.0, alpha=0.35),
+    make_material("Holo", (0.02, 0.2, 1.0), 0.2, emit=(0.03, 0.24, 1.0), strength=3.0, alpha=0.75),
     make_material("Leaf", (0.06, 0.32, 0.12), 0.5),
     make_material("Pot", (0.82, 0.83, 0.85), 0.2),
 ]}

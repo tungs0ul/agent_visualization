@@ -68,7 +68,7 @@ MAT_SPECS = {
     "Panel": dict(color=(0.3, 0.34, 0.43), rough=0.22, metal=0.75),
     "PanelDark": dict(color=(0.025, 0.035, 0.06), rough=0.12, metal=0.2),
     "Trim": dict(color=(0.3, 0.33, 0.38), rough=0.3, metal=0.9),
-    "Energy": dict(color=CYAN, rough=0.3, emit=CYAN, strength=6.0),
+    "Energy": dict(color=CYAN, rough=0.3, emit=CYAN, strength=2.6),
     "Beam": dict(color=(0.35, 0.85, 1.0), rough=0.2, emit=(0.1, 0.75, 1.0), strength=2.2, alpha=0.09),
 }
 

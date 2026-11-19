@@ -146,11 +146,8 @@ pub fn daylight(
             (Color::srgb(0.06, 0.05, 0.12), Color::srgb(0.8, 0.72, 0.85), 240.0, 0.6, Some((Vec3::new(-10.0, -8.0, -26.0), LinearRgba::rgb(12.0, 4.0, 1.0))))
         }
     };
-    if let Ok(mut camera) = camera.single_mut() {
-        camera.clear_color = ClearColorConfig::Custom(clear);
-    }
-    ambient.color = light;
-    ambient.brightness = brightness;
+    // Sky colour, ambient light and exposure come from the look settings (`look`).
+    let _ = (clear, light, brightness, &mut camera, &mut ambient);
     if let Some(mut material) = materials.get_mut(&sky.stars) {
         material.emissive = LinearRgba::rgb(3.0, 3.2, 4.0) * stars;
     }
@@ -232,7 +229,7 @@ pub fn build(kit: &mut Kit) {
         (command + Vec3::new(0.0, 3.8, -0.4), Color::srgb(0.35, 0.8, 1.0), 350_000.0, 9.0),
         (teleporter_spot() + Vec3::Y * 1.2, Color::srgb(0.3, 0.75, 1.0), 300_000.0, 6.0),
     ] {
-        kit.commands.spawn((PointLight { color, intensity: lumens, range, ..default() }, Transform::from_translation(at)));
+        kit.commands.spawn((PointLight { color, intensity: lumens, range, ..default() }, Transform::from_translation(at), crate::look::BaseIntensity(lumens)));
     }
     for index in 0..DESKS.len() {
         let at = Spot::Desk(index as u8).center();
@@ -274,7 +271,7 @@ impl DeskState {
     pub fn glow(self) -> LinearRgba {
         match self {
             DeskState::Free => LinearRgba::BLACK,
-            DeskState::Working => LinearRgba::rgb(0.5, 2.6, 4.0),
+            DeskState::Working => LinearRgba::rgb(0.08, 1.15, 2.4),
             DeskState::Waiting => LinearRgba::rgb(4.0, 2.2, 0.4),
             DeskState::Done => LinearRgba::rgb(0.4, 3.6, 1.6),
             DeskState::Failed => LinearRgba::rgb(4.0, 0.6, 0.8),
