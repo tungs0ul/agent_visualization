@@ -2360,3 +2360,13 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   will conflict (systems lists). Then push. Rules still apply: Blender look approval
   before porting new looks; kill all processes you start; the user's own agent-room
   (started from their terminal, relative path) is theirs.
+- 2026-11-20, Claude Opus 5.5: Comets and meteors outside the window (`visitor.rs`):
+  one at a time every 2-5 min (comets about 1 in 3), crossing in 6-10 s on a slightly
+  slanted path, entering and leaving off the glass, head turned along the motion as
+  the camera sees it, faded at the ends. Comets at z -100 (behind the small planet,
+  in front of the nebula), meteors at z -36 (in front of the big planet). Power: no
+  timer of its own; it checks the clock on frames already drawn (60 s low-power
+  wake-up while dozing), and only while one is on screen `pace_updates` draws at the
+  walking rate (not counted as activity). `AGENT_ROOM_VISITOR=comet|meteor` sends one
+  a second after start. Not yet checked visually: the screen was locked, so
+  screenshots were black; check with the env var.

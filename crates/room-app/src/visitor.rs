@@ -81,13 +81,6 @@ impl Pass {
         self.from.lerp(self.to, t)
     }
 
-    /// Angle of the motion on the glass, counter-clockwise from +x: the sprite's head
-    /// (+x) is turned this way, so it leads.
-    fn heading(&self) -> f32 {
-        let d = self.to - self.from;
-        d.y.atan2(d.x)
-    }
-
     /// Fades in over the first and out over the last 12 %.
     fn fade(t: f32) -> f32 {
         let edge = (t.min(1.0 - t) / 0.12).clamp(0.0, 1.0);
@@ -200,7 +193,7 @@ pub fn fly(
         }
         any = true;
         *transform = place(&visitor.pass, t);
-        if let Some(material) = materials.get_mut(&visitor.material) {
+        if let Some(mut material) = materials.get_mut(&visitor.material) {
             // Premultiplied: fading scales the added light and the hiding alike.
             let f = Pass::fade(t);
             material.base_color = Color::LinearRgba(LinearRgba::new(GAIN * f, GAIN * f, GAIN * f, f));
@@ -216,8 +209,14 @@ fn place(pass: &Pass, t: f32) -> Transform {
     let (at, reach) = through_window(glass.x, glass.y, pass.z);
     // As `space::planet_sprite`: face the camera, then half a turn about Y so the front
     // (not the culled back) shows unmirrored; local +x is then screen right.
-    let facing = Transform::from_translation(at).looking_at(crate::view3d::FULL_EYE, Vec3::Y).rotation;
-    let rotation = facing * Quat::from_rotation_y(PI) * Quat::from_rotation_z(pass.heading());
+    let facing = Transform::from_translation(at).looking_at(crate::view3d::FULL_EYE, Vec3::Y).rotation * Quat::from_rotation_y(PI);
+    // Turn the head along the motion as the camera sees it: the path's direction in
+    // the plane facing the camera (the glass is not that plane: the camera looks down).
+    let (from, _) = through_window(pass.from.x, pass.from.y, pass.z);
+    let (to, _) = through_window(pass.to.x, pass.to.y, pass.z);
+    let motion = to - from;
+    let heading = (motion.dot(facing * Vec3::Y)).atan2(motion.dot(facing * Vec3::X));
+    let rotation = facing * Quat::from_rotation_z(heading);
     Transform::from_translation(at).with_rotation(rotation).with_scale(Vec3::splat(pass.length / ASPECT * reach))
 }
 
@@ -240,7 +239,8 @@ mod tests {
                 }
                 assert!(pass.from.x.signum() != pass.to.x.signum());
                 // Slanted, but only slightly.
-                assert!(pass.heading().sin().abs() < 0.25, "{pass:?}");
+                let d = pass.to - pass.from;
+                assert!((d.y / d.length()).abs() < 0.25, "{pass:?}");
                 assert!((0.0..=1.0).contains(&Pass::fade(0.5)) && Pass::fade(0.0) == 0.0 && Pass::fade(1.0) == 0.0);
             }
         }
@@ -252,10 +252,13 @@ mod tests {
             let a = place(&pass, 0.3);
             let b = place(&pass, 0.6);
             // The sprite's +x (its head) points where it goes.
+            // Compared in the plane facing the camera, as the motion is seen.
             let head = a.rotation * Vec3::X;
-            assert!(head.dot((b.translation - a.translation).normalize()) > 0.99, "{pass:?}");
-            // And its front faces the camera (not culled).
             let front = a.rotation * Vec3::Z;
+            let motion = b.translation - a.translation;
+            let seen = (motion - front * motion.dot(front)).normalize();
+            assert!(head.dot(seen) > 0.999, "{pass:?}");
+            // And its front faces the camera (not culled).
             assert!(front.dot((crate::view3d::FULL_EYE - a.translation).normalize()) > 0.99);
         }
     }
