@@ -14,9 +14,7 @@ path = "src/main.rs"
 room-proto = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-# System fonts for the command hologram's text (Vietnamese, German, any script the
-# Mac has), found by family name (`command_holo`).
-bevy = { version = "0.20.1", features = ["system_font_discovery"] }
+bevy = "0.20.1"
 bevy_egui = "0.43.1"
 # Markdown (headings, lists, code blocks) in Claude's final answer.
 egui_commonmark = "0.25"

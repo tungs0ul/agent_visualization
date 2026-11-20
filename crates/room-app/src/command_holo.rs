@@ -8,8 +8,8 @@
 //! The frame, glass, beams and emblem are meshes built here once. The writing is
 //! Bevy UI rendered into a texture by a camera of its own that is switched on only
 //! for a few frames after the shown content changes: a still hologram costs nothing.
-//! Text uses the Mac's system fonts by family name (bevy's `system_font_discovery`),
-//! which cover Vietnamese, German and any other script the system has.
+//! Text uses the bundled Noto Sans Light (`assets/fonts`), which covers Vietnamese and
+//! German; its symbols are limited, so the dots are • and the step marker ›.
 
 use std::f32::consts::PI;
 
@@ -19,7 +19,7 @@ use bevy::camera::visibility::RenderLayers;
 use bevy::mesh::Indices;
 use bevy::prelude::*;
 use bevy::render::render_resource::{PrimitiveTopology, TextureFormat};
-use bevy::text::FontSource;
+use bevy::text::{Font, FontSource};
 
 use crate::model::{Model, Pose, SessionState};
 use crate::world3d::{Kit, Spot};
@@ -48,9 +48,6 @@ const RENDER_FRAMES: u8 = 3;
 /// Recent tools shown as chips, and calls shown as bars.
 const CHIPS: usize = 5;
 const BARS: usize = 10;
-
-/// The fonts, best first; the system falls back per character for scripts they lack.
-const FONTS: &str = "'Avenir Next', 'Helvetica Neue', 'Arial Unicode MS', sans-serif";
 
 const WHITE: Color = Color::srgb(0.86, 0.97, 1.0);
 const CYAN: Color = Color::srgb(0.35, 0.85, 1.0);
@@ -149,7 +146,7 @@ pub enum Slot {
 
 /// Builds the hologram once: glass, frame, beams and emblem in the room, and the
 /// texture with its camera and writing.
-pub fn build(kit: &mut Kit, images: &mut Assets<Image>) {
+pub fn build(kit: &mut Kit, images: &mut Assets<Image>, fonts: &mut Assets<Font>) {
     let centre = Spot::Command.center();
     let at = Transform::from_translation(centre);
     let unlit = |color: LinearRgba, alpha_mode: AlphaMode| StandardMaterial {
@@ -217,7 +214,8 @@ pub fn build(kit: &mut Kit, images: &mut Assets<Image>) {
     let core = kit.mesh(Sphere::new(0.06).mesh().ico(3).unwrap(), core, Transform::IDENTITY);
     kit.commands.entity(core).insert(ChildOf(emblem));
 
-    spawn_writing(kit.commands, image);
+    let font = fonts.add(Font::from_bytes(crate::fonts::NOTO_SANS_LIGHT.to_vec()));
+    spawn_writing(kit.commands, image, font);
 }
 
 /// Horizontal place on the texture of a point `a` degrees round the wall.
@@ -230,8 +228,8 @@ fn v(y: f32) -> f32 {
     (Y1 - y) / (Y1 - Y0) * TEX_H as f32
 }
 
-fn font(size: f32) -> TextFont {
-    TextFont { font: FontSource::families(FONTS), font_size: FontSize::Px(size), weight: FontWeight::MEDIUM, ..default() }
+fn font(face: &Handle<Font>, size: f32) -> TextFont {
+    TextFont { font: FontSource::Handle(face.clone()), font_size: FontSize::Px(size), ..default() }
 }
 
 fn line(left: f32, top: f32, width: f32, height: f32, color: Color) -> (Node, BackgroundColor) {
@@ -256,7 +254,7 @@ fn text_box(left: f32, top: f32, width: f32, height: f32, justify: JustifyConten
     }
 }
 
-fn spawn_writing(commands: &mut Commands, image: Handle<Image>) {
+fn spawn_writing(commands: &mut Commands, image: Handle<Image>, face: Handle<Font>) {
     let camera = commands
         .spawn((
             HoloTextCamera,
@@ -282,14 +280,14 @@ fn spawn_writing(commands: &mut Commands, image: Handle<Image>) {
 
     let header_top = v(Y1 - 0.04);
     let header_h = v(Y1 - 0.2) - header_top;
-    commands.spawn((Slot::Status, text_box(u(-49.0), header_top, w * 0.4, header_h, JustifyContent::Start), Text::new(""), font(50.0), TextColor(AMBER), TextLayout::no_wrap(), ChildOf(root)));
-    commands.spawn((Slot::Title, text_box(u(49.0) - w * 0.55, header_top, w * 0.55, header_h, JustifyContent::End), Text::new(""), font(46.0), TextColor(CYAN), TextLayout::no_wrap(), ChildOf(root)));
+    commands.spawn((Slot::Status, text_box(u(-49.0), header_top, w * 0.4, header_h, JustifyContent::Start), Text::new(""), font(&face, 50.0), TextColor(AMBER), TextLayout::no_wrap(), ChildOf(root)));
+    commands.spawn((Slot::Title, text_box(u(49.0) - w * 0.55, header_top, w * 0.55, header_h, JustifyContent::End), Text::new(""), font(&face, 46.0), TextColor(CYAN), TextLayout::no_wrap(), ChildOf(root)));
     // The task, large, over the emblem and the chart; two lines at most.
     commands.spawn((
         Slot::Task,
         text_box(u(-46.0), v(2.78), u(46.0) - u(-46.0), v(2.28) - v(2.78), JustifyContent::Center),
         Text::new(""),
-        font(100.0),
+        font(&face, 100.0),
         TextColor(WHITE),
         TextLayout::new(Justify::Center, LineBreak::WordBoundary),
         ChildOf(root),
@@ -299,7 +297,7 @@ fn spawn_writing(commands: &mut Commands, image: Handle<Image>) {
         Slot::Step,
         text_box(u(-26.0), v(2.2), u(26.0) - u(-26.0), v(1.98) - v(2.2), JustifyContent::Center),
         Text::new(""),
-        font(62.0),
+        font(&face, 62.0),
         TextColor(CYAN),
         TextLayout::no_wrap(),
         ChildOf(root),
@@ -315,7 +313,7 @@ fn spawn_writing(commands: &mut Commands, image: Handle<Image>) {
             Slot::ChipLabel(i),
             text_box(left - 20.0, v(1.77), width + 40.0, v(1.61) - v(1.77), JustifyContent::Center),
             Text::new(""),
-            font(44.0),
+            font(&face, 44.0),
             TextColor(CYAN),
             TextLayout::no_wrap(),
             ChildOf(root),
@@ -361,7 +359,7 @@ impl Shown {
     pub fn of(session: Option<&SessionState>) -> Self {
         let Some(session) = session else {
             return Shown {
-                status: "○ STANDBY".into(),
+                status: "• STANDBY".into(),
                 status_color: rgb(DIM),
                 title: "CLAUDE · MAIN AGENT".into(),
                 task: "No session yet".into(),
@@ -371,17 +369,17 @@ impl Shown {
         };
         let busy = session.main_pose != Pose::Idle;
         let (status, color) = if session.ended {
-            ("■ ENDED", DIM)
+            ("• ENDED", DIM)
         } else if session.main_pose == Pose::Waiting {
-            ("● NEEDS YOU", AMBER)
+            ("• NEEDS YOU", AMBER)
         } else if session.main_failed {
-            ("● ERROR", RED)
+            ("• ERROR", RED)
         } else if busy {
-            ("● WORKING", AMBER)
+            ("• WORKING", AMBER)
         } else if session.is_busy() {
-            ("● CREW WORKING", CYAN)
+            ("• CREW WORKING", CYAN)
         } else {
-            ("○ IDLE", DIM)
+            ("• IDLE", DIM)
         };
         let model = session.model.as_deref().map(crate::log::short_model).and_then(|m| m.split(['-', '[']).next()).filter(|m| !m.is_empty());
         let title = match model {
@@ -393,10 +391,10 @@ impl Shown {
             None => "Waiting for a task".into(),
         };
         let step = match &session.main_doing {
-            Some(doing) if busy => format!("▸ {}", room_proto::describe::truncate(&one_line(doing), 44)),
-            _ if session.prompts.is_empty() => "▸ Ready".into(),
-            _ if busy => "▸ Thinking".into(),
-            _ => "▸ Waiting for your next prompt".into(),
+            Some(doing) if busy => format!("› {}", room_proto::describe::truncate(&one_line(doing), 44)),
+            _ if session.prompts.is_empty() => "› Ready".into(),
+            _ if busy => "› Thinking".into(),
+            _ => "› Waiting for your next prompt".into(),
         };
         // Runs of the same tool count as one chip ("Read ×3").
         let calls = &session.main_work.calls;
@@ -575,7 +573,8 @@ mod tests {
 
     #[test]
     fn runs_of_one_tool_make_one_chip() {
-        let mut session = SessionState { main_pose: Pose::Reading, ..Default::default() };
+        let mut session = SessionState::default();
+        session.main_pose = Pose::Reading;
         for (id, name) in ["Grep", "Read", "Read", "Read", "Edit", "Bash", "mcp__github__get_issue"].iter().enumerate() {
             let tool = room_proto::event::ToolCall { name: (*name).into(), input: serde_json::json!({}) };
             session.main_work.on(&room_proto::event::EventKind::ToolStarted { tool_use_id: id.to_string(), tool });
@@ -584,7 +583,7 @@ mod tests {
         let labels: Vec<&str> = shown.chips.iter().map(|(label, _)| label.as_str()).collect();
         assert_eq!(labels, ["Grep", "Read ×3", "Edit", "Bash", "get_issue"]);
         assert!(shown.chips.last().unwrap().1, "the live tool is lit");
-        assert_eq!(shown.status, "● WORKING");
+        assert_eq!(shown.status, "• WORKING");
         assert_eq!(shown.bars.len(), 7);
     }
 

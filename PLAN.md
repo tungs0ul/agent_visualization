@@ -2360,3 +2360,21 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   will conflict (systems lists). Then push. Rules still apply: Blender look approval
   before porting new looks; kill all processes you start; the user's own agent-room
   (started from their terminal, relative path) is theirs.
+- 2026-11-20, Claude Opus 5.5: Finished item 3 of the entry above (branch
+  `worktree-agent-aae5bdfa7882057c9`, main merged in). The main desk has no console
+  (`stations.py`; the `STATIONS_NO_CONSOLE` switch is gone): its dais carries three
+  hologram projectors and, front left on the middle tier, an inbox pedestal
+  (`world3d::inbox`, moved there). New `command_holo.rs`: a curved see-through wall
+  behind Claude (r 1.75 m, ±52°, 1.3–3.0 m) with glowing edges, corner brackets,
+  beams from the projectors, a ring emblem that turns only while Claude works. The
+  writing (status, "CLAUDE · MAIN AGENT · model", task = last prompt, step =
+  `main_doing`, chips of recent tools, bars of their durations, scanlines, header
+  rule) is Bevy UI rendered into a 2048×1088 texture by its own camera, active for 3
+  frames after the shown content changes and off otherwise. Font: the bundled Noto
+  Sans Light (Vietnamese ok; it lacks ●/▸, so • and › are used). Also fixed:
+  `view3d::deliver` thought Claude was never at its desk since M27 moved the command
+  station (it measured from the origin), so reports always went to the inbox. The
+  HUD command panel and the plan board now keep clear of the wall's top
+  (`command_holo::top`). NOT yet seen in the app: the Mac was locked (screenshots
+  black); a Blender check of the new dais is fine. Next: screenshot check (hero and
+  close, `AGENT_ROOM_CAMERA`), text size/gain against p23_command_holo.png.

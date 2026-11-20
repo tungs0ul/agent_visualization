@@ -143,6 +143,7 @@ pub fn build(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut graphs: ResMut<Assets<AnimationGraph>>,
     mut images: ResMut<Assets<Image>>,
+    mut fonts: ResMut<Assets<bevy::text::Font>>,
 ) {
     commands.insert_resource(Clips::load(&assets, &mut graphs));
 
@@ -200,7 +201,7 @@ pub fn build(
     crate::hull::build(&mut kit);
     crate::space::build(&mut kit, &mut images);
     crate::screens::build(&mut kit, &mut images);
-    crate::command_holo::build(&mut kit, &mut images);
+    crate::command_holo::build(&mut kit, &mut images, &mut fonts);
 }
 
 
