@@ -7,7 +7,7 @@ blender=${BLENDER:-/Applications/Blender.app/Contents/MacOS/Blender}
 frames=8
 tmp=$(mktemp -d)
 mkdir -p assets/textures/screens
-for subject in crate rocket planet sun station ship blackhole; do
+for subject in crate rocket planet sun station ship blackhole galaxy; do
   i=0
   while [ $i -lt $frames ]; do
     HOLO_FRAMES=$frames HOLO_FRAME=$i "$blender" -b --factory-startup --python tools/blender/holo_screen_proto.py -- \

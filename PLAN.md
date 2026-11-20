@@ -441,6 +441,11 @@ characters, no copied layout or names.
 Bundle one open-licensed font (e.g. Inter or Nunito) in `assets/fonts/`, plus a
 monospace (JetBrains Mono) for commands. Record licenses in `assets/LICENSES.md`.
 
+Done so far (2026-11-19): egui's built-in Ubuntu Light / Hack stay the main fonts; Noto
+Sans Light and Noto Sans Mono are bundled (`assets/fonts/`, `src/fonts.rs`) as
+fallbacks for the letters they lack (Vietnamese ộ, ữ, ẫ, …). Licences in
+`assets/LICENSES.md`.
+
 ---
 
 ## 5. Window behavior
@@ -2312,3 +2317,46 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   robot works at the desk and rest on frame 3 otherwise. Checked in the app with a
   busy replay: robots at the desk middle, the working desk's screen changes frame,
   idle desks hold still. Screens (local): baseline/p22_*.png.
+- 2026-11-19, Claude Opus 5.5 (stopped at the usage limit, 22:40): RESUME HERE.
+  Done on main (pushed up to 12678ef; 3706e36 local, not pushed): glass cage round the
+  command core removed (`world3d::command_core` gone). Blender prototypes approved by
+  the user and being ported when stopped. Four sub-agents ran in parallel in git
+  worktrees under `.claude/worktrees/`; all stopped, their unfinished work committed
+  as "wip" on their branches (not merged, not pushed). For each: read its diff
+  (`git diff main...<branch>`), finish, build, test, screenshot, then merge into main:
+  1. `worktree-agent-afc4fef666ff0fe03` (wip 7dc1f3e): Vietnamese/German text shows
+     wrong in the app. Added assets/fonts/ + `src/fonts.rs`, LICENSES.md, ui.rs and
+     main.rs changes. Check: font covers ộ ữ ß ü in egui (and any Bevy text);
+     screenshot with a replay whose prompt is Vietnamese/German.
+  2. `worktree-agent-adc135299d8e93793` (wip aeabdb6): comet/meteor visitors outside
+     the window. New `src/visitor.rs`, main.rs. Art: assets/textures/space/comet.png,
+     meteor.png (premultiplied, head +x; `tools/blender/comets.py`; approved preview
+     baseline/p23_comet_meteor.png). Wanted: one every ~2–5 min, 6–10 s across,
+     comets rarer, head leads along the path, fade in/out, only costs frames while on
+     screen, `AGENT_ROOM_VISITOR=comet|meteor` forces one. Quad must face the camera
+     with the half turn like `space::planet_sprite`.
+  3. `worktree-agent-aae5bdfa7882057c9` (wip 093424f): big command hologram instead
+     of the main desk console (approved baseline/p23_command_holo*.png; prototype
+     `tools/blender/command_holo_proto.py`; `STATIONS_NO_CONSOLE=1` in stations.py).
+     Changed main_desk.glb, world3d.rs, view3d.rs, main.rs, Cargo.toml/lock. Was
+     wiring the module, build call, systems and HUD/plan-board anchors. Live text on
+     the wall: header (state, "CLAUDE · MAIN AGENT · model"), task (the HUD's "Working
+     on"), current step, recent tool chips; redraw only on change; non-ASCII must
+     render (see 1). Keep `world3d::inbox()` hand-overs working without the console.
+  4. `worktree-agent-ac00c63e8c084d65e` (wip 97cc323): the user's newest ask: the
+     robot's name tag covers the monitor, so instead of animating the monitor, show
+     that desk's subject as a big 3D hologram above the working desk (replacing the
+     tool-kind activity hologram there), turning slowly while it works; monitor stays
+     on its rest frame; move name tags so they cover neither. Started: GLB export of
+     the subjects (`tools/blender/holo_glb.py`, `export_holo_subjects.sh`,
+     assets/models/holo/, a `HOLO` look registry in holo_screen_proto.py).
+  5. Me, unfinished: galaxy as the 8th screen subject (no more two rockets). Approved
+     look baseline/p23_galaxy.png; `galaxy()` is in holo_screen_proto.py on main;
+     bake_screens.sh lists it (uncommitted change, now committed). Still to do: bake
+     it (8 frames + atlas, see bake_screens.sh; ~1 min alone, slow when the machine
+     is busy) and add galaxy.png as the 8th entry of `screens::SUBJECTS` (size 8).
+     If item 4 replaces screen animation, bake only what it needs.
+  Merge order suggestion: 1 (fonts) first, then 5, 2, 3, 4; main.rs and view3d.rs
+  will conflict (systems lists). Then push. Rules still apply: Blender look approval
+  before porting new looks; kill all processes you start; the user's own agent-room
+  (started from their terminal, relative path) is theirs.
