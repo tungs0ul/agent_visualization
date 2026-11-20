@@ -7,7 +7,7 @@
 use bevy_egui::egui::{FontData, FontDefinitions, FontFamily};
 use std::sync::Arc;
 
-const NOTO_SANS_LIGHT: &[u8] = include_bytes!("../../../assets/fonts/NotoSans-Light.ttf");
+pub const NOTO_SANS_LIGHT: &[u8] = include_bytes!("../../../assets/fonts/NotoSans-Light.ttf");
 const NOTO_SANS_MONO: &[u8] = include_bytes!("../../../assets/fonts/NotoSansMono-Regular.ttf");
 
 /// egui's default fonts plus the Noto fallbacks.

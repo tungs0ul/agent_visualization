@@ -1,7 +1,7 @@
 """Prototype of the main agent's big hologram that replaces its console, for the
 user's OK before porting.
 
-    STATIONS_OUT=DIR STATIONS_NO_CONSOLE=1 Blender -b --factory-startup --python tools/blender/stations.py -- main_desk
+    STATIONS_OUT=DIR Blender -b --factory-startup --python tools/blender/stations.py -- main_desk
     Blender -b --factory-startup --python tools/blender/command_holo_proto.py -- DIR/main_desk.glb OUT.png [close|room]
 
 The dais without its console, the robot on its pad facing the viewer, and behind it a
