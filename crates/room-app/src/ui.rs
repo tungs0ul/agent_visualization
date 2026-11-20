@@ -50,6 +50,8 @@ pub fn draw(
     // Panels in the room's theme (PLAN.md M14).
     if !state.styled {
         ctx.set_visuals(visuals());
+        // Vietnamese letters the default fonts lack (crate::fonts).
+        ctx.set_fonts(crate::fonts::definitions());
         state.styled = true;
     }
     let mut root = egui::Ui::new(

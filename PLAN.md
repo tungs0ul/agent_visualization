@@ -441,6 +441,11 @@ characters, no copied layout or names.
 Bundle one open-licensed font (e.g. Inter or Nunito) in `assets/fonts/`, plus a
 monospace (JetBrains Mono) for commands. Record licenses in `assets/LICENSES.md`.
 
+Done so far (2026-11-19): egui's built-in Ubuntu Light / Hack stay the main fonts; Noto
+Sans Light and Noto Sans Mono are bundled (`assets/fonts/`, `src/fonts.rs`) as
+fallbacks for the letters they lack (Vietnamese ộ, ữ, ẫ, …). Licences in
+`assets/LICENSES.md`.
+
 ---
 
 ## 5. Window behavior
