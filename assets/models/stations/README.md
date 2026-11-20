@@ -39,4 +39,4 @@ Inspect: `python3 -I tools/blender/inspect_glb.py assets/models/stations/lab.glb
 | wall_panel.glb | 3.0 × 3.0 × 0.27, front +Z, window 2.2 × 1.7 at y 0.75-2.45 | 2k | - |
 | pillar.glb | 0.67 × 3.0 × 0.67 | 2k | - |
 | document.glb / holo_capsule.glb | 0.29 × 0.2 × 0.29 | 1k | - |
-| holo_document / holo_editor / holo_terminal / holo_cards / holo_nodes | 0.5-0.9 wide, 0.5-0.8 tall | < 3.5k | spawned above a robot |
+| (the big desk holograms are the screen subjects: `assets/models/holo/`, `tools/blender/export_holo_subjects.sh`) | | | |

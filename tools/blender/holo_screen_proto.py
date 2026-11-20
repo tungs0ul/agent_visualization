@@ -2,7 +2,10 @@
 before anything is ported to the app (target crop 07).
 
     /Applications/Blender.app/Contents/MacOS/Blender -b --factory-startup \
-        --python tools/blender/holo_screen_proto.py -- OUT.png [close|room|screen|bake] [subject]
+        --python tools/blender/holo_screen_proto.py -- OUT.png [close|room|screen|bake|glb] [subject]
+
+`glb` writes the subject alone as a 3D model (OUT is the .glb path) for the big
+hologram over a working desk: see `holo_glb.py` and `export_holo_subjects.sh`.
 
 `bake` writes what the app shows: the screen's light only (subject, UI, beam) seen
 straight on through an orthographic camera, on black, no bloom (the app adds its
@@ -102,6 +105,11 @@ light("AREA", (4, 2, 3), 90, (0.6, 0.4, 1.0), size=3)
 
 
 # ---------------------------------------------------------------- materials
+# What each material looks like, for the 3D export (`VIEW` glb, `holo_glb.py`): glTF
+# can't carry these node trees, so the exporter rebuilds each one from this record.
+HOLO = {}
+
+
 def emit(name, color, strength, alpha=None):
     """Emission, optionally see-through: Add(Transparent, Emission) when alpha is None
     (pure light), else Mix(Transparent, Emission) by alpha."""
@@ -126,6 +134,7 @@ def emit(name, color, strength, alpha=None):
         nt.links.new(tr.outputs[0], mix.inputs[1])
         nt.links.new(em.outputs[0], mix.inputs[2])
         nt.links.new(mix.outputs[0], out.inputs["Surface"])
+    HOLO[mt.name] = dict(kind="light", color=color, strength=strength * (1.0 if alpha is None else alpha))
     try:
         mt.surface_render_method = "BLENDED"
     except Exception:
@@ -408,6 +417,7 @@ def radial_material(name, stops, strength, inner=0.0, outer=1.0, rings=0.0):
     m3.inputs[1].default_value = strength
     nt.links.new(amp, m3.inputs[0])
     nt.links.new(m3.outputs[0], em.inputs["Strength"])
+    HOLO[mt.name] = dict(kind="radial", stops=stops, strength=strength, inner=inner, outer=outer, rings=rings)
     return mt
 
 
@@ -423,6 +433,7 @@ def sun():
     # streamers fading outward and two flame arcs on the limb (the user dropped the
     # measuring ring and its ticks).
     mt, nt = emit("photosphere", (1, 0.5, 0.1), 1.5, alpha=1.0)
+    HOLO[mt.name] = dict(kind="plasma", strength=1.5)
     mt.surface_render_method = "DITHERED"   # solid: hides the far half of the arcs
     em = [n for n in nt.nodes if n.type == "EMISSION"][0]
     tc = nt.nodes.new("ShaderNodeTexCoord")
@@ -455,6 +466,7 @@ def sun():
 
     # corona: a disc behind the ball, light = radial falloff x streaks by angle
     cm, cn = emit("corona", (1, 0.5, 0.12), 1.0)
+    HOLO[cm.name] = dict(kind="corona", color=(1, 0.5, 0.12), strength=4.0)
     cem = [n for n in cn.nodes if n.type == "EMISSION"][0]
     ctc = cn.nodes.new("ShaderNodeTexCoord")
     sep = cn.nodes.new("ShaderNodeSeparateXYZ")
@@ -535,6 +547,7 @@ def rim_face(name="rimface", strength=(2.5, 9.0), alpha=(0.45, 0.95), blend=0.25
     al.inputs["To Min"].default_value, al.inputs["To Max"].default_value = alpha
     nt.links.new(pw.outputs[0], al.inputs["Value"])
     nt.links.new(al.outputs["Result"], mix.inputs[0])
+    HOLO[mt.name] = dict(kind="rim", base=BLUE, edge=(0.3, 0.9, 1.0), strength=strength, alpha=alpha, blend=blend)
     return mt
 
 
@@ -795,7 +808,16 @@ def blackhole():
 
 
 SUBJECTS = dict(iss=iss, galaxy=galaxy, crate=crate, rocket=rocket, planet=planet, sun=sun, station=station, ship=ship, blackhole=blackhole)
+if VIEW == "glb":
+    # thinner tori for a real-time model (the glowing tubes stay round enough)
+    tor = lambda **kw: bpy.ops.mesh.primitive_torus_add(**{"minor_segments": 6, **kw})   # noqa: E731
 angles = SUBJECTS[SUBJECT]()
+if VIEW == "glb":
+    # The subject alone as a 3D model for the app's desk hologram (`holo_glb.py`).
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import holo_glb
+    holo_glb.export(pivot, HOLO, OUT, SUBJECT, lean=angles[0])
+    raise SystemExit(0)
 if os.environ.get("HOLO_ANGLES"):           # try other angles: "lean,turn,roll"
     angles = tuple(float(v) for v in os.environ["HOLO_ANGLES"].split(","))
 lean, turn, roll = (tuple(angles) + (0.0,))[:3]

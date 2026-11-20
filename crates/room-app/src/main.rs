@@ -27,6 +27,7 @@ mod report;
 mod repo;
 mod server;
 mod space;
+mod holo;
 mod hud;
 mod hull;
 mod view3d;
@@ -125,7 +126,7 @@ fn main() -> AppExit {
                 // than the work (V2.md phase 0: about 35 % to 22 % of a core while active).
                 .set(TaskPoolPlugin { task_pool_options: TaskPoolOptions::with_num_threads(3) }),
         )
-        .add_plugins(EguiPlugin::default())
+        .add_plugins((EguiPlugin::default(), holo::HoloPlugin))
         .add_message::<mini::ToggleMini>()
         .init_resource::<view3d::View3d>()
         .init_resource::<view3d::CameraView>()
@@ -162,7 +163,7 @@ fn main() -> AppExit {
                 (receive_events, replay::tick, chat::dev_chat, chat::read_chats, end_dead_sessions),
                 settle_permissions,
                 hud::title,
-                (view3d::sync, look::reload, look::apply, probe::capture, hull::cutaway, view3d::desk_lights, view3d::screen_animation, view3d::teleporter, view3d::deliver, view3d::links, view3d::context_tank, view3d::celebrate, world3d::daylight, view3d::activity_holograms, view3d::light_trails, command_holo::update, command_holo::turn_emblem, hud::trace, view3d::camera_input, view3d::frame).chain(),
+                (view3d::sync, look::reload, look::apply, probe::capture, hull::cutaway, view3d::desk_lights, view3d::teleporter, view3d::deliver, view3d::links, view3d::context_tank, view3d::celebrate, world3d::daylight, holo::desk_holograms, view3d::light_trails, command_holo::update, command_holo::turn_emblem, hud::trace, view3d::camera_input, view3d::frame).chain(),
                 visitor::fly,
                 pace_updates,
                 log_frame_rate.run_if(|| std::env::var_os("AGENT_ROOM_FPS_LOG").is_some()),

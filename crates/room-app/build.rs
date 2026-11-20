@@ -26,14 +26,14 @@ fn main() {
     std::fs::write(dest, out).unwrap();
 }
 
-/// Only what the app loads: glTF models and textures. READMEs and licences stay in the repo.
+/// Only what the app loads: glTF models, textures and shaders. READMEs and licences stay in the repo.
 fn walk(dir: &Path, files: &mut Vec<PathBuf>) {
     for entry in std::fs::read_dir(dir).unwrap().flatten() {
         let path = entry.path();
         if path.is_dir() {
             println!("cargo:rerun-if-changed={}", path.display());
             walk(&path, files);
-        } else if path.extension().is_some_and(|e| e == "glb" || e == "gltf" || e == "bin" || e == "png" || e == "ktx2") {
+        } else if path.extension().is_some_and(|e| e == "glb" || e == "gltf" || e == "bin" || e == "png" || e == "ktx2" || e == "wesl") {
             files.push(path);
         }
     }

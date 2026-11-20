@@ -835,59 +835,7 @@ def build_desk_console():
     potted_plant((0.78, 0.12, top), scale=0.32, seed=17, leaves=12)
 
 
-# ---------------------------------------------------------------- activity holograms
-def build_holo_document():
-    holo_screen((0, 0, 0.395), 0.6, 0.78, tilt=0, content="doc", seed=31)
-
-
-def build_holo_editor():
-    holo_screen((0, 0, 0.285), 0.86, 0.56, tilt=0, content="editor", seed=32)
-    for i, w in enumerate((0.16, 0.14)):
-        box((-0.43 + 0.1 + i * 0.18, -0.002, 0.585), (w, 0.004, 0.035), "Holo")
-        box((-0.43 + 0.1 + i * 0.18, -0.006, 0.585), (w * 0.6, 0.004, 0.008), "GlowOrange" if i == 0 else "GlowCyan")
-
-
-def build_holo_terminal():
-    holo_screen((0, 0, 0.255), 0.76, 0.5, tilt=0, content="terminal", seed=33, bg="HoloDark", frame="GlowGreen")
-
-
-def build_holo_cards():
-    kinds = ("card", "card", "card")
-    for i, (x, roll, z) in enumerate(((-0.27, 12, 0.242), (0.0, 0, 0.272), (0.27, -12, 0.242))):
-        with at((x, -0.03 * (i == 1), z), (0, roll, 0)):
-            holo_screen((0, 0, 0), 0.3, 0.42, tilt=0, content=kinds[i], seed=40 + i)
-            holo_icon((0, -0.01, 0.12), ("search", "doc", "file")[i], 0.1)
-
-
-def build_holo_nodes():
-    rng = random.Random(5)
-    c = Vector((0, 0, 0.245))
-    pts = []
-    n = 13
-    for i in range(n):
-        y = 1 - 2 * (i + 0.5) / n
-        rr = math.sqrt(1 - y * y)
-        th = i * 2.39996
-        p = Vector((math.cos(th) * rr, math.sin(th) * rr, y)) * 0.2 * rng.uniform(0.75, 1.1)
-        pts.append(c + p)
-    edges = set()
-    for i, p in enumerate(pts):
-        near = sorted(range(n), key=lambda j: (pts[j] - p).length)[1:3]
-        for j in near:
-            edges.add((min(i, j), max(i, j)))
-    for i in range(0, n, 3):
-        tube_path([c, pts[i]], 0.004, "GlowCyan", sides=6, samples=1)
-    for i, j in edges:
-        tube_path([pts[i], pts[j]], 0.004, "GlowCyan", sides=6, samples=1)
-    for i, p in enumerate(pts):
-        m = ("GlowCyan", "GlowCyan", "GlowOrange", "GlowPurple")[i % 4]
-        sphere(p, (0.022,) * 3, m, seg=12, rings_=6)
-    sphere(c, (0.055,) * 3, "GlowPurple", seg=20, rings_=10)
-    sphere(c, (0.08,) * 3, "Holo", seg=20, rings_=10)
-    ring(c, 0.25, 0.258, -0.002, 0.002, "GlowCyan", segs=48, rot=(70, 10, 0))
-    ring(c, 0.22, 0.226, -0.002, 0.002, "GlowOrange", segs=48, a0=0, a1=220, rot=(-60, 30, 0))
-
-
+# ---------------------------------------------------------------- report capsule
 def build_holo_capsule():
     build_document()
 
@@ -983,11 +931,6 @@ STATIONS = {
     "wall_panel": build_wall_panel,
     "pillar": build_pillar,
     "document": build_document,
-    "holo_document": build_holo_document,
-    "holo_editor": build_holo_editor,
-    "holo_terminal": build_holo_terminal,
-    "holo_cards": build_holo_cards,
-    "holo_nodes": build_holo_nodes,
     "holo_capsule": build_holo_capsule,
 }
 

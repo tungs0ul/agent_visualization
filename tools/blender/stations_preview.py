@@ -29,7 +29,7 @@ SPOTS = {
     "writing_desk": ((0.0, 0.043, 0.85), 180),
     "desk_console": ((0.0, 0.043, 0.85), 180),
 }
-HOLOS = ["holo_document", "holo_editor", "holo_terminal", "holo_cards", "holo_nodes", "holo_capsule"]
+HOLOS = ["holo_capsule"]
 
 scene = bpy.context.scene
 scene.render.engine = "BLENDER_EEVEE"

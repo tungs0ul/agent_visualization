@@ -804,13 +804,19 @@ pub fn labels(
             name.push(' ');
             name.push_str(&repo.badge());
         }
-        let lift = if mode.mini { 1.35 } else { 1.05 };
-        let head = at.translation() + Vec3::Y * lift * at.scale().y;
-        let Ok(screen) = camera.world_to_viewport(camera_at, head) else { continue };
+        // Under the robot's feet in the full view, so it covers neither the desk's
+        // screen nor the hologram over it (`holo.rs`); over the head in the mini view,
+        // which follows Claude up close.
+        let (anchor, pivot, gap) = if mode.mini {
+            (at.translation() + Vec3::Y * 1.35 * at.scale().y, egui::Align2::CENTER_BOTTOM, 0.0)
+        } else {
+            (at.translation(), egui::Align2::CENTER_TOP, 4.0)
+        };
+        let Ok(screen) = camera.world_to_viewport(camera_at, anchor) else { continue };
         let screen = screen + offset;
         egui::Area::new(egui::Id::new(("label3d", &avatar.session, &avatar.who)))
-            .fixed_pos(egui::pos2(screen.x, screen.y))
-            .pivot(egui::Align2::CENTER_BOTTOM)
+            .fixed_pos(egui::pos2(screen.x, screen.y + gap))
+            .pivot(pivot)
             .interactable(true)
             .order(egui::Order::Background)
             .show(ctx, |ui| {
@@ -899,139 +905,12 @@ pub fn frame(
 pub(crate) const FULL_EYE: Vec3 = Vec3::new(0.0, 12.2, 15.4);
 const FULL_LOOK: Vec3 = Vec3::new(0.0, 0.0, -1.4);
 
-/// The hologram floating beside a robot: a picture of what it is doing right now
-/// (PLAN.md M17, "the holograms are the visualisation of its mind").
-#[derive(Component)]
-pub(crate) struct ActivityHolo {
-    /// The robot it belongs to.
-    of: Entity,
-    pose: Pose,
-    /// Seconds since it appeared (it grows in).
-    age: f32,
-}
-
-/// Which hologram shows what a robot does.
-fn holo_for(pose: Pose) -> Option<&'static str> {
-    Some(match pose {
-        Pose::Reading => "models/stations/holo_document.glb",
-        Pose::Typing => "models/stations/holo_editor.glb",
-        Pose::Terminal => "models/stations/holo_terminal.glb",
-        Pose::Web => "models/stations/holo_cards.glb",
-        Pose::Thinking => "models/stations/holo_nodes.glb",
-        Pose::Delegating | Pose::Reporting => "models/stations/holo_capsule.glb",
-        Pose::Idle | Pose::Waiting => return None,
-    })
-}
-
-/// Shows, swaps and moves the activity holograms; they appear once a robot has
-/// arrived where it works, beside its head, turned a little towards the camera.
-#[allow(clippy::too_many_arguments, clippy::type_complexity)]
-pub fn activity_holograms(
-    mut commands: Commands,
-    time: Res<Time>,
-    assets: Res<AssetServer>,
-    avatars: Query<(Entity, &Avatar, &Transform), Without<ActivityHolo>>,
-    mut holos: Query<(Entity, &mut ActivityHolo, &mut Transform)>,
-    mut lines: Query<(&HoloLine, &ChildOf, &mut Transform), (Without<ActivityHolo>, Without<Avatar>)>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    mut look: Local<Option<(Handle<Mesh>, Handle<StandardMaterial>)>>,
-) {
-    let (line_mesh, line_glow) = look
-        .get_or_insert_with(|| {
-            (
-                meshes.add(Cuboid::new(1.0, 0.022, 0.004)),
-                materials.add(StandardMaterial { base_color: Color::BLACK, emissive: LinearRgba::rgb(1.2, 4.0, 6.0), ..default() }),
-            )
-        })
-        .clone();
-    let mut shown: HashMap<Entity, Pose> = HashMap::new();
-    for (entity, mut holo, mut at) in &mut holos {
-        let robot = avatars.get(holo.of).ok();
-        let pose = robot.map(|(_, avatar, _)| avatar.pose);
-        let busy_elsewhere = robot.is_some_and(|(_, avatar, _)| avatar.playing == Some(Act::Walk) || avatar.presence != Presence::Here);
-        if pose != Some(holo.pose) || busy_elsewhere {
-            commands.entity(entity).despawn();
-            continue;
-        }
-        let Some((_, avatar, _)) = robot else { continue };
-        shown.insert(holo.of, holo.pose);
-        holo.age += time.delta_secs();
-        let grow = (holo.age / 0.35).min(1.0);
-        let bob = 0.02 * (time.elapsed_secs() * 1.6 + (holo.of.to_bits() % 97) as f32).sin();
-        // Above the desk's main screen, rising out of it (PROMPT_03 B, crop 07), on
-        // active crew desks only: no floating cards in front of the robots.
-        let Some(desk) = avatar.desk else { continue };
-        at.translation = Spot::Desk(desk).center() + Vec3::new(0.0, HOLO_ABOVE_SCREEN + bob, -0.36);
-        at.rotation = Quat::from_rotation_y(time.elapsed_secs() * 0.25);
-        at.scale = Vec3::splat(grow * HOLO_SIZE);
-    }
-    for (robot, avatar, _) in &avatars {
-        if shown.contains_key(&robot) || avatar.playing == Some(Act::Walk) || avatar.presence != Presence::Here {
-            continue;
-        }
-        let Some(file) = holo_for(avatar.pose) else { continue };
-        if avatar.desk.is_none() {
-            continue;
-        }
-        let holo = commands
-            .spawn((
-                ActivityHolo { of: robot, pose: avatar.pose, age: 0.0 },
-                WorldAssetRoot(assets.load(GltfAssetLabel::Scene(0).from_asset(file))),
-                Transform::from_scale(Vec3::ZERO),
-            ))
-            .observe(brighten_holo)
-            .id();
-        // Flat screens get lines of "text" writing themselves (not the real text,
-        // which the label above the head shows).
-        if matches!(avatar.pose, Pose::Reading | Pose::Typing | Pose::Terminal | Pose::Web) {
-            for index in 0..HOLO_LINES {
-                commands.spawn((
-                    HoloLine { index },
-                    Mesh3d(line_mesh.clone()),
-                    MeshMaterial3d(line_glow.clone()),
-                    Transform::from_scale(Vec3::new(0.0, 1.0, 1.0)),
-                    ChildOf(holo),
-                ));
-            }
-        }
-    }
-    // The lines write left to right one after another, hold, then start over.
-    let t = time.elapsed_secs();
-    for (line, parent, mut at) in &mut lines {
-        let Ok((_, holo, _)) = holos.get(parent.parent()) else { continue };
-        let seed = (holo.of.to_bits() % 7) as f32;
-        let cycle = (t + seed) % LINE_CYCLE;
-        let start = line.index as f32 * 0.55;
-        let written = ((cycle - start) / 0.5).clamp(0.0, 1.0);
-        let width = 0.32 + 0.22 * ((line.index as f32 * 2.3 + seed).sin() * 0.5 + 0.5);
-        let length = width * written;
-        at.scale = Vec3::new(length.max(0.0001), 1.0, 1.0);
-        at.translation = Vec3::new(-0.3 + length / 2.0, 0.42 - 0.075 * line.index as f32, 0.03);
-    }
-}
-
-/// A line of glowing "text" on an activity screen.
-#[derive(Component)]
-pub(crate) struct HoloLine {
-    index: usize,
-}
-
-const HOLO_LINES: usize = 4;
-/// Seconds for all lines to write, hold and clear.
-const LINE_CYCLE: f32 = 4.0;
-
-/// Height of the activity hologram over a crew desk (just above its main screen),
-/// and its size.
-const HOLO_ABOVE_SCREEN: f32 = 1.92;
-const HOLO_SIZE: f32 = 0.95;
-
-/// Brighter copies of the holograms' materials, made once per material.
+/// Brighter copies of the report capsule's materials, made once per material.
 #[derive(Resource, Default)]
 pub(crate) struct BrightHolos(HashMap<AssetId<StandardMaterial>, Handle<StandardMaterial>>);
 
-/// The activity screens glow: their materials, made for the stations' dimmer
-/// panels, get twice the light and a little more body.
+/// The report capsule glows: its materials, made for the stations' dimmer panels,
+/// get twice the light and a little more body.
 fn brighten_holo(
     ready: On<WorldInstanceReady>,
     mut commands: Commands,
@@ -1170,27 +1049,21 @@ pub fn desk_lights(
     }
 }
 
-/// The desk screens' holograms move while a robot works at the desk and hold still
-/// otherwise (the user, 2026-11-19). The view redraws while agents work anyway.
-pub fn screen_animation(
-    time: Res<Time>,
-    avatars: Query<&Avatar>,
-    mut screens: Query<(&mut crate::screens::ScreenArt, &MeshMaterial3d<StandardMaterial>)>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    for (mut screen, material) in &mut screens {
-        let working = avatars.iter().any(|avatar| {
-            avatar.desk == Some(screen.desk)
-                && !matches!(avatar.presence, Presence::Leaving(_))
-                && !avatar.failed
-                && !avatar.done
-                && avatar.pose != Pose::Waiting
-        });
-        let uv = if working { screen.advance(time.delta_secs()) } else { screen.rest() };
-        if let (Some(uv), Some(mut material)) = (uv, uv.and_then(|_| materials.get_mut(&material.0))) {
-            material.uv_transform = uv;
+/// Each crew desk's robot, for its big subject hologram (`holo.rs`): `None` while the
+/// desk is free or its robot is still walking there or leaving, else whether it is
+/// working (not waiting for the user, done or failed).
+pub(crate) fn desk_work(avatars: &Query<&Avatar>) -> [Option<bool>; crate::world3d::DESKS.len()] {
+    let mut desks = [None; crate::world3d::DESKS.len()];
+    for avatar in avatars {
+        let Some(desk) = avatar.desk else { continue };
+        if !matches!(avatar.presence, Presence::Here) || avatar.playing == Some(Act::Walk) {
+            continue;
         }
+        let working = !avatar.failed && !avatar.done && avatar.pose != Pose::Waiting;
+        let slot = &mut desks[desk as usize % desks.len()];
+        *slot = Some(slot.unwrap_or(false) || working);
     }
+    desks
 }
 
 /// The way a walking robot faces: where it actually moved this frame.

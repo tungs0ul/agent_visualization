@@ -43,7 +43,7 @@ const GREEN: Vec3 = Vec3::new(0.13, 0.88, 0.48);
 /// pane and, just in front of it, the art added on top as light (it glows and blooms
 /// while the glass stays dim, as in the target's crop 07).
 pub fn build(kit: &mut Kit, images: &mut Assets<Image>) {
-    let mains: Vec<Handle<Image>> = SUBJECTS.iter().map(|bytes| images.add(crate::space::decode_png(bytes))).collect();
+    let mains: Vec<Handle<Image>> = SUBJECTS.iter().map(|(_, bytes)| images.add(crate::space::decode_png(bytes))).collect();
     let sides: Vec<Handle<Image>> = SIDES.iter().enumerate().map(|(seed, side)| images.add(paint_side(*side, seed as u32 + 40))).collect();
     let glass_main = images.add(glass_image(512, 256));
     let glass_side = images.add(glass_image(160, 240));
@@ -60,7 +60,7 @@ pub fn build(kit: &mut Kit, images: &mut Assets<Image>) {
     let quad = kit.meshes.add(Rectangle::new(1.0, 1.0));
     for index in 0..DESKS.len() {
         let desk = Spot::Desk(index as u8).center();
-        let textures = [mains[index % mains.len()].clone(), sides[index % SIDES.len()].clone(), sides[(index + 2) % SIDES.len()].clone()];
+        let textures = [mains[subject(index as u8)].clone(), sides[index % SIDES.len()].clone(), sides[(index + 2) % SIDES.len()].clone()];
         for (i, ((at, size, yaw, tilt), texture)) in SCREENS.into_iter().zip(textures).enumerate() {
             let rotation = Quat::from_rotation_y(yaw.to_radians()) * Quat::from_rotation_x(tilt.to_radians());
             let front = rotation * Vec3::Z;
@@ -75,67 +75,27 @@ pub fn build(kit: &mut Kit, images: &mut Assets<Image>) {
             let gain = if i == 0 { MAIN_GAIN } else { ART_GAIN };
             let mut material = unlit(texture, gain, AlphaMode::Add);
             if i == 0 {
-                material.uv_transform = frame_uv(REST_FRAME);
+                material.uv_transform = rest_frame_uv();
             }
-            let art = kit.materials.add(material);
-            let mut screen = kit.commands.spawn((
+            kit.commands.spawn((
                 Mesh3d(quad.clone()),
-                MeshMaterial3d(art),
+                MeshMaterial3d(kit.materials.add(material)),
                 Transform::from_translation(desk + at + front * 0.008).with_rotation(rotation).with_scale(scale),
             ));
-            if i == 0 {
-                screen.insert(ScreenArt { desk: index as u8, step: 0, clock: 0.0 });
-            }
         }
     }
 }
 
-/// A desk's main screen: an atlas of `FRAMES` frames (4 columns, 2 rows) that plays
-/// forth and back while the desk works (`view3d::screen_animation`) and rests on the
-/// middle frame when it doesn't.
-#[derive(Component)]
-pub struct ScreenArt {
-    pub desk: u8,
-    step: usize,
-    clock: f32,
-}
-
-const FRAMES: usize = 8;
-const COLUMNS: usize = 4;
-const ROWS: usize = 2;
-const REST_FRAME: usize = 3;
-/// Frames per second while the desk works.
-const FPS: f32 = 6.0;
-
-/// The atlas window that shows frame `frame`.
-fn frame_uv(frame: usize) -> bevy::math::Affine2 {
-    let (col, row) = (frame % COLUMNS, frame / COLUMNS);
+/// The main screens hold still: the big 3D hologram over a working desk carries the
+/// motion (`holo.rs`; the robot's label used to hide the screen). The bake is an atlas
+/// of 8 frames, 4 columns by 2 rows (`bake_screens.sh`); the screen shows frame 3.
+fn rest_frame_uv() -> bevy::math::Affine2 {
+    const COLUMNS: usize = 4;
+    const ROWS: usize = 2;
+    const REST_FRAME: usize = 3;
+    let (col, row) = (REST_FRAME % COLUMNS, REST_FRAME / COLUMNS);
     let size = Vec2::new(1.0 / COLUMNS as f32, 1.0 / ROWS as f32);
     bevy::math::Affine2::from_scale_angle_translation(size, 0.0, Vec2::new(col as f32, row as f32) * size)
-}
-
-impl ScreenArt {
-    /// Moves the animation on by `dt` seconds; the new frame's UV window when the
-    /// frame changed.
-    pub fn advance(&mut self, dt: f32) -> Option<bevy::math::Affine2> {
-        self.clock += dt;
-        if self.clock < 1.0 / FPS {
-            return None;
-        }
-        self.clock = 0.0;
-        // forth and back: 0 1 .. 7 6 .. 1, then again
-        self.step = (self.step + 1) % (2 * FRAMES - 2);
-        let frame = if self.step < FRAMES { self.step } else { 2 * FRAMES - 2 - self.step };
-        Some(frame_uv(frame))
-    }
-
-    /// Back to the resting frame; its UV window when it wasn't there already.
-    pub fn rest(&mut self) -> Option<bevy::math::Affine2> {
-        let was = self.step;
-        self.step = REST_FRAME;
-        self.clock = 0.0;
-        (was != REST_FRAME).then(|| frame_uv(REST_FRAME))
-    }
 }
 
 /// How bright the side-panel art is drawn over its glass.
@@ -143,19 +103,26 @@ const ART_GAIN: f32 = 3.0;
 /// How bright the baked main screens are drawn (they were rendered 1.7 stops dark).
 const MAIN_GAIN: f32 = 3.2;
 
+/// Which subject desk `desk`'s main screen (and its hologram) shows: an index into
+/// `SUBJECTS`.
+pub fn subject(desk: u8) -> usize {
+    desk as usize % SUBJECTS.len()
+}
+
 /// The main screens' starship holograms, rendered in Blender
 /// (`tools/blender/holo_screen_proto.py`, `bake_screens.sh`): the subject, the UI and
-/// the beam as light only, straight on, 8 frames in an atlas. One per desk, in
-/// this order.
-const SUBJECTS: [&[u8]; 8] = [
-    include_bytes!("../../../assets/textures/screens/rocket.png"),
-    include_bytes!("../../../assets/textures/screens/planet.png"),
-    include_bytes!("../../../assets/textures/screens/sun.png"),
-    include_bytes!("../../../assets/textures/screens/station.png"),
-    include_bytes!("../../../assets/textures/screens/ship.png"),
-    include_bytes!("../../../assets/textures/screens/blackhole.png"),
-    include_bytes!("../../../assets/textures/screens/crate.png"),
-    include_bytes!("../../../assets/textures/screens/galaxy.png"),
+/// the beam as light only, straight on, in an atlas. One per desk, in this order.
+/// The name is also the subject's 3D model, `models/holo/<name>.glb`
+/// (`export_holo_subjects.sh`), shown big over the desk while it works.
+pub const SUBJECTS: [(&str, &[u8]); 8] = [
+    ("rocket", include_bytes!("../../../assets/textures/screens/rocket.png")),
+    ("planet", include_bytes!("../../../assets/textures/screens/planet.png")),
+    ("sun", include_bytes!("../../../assets/textures/screens/sun.png")),
+    ("station", include_bytes!("../../../assets/textures/screens/station.png")),
+    ("ship", include_bytes!("../../../assets/textures/screens/ship.png")),
+    ("blackhole", include_bytes!("../../../assets/textures/screens/blackhole.png")),
+    ("crate", include_bytes!("../../../assets/textures/screens/crate.png")),
+    ("galaxy", include_bytes!("../../../assets/textures/screens/galaxy.png")),
 ];
 
 /// The dark glass pane behind the art: deep navy, a touch lighter in the middle, a
