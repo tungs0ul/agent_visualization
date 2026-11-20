@@ -735,6 +735,40 @@ def ship():
     return (TILT + 22, -28)
 
 
+def galaxy():
+    # a spiral galaxy seen at a slant: two logarithmic arms of stars (blue-white,
+    # some violet and pink), dust lanes left dark, a warm bright bulge, and a soft
+    # halo of scattered stars; a little turn over the animation frames
+    PLATFORM[0] = False
+    M_STAR_B = emit("star_b", (0.5, 0.8, 1.0), 9.0)[0]
+    M_STAR_V = emit("star_v", (0.6, 0.4, 1.0), 8.0)[0]
+    stops = [(0.0, (1.0, 0.85, 0.6, 1.0)), (0.3, (1.0, 0.6, 0.35, 0.5)), (1.0, (0.4, 0.3, 0.8, 0.0))]
+    core = part(bpy.ops.mesh.primitive_circle_add, radial_material("bulge", stops, 6.0, inner=0.0, outer=0.1),
+                vertices=64, radius=0.1, fill_type="NGON")
+    facing_camera(core)                      # a round bulge whatever the disc's tilt
+    disc_stops = [(0.0, (0.5, 0.6, 1.0, 0.5)), (0.5, (0.3, 0.4, 1.0, 0.18)), (1.0, (0.2, 0.2, 0.8, 0.0))]
+    part(bpy.ops.mesh.primitive_circle_add, radial_material("galdisc", disc_stops, 2.0, inner=0.05, outer=0.32),
+         vertices=96, radius=0.32, fill_type="NGON")
+    spin = math.radians(25.0 * T)
+    grng = random.Random(11)
+    for arm in range(2):
+        for i in range(520):
+            t = grng.random() ** 0.8
+            theta = arm * math.pi + t * 3.6 + spin
+            r = 0.04 + 0.27 * t
+            jitter = 0.018 + 0.03 * t
+            x = r * math.cos(theta) + grng.gauss(0, jitter)
+            y = r * math.sin(theta) + grng.gauss(0, jitter)
+            mat = M_STAR_V if grng.random() < 0.15 else (M_PINK if grng.random() < 0.05 else M_STAR_B)
+            if grng.random() < 0.04:
+                mat = M_WHITE
+            part(ico, mat, (x, y, grng.gauss(0, 0.004)), radius=grng.uniform(0.0009, 0.0026), subdivisions=1)
+    for i in range(120):
+        a, r = grng.uniform(0, math.tau), 0.06 + grng.random() ** 0.5 * 0.3
+        part(ico, M_LINE_DIM, (r * math.cos(a + spin), r * math.sin(a + spin), grng.gauss(0, 0.01)), radius=0.0015, subdivisions=1)
+    return (TILT + 32, 10, -16)
+
+
 def planet():
     # a ringed planet in the rocket's style: a smooth sphere whose edge glows, a few
     # faint latitude bands, a flat ring (bright inner edge fading out, streaked) tilted
@@ -773,7 +807,7 @@ def blackhole():
     return (0, 0)
 
 
-SUBJECTS = dict(iss=iss, crate=crate, rocket=rocket, planet=planet, sun=sun, station=station, ship=ship, blackhole=blackhole)
+SUBJECTS = dict(iss=iss, galaxy=galaxy, crate=crate, rocket=rocket, planet=planet, sun=sun, station=station, ship=ship, blackhole=blackhole)
 if VIEW == "glb":
     # thinner tori for a real-time model (the glowing tubes stay round enough)
     tor = lambda **kw: bpy.ops.mesh.primitive_torus_add(**{"minor_segments": 6, **kw})   # noqa: E731
@@ -782,12 +816,12 @@ if VIEW == "glb":
     # The subject alone as a 3D model for the app's desk hologram (`holo_glb.py`).
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import holo_glb
-    holo_glb.export(pivot, HOLO, OUT)
+    holo_glb.export(pivot, HOLO, OUT, SUBJECT, lean=angles[0])
     raise SystemExit(0)
 if os.environ.get("HOLO_ANGLES"):           # try other angles: "lean,turn,roll"
     angles = tuple(float(v) for v in os.environ["HOLO_ANGLES"].split(","))
 lean, turn, roll = (tuple(angles) + (0.0,))[:3]
-if SUBJECT not in ("sun", "blackhole"):
+if SUBJECT not in ("sun", "blackhole", "galaxy"):   # these move in their own way
     turn += 18.0 * T                          # a slow sway forth and back
 pivot.location = crate_c
 pivot.rotation_mode = "ZYX"   # spin about the vertical first, then lean toward the viewer, then roll

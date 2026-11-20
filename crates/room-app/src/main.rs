@@ -11,6 +11,7 @@ mod chat;
 mod compose;
 mod console;
 mod diff;
+mod fonts;
 mod director;
 mod log;
 mod look;
@@ -28,6 +29,7 @@ mod space;
 mod hud;
 mod hull;
 mod view3d;
+mod visitor;
 mod wins;
 mod work;
 mod world3d;
@@ -149,6 +151,7 @@ fn main() -> AppExit {
         .init_resource::<ui::MarkdownCache>()
         .init_resource::<chat::Chats>()
         .init_resource::<Model>()
+        .init_resource::<visitor::Visitors>()
         .add_systems(Startup, (view3d::build, spawn_ui_camera, connect_waker, chat::init_folder))
         .add_systems(
             Update,
@@ -159,6 +162,7 @@ fn main() -> AppExit {
                 settle_permissions,
                 hud::title,
                 (view3d::sync, look::reload, look::apply, probe::capture, hull::cutaway, view3d::desk_lights, view3d::screen_animation, view3d::teleporter, view3d::deliver, view3d::links, view3d::context_tank, view3d::celebrate, world3d::daylight, view3d::activity_holograms, view3d::light_trails, hud::trace, view3d::camera_input, view3d::frame).chain(),
+                visitor::fly,
                 pace_updates,
                 log_frame_rate.run_if(|| std::env::var_os("AGENT_ROOM_FPS_LOG").is_some()),
                 window::take_screenshots,
@@ -507,6 +511,7 @@ fn pace_updates(
     model: Res<Model>,
     view: Res<view3d::View3d>,
     mut toasts: ResMut<notify::Toasts>,
+    visitors: Res<visitor::Visitors>,
     screenshots: Option<Res<ScreenshotMode>>,
     mut current: Local<Option<(Duration, Duration)>>,
     mut last_busy: Local<Option<std::time::Instant>>,
@@ -535,11 +540,13 @@ fn pace_updates(
     } else {
         None
     };
-    let wanted = match (pace.every(), tick) {
-        (Some((focused, unfocused)), Some(tick)) => Some((focused.min(tick), unfocused.min(tick))),
-        (None, Some(tick)) => Some((tick, tick)),
-        (every, None) => every,
-    };
+    // A comet or meteor crossing the window moves like a walking robot, but only while
+    // it is there: it does not count as activity, so the room dozes right after.
+    let crossing = visitors.on_screen.then(|| Pace::Moving.every()).flatten();
+    let wanted = [pace.every(), tick.map(|tick| (tick, tick)), crossing]
+        .into_iter()
+        .flatten()
+        .reduce(|(f1, u1), (f2, u2)| (f1.min(f2), u1.min(u2)));
     if wanted == *current {
         return;
     }

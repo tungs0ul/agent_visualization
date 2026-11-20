@@ -14,10 +14,10 @@ needs in the material's extras:
   sun's corona and its boiling plasma are baked into small emissive textures here.
 - Wireframe modifiers are applied to the geometry.
 
-All parts with the same material are joined into one mesh ("body"); the parts the
-app turns on their own ("spin": the sun's ball, the black hole's disc) stay separate
-nodes with their own transform, turning about their local Y (glTF up). The model is
-centred and scaled so its largest side is 1 m.
+The parts are joined into one mesh ("body", one primitive per material); for the
+subjects in `SPIN` the parts that turn on their own (the sun's ball, the black hole's
+disc, the galaxy's stars) form a second node ("spin") that the app turns about its
+local Y (glTF up). The model is centred and scaled so its largest side is 1 m.
 """
 import math
 
@@ -26,53 +26,42 @@ import bpy
 from mathutils import Matrix, Vector, noise
 
 TEX = 256
-SPIN = ("photosphere", "disc")
+# Subjects shown facing the camera (the app turns the whole model to the viewer, as
+# on the screen): the material of the part that sets the spin axis, and which parts
+# turn about it ("*": all but the named ones). Everything else turns as a whole.
+SPIN = {
+    "sun": ("photosphere", {"photosphere"}),
+    "blackhole": ("disc", {"disc"}),
+    "galaxy": ("galdisc", {"*", "bulge"}),
+}
 UV_RADIUS = {}          # material name -> the radius its planar UVs span
 
 
-def export(pivot, holo, out):
+def spins(subject, mname):
+    if subject not in SPIN:
+        return False
+    names = SPIN[subject][1]
+    return (base_name(mname) not in names) if "*" in names else (base_name(mname) in names)
+
+
+def export(pivot, holo, out, subject, lean=0.0):
+    # Facing subjects keep the screen's lean toward the viewer (the galaxy's slant);
+    # turning ones stand upright.
+    pivot.location = (0, 0, 0)
+    pivot.rotation_euler = (math.radians(lean) if subject in SPIN else 0.0, 0, 0)
     bpy.context.view_layer.update()
     dg = bpy.context.evaluated_depsgraph_get()
-    parts = [ob for ob in pivot.children_recursive if ob.type == "MESH"]
+    parts = [ob for ob in pivot.children_recursive if ob.type == "MESH" and ob.data.materials]
     for ob in parts:
-        if ob.data.materials and base_name(ob.data.materials[0].name) in ("pring", "disc", "halo", "corona"):
+        if holo.get(ob.data.materials[0].name, {}).get("kind") in ("radial", "corona"):
             planar_uvs(ob)
-    bodies = {}          # material name -> bmesh in world space
-    spins = []           # (mesh, material name, matrix_world)
-    for ob in parts:
-        mname = ob.data.materials[0].name
-        me = bpy.data.meshes.new_from_object(ob.evaluated_get(dg), depsgraph=dg)
-        if base_name(mname) in SPIN:
-            spins.append((me, mname, ob.matrix_world.copy()))
-            continue
-        me.transform(ob.matrix_world)
-        bm = bodies.setdefault(mname, bmesh.new())
-        bm.from_mesh(me)
-        bpy.data.meshes.remove(me)
-
-    # body: one mesh, one material slot per material
-    names = list(bodies)
-    body = bpy.data.meshes.new("body")
-    whole = bmesh.new()
-    for i, n in enumerate(names):
-        tmp = bpy.data.meshes.new("tmp")
-        bodies[n].to_mesh(tmp)
-        before = len(whole.faces)
-        whole.from_mesh(tmp)
-        whole.faces.ensure_lookup_table()
-        for f in whole.faces[before:]:
-            f.material_index = i
-        bpy.data.meshes.remove(tmp)
-        bodies[n].free()
-    whole.to_mesh(body)
-    whole.free()
-    for n in names:
-        body.materials.append(material(n, holo))
-    objects = [new_object("body", body, Matrix.Identity(4))]
-    for me, mname, mw in spins:
-        me.materials.clear()
-        me.materials.append(material(mname, holo))
-        objects.append(new_object("spin", me, mw))
+    body = [ob for ob in parts if not spins(subject, ob.data.materials[0].name)]
+    turning = [ob for ob in parts if spins(subject, ob.data.materials[0].name)]
+    objects = [new_object("body", join(body, Matrix.Identity(4), dg, holo), Matrix.Identity(4))]
+    if turning:
+        axis = next(ob for ob in turning if base_name(ob.data.materials[0].name) == SPIN[subject][0])
+        frame = axis.matrix_world.copy()
+        objects.append(new_object("spin", join(turning, frame.inverted(), dg, holo), frame))
 
     # centre on the bounding box, largest side 1 m
     lo, hi = Vector((1e9,) * 3), Vector((-1e9,) * 3)
@@ -104,7 +93,31 @@ def export(pivot, holo, out):
         export_image_format="AUTO",
     )
     tris = sum(sum(len(p.vertices) - 2 for p in ob.data.polygons) for ob in objects)
-    print(f"HOLO: wrote {out}, {tris} triangles, {len(names) + len(spins)} materials, {len(spins)} spin node(s)")
+    print(f"HOLO: wrote {out}, {tris} triangles, {len(objects)} node(s)")
+
+
+def join(parts, to_frame, dg, holo):
+    """The parts with modifiers applied, in `to_frame`, as one mesh with one material
+    slot per material."""
+    groups = {}
+    for ob in parts:
+        groups.setdefault(ob.data.materials[0].name, []).append(ob)
+    whole = bmesh.new()
+    mesh = bpy.data.meshes.new("holo")
+    for i, (mname, obs) in enumerate(groups.items()):
+        for ob in obs:
+            me = bpy.data.meshes.new_from_object(ob.evaluated_get(dg), depsgraph=dg)
+            me.transform(to_frame @ ob.matrix_world)
+            before = len(whole.faces)
+            whole.from_mesh(me)
+            whole.faces.ensure_lookup_table()
+            for f in whole.faces[before:]:
+                f.material_index = i
+            bpy.data.meshes.remove(me)
+        mesh.materials.append(material(mname, holo))
+    whole.to_mesh(mesh)
+    whole.free()
+    return mesh
 
 
 def base_name(name):

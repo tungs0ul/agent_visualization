@@ -6,7 +6,7 @@
 set -eu
 blender=${BLENDER:-/Applications/Blender.app/Contents/MacOS/Blender}
 mkdir -p assets/models/holo
-subjects=${*:-"rocket planet sun station ship blackhole crate"}
+subjects=${*:-"rocket planet sun station ship blackhole crate galaxy"}
 for subject in $subjects; do
   "$blender" -b --factory-startup --python tools/blender/holo_screen_proto.py -- \
     "$PWD/assets/models/holo/$subject.glb" glb "$subject" 2>/dev/null | grep '^HOLO:' || { echo "failed: $subject" >&2; exit 1; }
