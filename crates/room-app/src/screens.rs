@@ -1,6 +1,6 @@
 //! The crew desks' screens (the user: "it is a star ship and you display code?").
 //! The main screen shows a starship hologram (rocket, planet, sun, station, ship, black
-//! hole, cargo crate) rendered in Blender and approved by the user; the side panels
+//! hole, cargo crate, galaxy: one per desk) rendered in Blender and approved by the user; the side panels
 //! show gauges, lists and waves painted here once at start. Each screen is dark
 //! see-through glass with the art added over it as light, so the art glows and the
 //! glass stays dim. They are frameless holograms as in the target
@@ -147,7 +147,7 @@ const MAIN_GAIN: f32 = 3.2;
 /// (`tools/blender/holo_screen_proto.py`, `bake_screens.sh`): the subject, the UI and
 /// the beam as light only, straight on, 8 frames in an atlas. One per desk, in
 /// this order.
-const SUBJECTS: [&[u8]; 7] = [
+const SUBJECTS: [&[u8]; 8] = [
     include_bytes!("../../../assets/textures/screens/rocket.png"),
     include_bytes!("../../../assets/textures/screens/planet.png"),
     include_bytes!("../../../assets/textures/screens/sun.png"),
@@ -155,6 +155,7 @@ const SUBJECTS: [&[u8]; 7] = [
     include_bytes!("../../../assets/textures/screens/ship.png"),
     include_bytes!("../../../assets/textures/screens/blackhole.png"),
     include_bytes!("../../../assets/textures/screens/crate.png"),
+    include_bytes!("../../../assets/textures/screens/galaxy.png"),
 ];
 
 /// The dark glass pane behind the art: deep navy, a touch lighter in the middle, a
