@@ -2370,3 +2370,24 @@ Known gaps: macOS attention bounce not done; roster click-to-highlight not done
   walking rate (not counted as activity). `AGENT_ROOM_VISITOR=comet|meteor` sends one
   a second after start. Not yet checked visually: the screen was locked, so
   screenshots were black; check with the env var.
+- 2026-11-20, Claude Opus 5.5: desk subject holograms (user: the robot's name tag
+  covered the desk's screen, so animating it was pointless). While a sub-agent is at
+  a crew desk, its screen's subject (`screens::SUBJECTS`, now `(name, png)`, all 8
+  incl. galaxy) floats over the desk as a big 3D hologram (`holo.rs`, 1.7 m, centre
+  2.55 m up behind the robot) with a faint beam from the screen top; it grows in on
+  arrival, turns while the robot works, holds still while it waits, shrinks away when
+  the desk is free (idle desks cost nothing). Sun, black hole and galaxy face the
+  camera and turn only their "spin" node (ball, disc, stars). Models:
+  `tools/blender/export_holo_subjects.sh` runs `holo_screen_proto.py ... glb <subject>`
+  and `holo_glb.py` (materials recorded in `HOLO`, rebuilt as emissive glTF + extras;
+  wireframes applied; radial streak rings, corona and plasma baked to 256 px
+  textures; centred, largest side 1 m; 0.4k-23k tris) into `assets/models/holo/`.
+  `HoloMaterial` (`assets/shaders/holo.wesl`, WESL, embedded via build.rs) does the
+  fresnel rim glow, added as light or solid. The screens hold their resting atlas
+  frame (`ScreenArt`/`screen_animation` removed; the 8-frame atlas bake stays). The
+  tool-kind activity holograms and their five models are gone (the capsule stays).
+  Robot labels sit under the feet in the full view (over the head in mini). Screen
+  was LOCKED: app screenshots black, so the shader and placement are NOT yet seen in
+  the app; checked the GLBs with `tools/blender/holo_glb_preview.py` (the app shader
+  rebuilt in Blender), local baseline/p24_desk_holo_glbs.png. Next: look in the app
+  (size/height vs. back-row desks, GAIN, the crate looks big by largest-side scaling).
