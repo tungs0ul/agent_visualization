@@ -12,6 +12,7 @@ mod command_holo;
 mod compose;
 mod console;
 mod diff;
+mod fonts;
 mod director;
 mod log;
 mod look;
